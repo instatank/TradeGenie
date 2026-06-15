@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #eef2f4;
+  color: #1b1f23;
+}
+
+textarea,
+input,
+select,
+button {
+  font: inherit;
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8;
+  }
+
+  .panel {
+    @apply rounded-lg border border-forge-line bg-white p-4 shadow-soft;
+  }
+
+  .field {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .label {
+    @apply text-sm font-medium text-forge-ink;
+  }
+
+  .input {
+    @apply min-h-10 rounded-md border border-forge-line bg-white px-3 py-2 text-sm outline-none transition focus:border-forge-blue focus:ring-2 focus:ring-forge-blue/15;
+  }
+
+  .textarea {
+    @apply min-h-28 rounded-md border border-forge-line bg-white px-3 py-2 text-sm outline-none transition focus:border-forge-blue focus:ring-2 focus:ring-forge-blue/15;
+  }
+
+  .button {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-transparent bg-forge-ink px-3 py-2 text-sm font-medium text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .button-secondary {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-forge-line bg-white px-3 py-2 text-sm font-medium text-forge-ink transition hover:bg-forge-panel;
+  }
+
+  .button-danger {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-forge-red transition hover:bg-red-100;
+  }
+
+  .metric {
+    @apply rounded-lg border border-forge-line bg-white p-4 shadow-soft;
+  }
+
+  .muted {
+    @apply text-sm text-forge-muted;
+  }
+}
