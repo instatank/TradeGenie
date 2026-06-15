@@ -113,7 +113,7 @@ export default async function ImportPage({ searchParams }: { searchParams?: Prom
             <table className="min-w-full text-sm">
               <thead className="bg-forge-panel">
                 <tr>
-                  {["Time", "Instrument", "Side", "Qty", "Price", "Order value", "P&L", "Linked trade", ""].map((header) => (
+                  {["Time", "Instrument", "Side", "Qty", "Price", "Order value", "P&L", "Linked", ""].map((header) => (
                     <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
                   ))}
                 </tr>
@@ -128,28 +128,30 @@ export default async function ImportPage({ searchParams }: { searchParams?: Prom
                     <td className="px-3 py-2">{execution.price ?? "NA"}</td>
                     <td className="px-3 py-2">{execution.totalOrderValue ?? "NA"}</td>
                     <td className="px-3 py-2">{execution.realizedPnl ?? "NA"}</td>
-                    <td className="px-3 py-2">
-                      <form action={linkRawExecutionAction} className="flex min-w-72 gap-2">
-                        <input type="hidden" name="rawExecutionId" value={execution.id} />
-                        <select name="linkedTradeId" defaultValue={execution.linkedTradeId ?? ""} className="input flex-1">
-                          <option value="">Unlinked</option>
-                          {recentTrades.map((trade) => (
-                            <option key={trade.id} value={trade.id}>
-                              {format(trade.tradeDateTime, "dd MMM")} · {trade.instrument} · {humanize(trade.direction)}
-                            </option>
-                          ))}
-                        </select>
-                        <button className="button-secondary" type="submit">Save</button>
-                      </form>
-                    </td>
+                    <td className="px-3 py-2">{execution.linkedTradeId ? "Linked" : "Unlinked"}</td>
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-1">
                         <details className="relative">
-                          <summary className="button-secondary min-h-8 cursor-pointer list-none px-2" title="Edit execution" aria-label="Edit execution">
-                            <Pencil className="h-4 w-4" aria-hidden="true" />
+                          <summary className="button-secondary min-h-8 cursor-pointer list-none px-2" title="Manage execution" aria-label="Manage execution">
+                            Manage
                           </summary>
                           <div className="absolute right-0 z-10 mt-2 w-[min(720px,calc(100vw-2rem))] rounded-lg border border-forge-line bg-white p-4 shadow-lg">
-                            <form action={updateRawExecutionAction} className="grid gap-3 sm:grid-cols-3">
+                            <form action={linkRawExecutionAction} className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                              <input type="hidden" name="rawExecutionId" value={execution.id} />
+                              <label className="field">
+                                <span className="label">Link to trade</span>
+                                <select name="linkedTradeId" defaultValue={execution.linkedTradeId ?? ""} className="input">
+                                  <option value="">Unlinked</option>
+                                  {recentTrades.map((trade) => (
+                                    <option key={trade.id} value={trade.id}>
+                                      {format(trade.tradeDateTime, "dd MMM")} · {trade.instrument} · {humanize(trade.direction)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <button className="button-secondary" type="submit">Save link</button>
+                            </form>
+                            <form action={updateRawExecutionAction} className="grid gap-3 border-t border-forge-line pt-4 sm:grid-cols-3">
                               <input type="hidden" name="rawExecutionId" value={execution.id} />
                               <TextField label="Execution time" name="executionDateTime" type="datetime-local" defaultValue={format(execution.executionDateTime, "yyyy-MM-dd'T'HH:mm")} />
                               <TextField label="Instrument" name="instrument" defaultValue={execution.instrument} />
@@ -163,7 +165,10 @@ export default async function ImportPage({ searchParams }: { searchParams?: Prom
                               <TextField label="Broker" name="exchangeBroker" defaultValue={execution.exchangeBroker} />
                               <TextField label="Order ID" name="orderId" defaultValue={execution.orderId} />
                               <div className="flex items-end">
-                                <button className="button-secondary w-full" type="submit">Save row</button>
+                                <button className="button-secondary w-full" type="submit">
+                                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                                  Save row
+                                </button>
                               </div>
                             </form>
                           </div>

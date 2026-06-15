@@ -90,8 +90,20 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
 
         <div className="space-y-3">
           {pagedLessons.map((lesson) => (
-            <article key={lesson.id} className={`panel ${lesson.isActive ? "" : "opacity-60"}`}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <details key={lesson.id} className={`panel ${lesson.isActive ? "" : "opacity-60"}`}>
+              <summary className="grid cursor-pointer gap-3 sm:grid-cols-[1fr_180px] sm:items-center">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{lesson.lessonText}</p>
+                  <p className="mt-1 text-sm text-forge-muted">
+                    {humanize(lesson.category)} · {humanize(lesson.sourceType)}
+                  </p>
+                </div>
+                <div className="text-sm text-forge-muted sm:text-right">
+                  {format(lesson.createdAt, "dd MMM yyyy")}
+                  {!lesson.isActive ? <span className="ml-2 rounded-md bg-forge-panel px-2 py-1 text-xs">Inactive</span> : null}
+                </div>
+              </summary>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-base font-medium">{lesson.lessonText}</p>
                   <p className="mt-2 text-sm text-forge-muted">
@@ -128,7 +140,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                   <button className="button-secondary" type="submit">Save</button>
                 </form>
               </details>
-            </article>
+            </details>
           ))}
           {!lessons.length ? <div className="panel muted">No lessons match these filters.</div> : null}
           <PaginationControls basePath="/lessons" params={params} page={page} pageSize={pageSize} total={lessons.length} />

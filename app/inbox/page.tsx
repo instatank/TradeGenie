@@ -121,7 +121,25 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
             const destination = destinationLabel(detectedType, Boolean(transcript.linkedTradeId), Boolean(transcript.linkedDailyJournalId));
             const needsTradeLink = detectedType === "TRADE_EXIT_REVIEW" && !transcript.linkedTradeId;
             return (
-            <article key={transcript.id} className="panel space-y-4">
+            <details key={transcript.id} className="panel group">
+              <summary className="grid cursor-pointer gap-3 sm:grid-cols-[180px_1fr_180px] sm:items-center">
+                <div>
+                  <div className="font-semibold">{humanize(transcript.transcriptType)}</div>
+                  <div className="text-xs text-forge-muted">{humanize(transcript.processingStatus)}</div>
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-forge-muted">{transcript.cleanedSummary ?? transcript.rawText}</p>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-forge-muted">
+                    {transcript.linkedTrade ? <span>Trade: {transcript.linkedTrade.instrument}</span> : null}
+                    {transcript.linkedDailyJournal ? <span>Daily: {format(transcript.linkedDailyJournal.date, "dd MMM")}</span> : null}
+                    {transcript.structuredJson ? <span>Structured</span> : <span>Raw</span>}
+                  </div>
+                </div>
+                <div className="text-sm text-forge-muted sm:text-right">
+                  {format(transcript.transcriptDateTime, "dd MMM HH:mm")}
+                </div>
+              </summary>
+              <div className="mt-4 space-y-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h2 className="font-semibold">{humanize(transcript.transcriptType)} · {humanize(transcript.processingStatus)}</h2>
@@ -252,7 +270,8 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                 {transcript.linkedTrade ? <Link className="text-forge-blue hover:underline" href={`/trades/${transcript.linkedTrade.id}`}>Linked trade: {transcript.linkedTrade.instrument}</Link> : null}
                 {transcript.linkedDailyJournal ? <Link className="text-forge-blue hover:underline" href={`/daily?date=${format(transcript.linkedDailyJournal.date, "yyyy-MM-dd")}`}>Linked daily: {format(transcript.linkedDailyJournal.date, "dd MMM yyyy")}</Link> : null}
               </div>
-            </article>
+              </div>
+            </details>
             );
           })}
           {!filteredTranscripts.length ? <div className="panel muted">No voice notes in this view.</div> : null}

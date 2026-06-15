@@ -10,16 +10,16 @@ This is the working backlog for TradeForge Journal. The list is ordered around m
 2. **Data backup/export**
    Add one-click export to JSON/CSV for trades, lessons, journals, transcripts, and raw executions.
 
-3. **Compact table pattern beyond Trades**
-   Apply the compact row, single-click expand, double-click open pattern to:
+3. **Done: Compact table pattern beyond Trades**
+   Applied compact expandable rows to:
    - Inbox voice notes
    - Lessons
    - Import/raw executions
 
-4. **Trade detail page cleanup**
-   Turn the trade detail page into a cleaner editing workspace:
+4. **Done: Trade detail page cleanup**
+   Turned the trade detail page into a cleaner editing workspace:
    - compact summary at top
-   - sections or tabs for Entry, Exit, Mistakes, Executions, Lessons, Screenshots
+   - collapsible sections for Entry, Exit, Mistakes, Executions, Lessons, Screenshots
    - clearer save/edit affordances
 
 5. **Better voice note confirmation flow**

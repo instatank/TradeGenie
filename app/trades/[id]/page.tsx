@@ -45,10 +45,33 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         </form>
       </div>
 
-      <form action={updateTradeAction} className="space-y-5" encType="multipart/form-data">
+      <section className="panel mb-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">{trade.instrument} · {humanize(trade.direction)} · {humanize(trade.status)}</h2>
+            <p className="mt-1 text-sm text-forge-muted">
+              {format(trade.tradeDateTime, "dd MMM yyyy HH:mm")} · {humanize(trade.marketType)} · {trade.setupName ?? "No setup"}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-medium text-forge-muted">
+            {trade.mistakeTags.length ? <span className="rounded-md bg-forge-panel px-2 py-1">{trade.mistakeTags.length} mistake tag{trade.mistakeTags.length === 1 ? "" : "s"}</span> : null}
+            {trade.transcripts.length ? <span className="rounded-md bg-forge-panel px-2 py-1">{trade.transcripts.length} note{trade.transcripts.length === 1 ? "" : "s"}</span> : null}
+            {trade.rawExecutions.length ? <span className="rounded-md bg-forge-panel px-2 py-1">{trade.rawExecutions.length} execution{trade.rawExecutions.length === 1 ? "" : "s"}</span> : null}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <MiniMetric label="Net P&L" value={formatMaybe(trade.netPnl)} tone={Number(trade.netPnl ?? 0) >= 0 ? "good" : "bad"} />
+          <MiniMetric label="R multiple" value={formatMaybe(trade.rMultiple)} />
+          <MiniMetric label="Entry" value={formatMaybe(trade.entryPrice)} />
+          <MiniMetric label="Order value" value={formatMaybe(trade.totalOrderValue)} />
+          <MiniMetric label="Plan" value={humanize(trade.followedPlan)} />
+        </div>
+      </section>
+
+      <form action={updateTradeAction} className="space-y-5">
         <input type="hidden" name="id" value={trade.id} />
-        <section className="panel space-y-4">
-          <h2 className="font-semibold">Core idea</h2>
+        <details className="panel space-y-4" open>
+          <summary className="cursor-pointer font-semibold">Core idea</summary>
           <div className="grid gap-4 sm:grid-cols-3">
             <TextField label="Trade date/time" name="tradeDateTime" type="datetime-local" defaultValue={format(trade.tradeDateTime, "yyyy-MM-dd'T'HH:mm")} />
             <TextField label="Instrument" name="instrument" defaultValue={trade.instrument} />
@@ -57,10 +80,10 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <SelectField label="Market type" name="marketType" options={marketTypes} defaultValue={trade.marketType} />
             <TextField label="Setup name" name="setupName" defaultValue={trade.setupName} />
           </div>
-        </section>
+        </details>
 
-        <section className="panel space-y-4">
-          <h2 className="font-semibold">Subjective entry note</h2>
+        <details className="panel space-y-4" open>
+          <summary className="cursor-pointer font-semibold">Subjective entry note</summary>
           <TextAreaField label="Entry thesis" name="entryThesis" defaultValue={trade.entryThesis} rows={4} />
           <div className="grid gap-4 sm:grid-cols-2">
             <TextAreaField label="Invalidation" name="invalidation" defaultValue={trade.invalidation} rows={3} />
@@ -70,10 +93,10 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Confidence score" name="confidenceScore" type="number" defaultValue={trade.confidenceScore} />
             <SelectField label="Entry grade" name="entryGrade" options={entryGrades} defaultValue={trade.entryGrade} />
           </div>
-        </section>
+        </details>
 
-        <section className="panel space-y-4">
-          <h2 className="font-semibold">Objective trade data</h2>
+        <details className="panel space-y-4">
+          <summary className="cursor-pointer font-semibold">Objective trade data</summary>
           <div className="grid gap-4 sm:grid-cols-4">
             <TextField label="Entry price" name="entryPrice" type="number" step="0.01" defaultValue={trade.entryPrice} />
             <TextField label="Stop price" name="stopPrice" type="number" step="0.01" defaultValue={trade.stopPrice} />
@@ -97,20 +120,20 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           <p className="text-sm text-forge-muted">
             Order value is calculated from entry price x quantity when blank. If quantity is blank, it is calculated from order value / entry price.
           </p>
-        </section>
+        </details>
 
-        <section className="panel space-y-4">
-          <h2 className="font-semibold">Exit review</h2>
+        <details className="panel space-y-4" open={trade.status === "CLOSED" || Boolean(trade.exitReason || trade.lesson)}>
+          <summary className="cursor-pointer font-semibold">Exit review</summary>
           <div className="grid gap-4 sm:grid-cols-2">
             <TextAreaField label="Exit reason" name="exitReason" defaultValue={trade.exitReason} rows={3} />
             <SelectField label="Followed plan" name="followedPlan" options={followedPlanOptions} includeBlank defaultValue={trade.followedPlan} />
             <TextAreaField label="Lesson" name="lesson" defaultValue={trade.lesson} rows={3} />
             <TextAreaField label="Notes" name="notes" defaultValue={trade.notes} rows={3} />
           </div>
-        </section>
+        </details>
 
-        <section className="panel space-y-4">
-          <h2 className="font-semibold">Mistakes</h2>
+        <details className="panel space-y-4" open={trade.mistakeTags.length > 0}>
+          <summary className="cursor-pointer font-semibold">Mistakes</summary>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {sortedMistakeTags.map((tag) => (
               <label key={tag.id} className="flex items-start gap-2 rounded-md border border-forge-line p-2 text-sm">
@@ -122,10 +145,10 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
               </label>
             ))}
           </div>
-        </section>
+        </details>
 
-        <section className="panel space-y-4">
-          <h2 className="font-semibold">Screenshots</h2>
+        <details className="panel space-y-4" open={trade.screenshots.length > 0}>
+          <summary className="cursor-pointer font-semibold">Screenshots</summary>
           <input className="input w-full" type="file" name="screenshot" accept="image/*" />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {trade.screenshots.map((screenshot) => (
@@ -134,7 +157,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
               </div>
             ))}
           </div>
-        </section>
+        </details>
 
         <button className="button" type="submit">Save trade changes</button>
       </form>
@@ -213,4 +236,17 @@ function LinkedExecutions({ executions }: { executions: { id: string; executionD
       </table>
     </div>
   );
+}
+
+function MiniMetric({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
+  return (
+    <div className="rounded-lg bg-forge-panel p-3">
+      <div className="text-xs uppercase tracking-wide text-forge-muted">{label}</div>
+      <div className={`mt-1 font-semibold ${tone === "good" ? "text-forge-green" : tone === "bad" ? "text-forge-red" : ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function formatMaybe(value: number | null | undefined) {
+  return value == null ? "NA" : value.toFixed(2);
 }

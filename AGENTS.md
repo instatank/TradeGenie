@@ -81,6 +81,8 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - double-click row: open trade detail/edit page
   - pencil icon: open detail/edit page
   - bin icon: delete
+- Inbox, Lessons, and Import use compact default rows with full details/actions hidden behind expandable controls.
+- Trade detail starts with a compact summary and organizes editing fields into collapsible sections.
 - Calendar filtering uses `period=day|week|month` and `date=yyyy-MM-dd`.
 
 ## Commands
@@ -122,9 +124,7 @@ Use `PENDING_TASKS.md` as the backlog. Current recommended sequence:
 
 1. Firebase persistence + Vercel-safe storage.
 2. Voice note confirmation flow cleanup.
-3. Trade detail page cleanup.
-4. Compact expandable pattern for Inbox/Lessons/Import.
-5. Today workspace / dashboard refinement.
+3. Today workspace / dashboard refinement.
 
 ## Known Risks / Gotchas
 

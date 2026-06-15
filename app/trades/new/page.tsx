@@ -8,7 +8,7 @@ export default async function NewTradePage() {
   return (
     <main className="page-shell max-w-3xl">
       <PageTitle title="Quick trade note" subtitle="Only four fields are required. Capture the idea before the details get fuzzy." />
-      <form action={createTradeAction} className="panel space-y-4" encType="multipart/form-data">
+      <form action={createTradeAction} className="panel space-y-4">
         <div className="grid gap-4 sm:grid-cols-3">
           <TextField label="Instrument" name="instrument" required placeholder="BTC, SOL, NIFTY" />
           <SelectField label="Direction" name="direction" options={directions} defaultValue="UNKNOWN" />
