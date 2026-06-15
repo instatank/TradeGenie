@@ -164,7 +164,7 @@ function firestore() {
         credential: cert({
           projectId: process.env.FIREBASE_PROJECT_ID,
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+          privateKey: normalizePrivateKey(process.env.FIREBASE_PRIVATE_KEY),
         }),
       });
     } else {
@@ -172,6 +172,13 @@ function firestore() {
     }
   }
   return getFirestore();
+}
+
+function normalizePrivateKey(value: string) {
+  return value
+    .replace(/^"|"$/g, "")
+    .replace(/\\\\n/g, "\n")
+    .replace(/\\n/g, "\n");
 }
 
 function hydrate(value: unknown): unknown {
