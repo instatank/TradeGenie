@@ -26,10 +26,11 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - `FIREBASE_PROJECT_ID`
   - `FIREBASE_CLIENT_EMAIL`
   - `FIREBASE_PRIVATE_KEY`
+  - `FIREBASE_STORAGE_BUCKET`
 - Optional local ADC path:
   - `GOOGLE_APPLICATION_CREDENTIALS`
 - Do not commit secrets, service account JSON, `.env`, `.env.local`, or local data exports.
-- Screenshot uploads currently use local disk under `public/uploads`; this is not Vercel-safe and needs Firebase Storage or another persistent object store before production reliance.
+- Screenshot uploads use Firebase Storage when Firebase is configured; local disk under `public/uploads` is only a development fallback.
 
 ## Important Files
 
@@ -128,7 +129,7 @@ Use `PENDING_TASKS.md` as the backlog. Current recommended sequence:
 ## Known Risks / Gotchas
 
 - Firestore is not currently confirmed configured; local JSON may be the active store.
-- Vercel serverless filesystem is not durable, so local JSON and local uploads are not production-safe.
+- Vercel serverless filesystem is not durable, so local JSON and local upload fallback are not production-safe.
 - Firebase Admin/server libraries bypass Firestore security rules; protect service account credentials and use least-privilege IAM where practical.
 - No auth is planned for MVP, so production deployment should be treated as private/personal access unless auth is later added.
 - Avoid exchange API sync, real-time signals, screenshot AI parsing, strategy recommendations, and automated trading features in MVP.

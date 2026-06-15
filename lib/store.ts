@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import type {
   DailyJournal,
   ImportBatch,
@@ -159,6 +160,7 @@ async function writeLocalStore(store: StoreShape) {
 
 function firestore() {
   if (!getApps().length) {
+    const storageBucket = firebaseStorageBucketName();
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
       initializeApp({
         credential: cert({
@@ -166,12 +168,24 @@ function firestore() {
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
           privateKey: normalizePrivateKey(process.env.FIREBASE_PRIVATE_KEY),
         }),
+        ...(storageBucket ? { storageBucket } : {}),
       });
     } else {
-      initializeApp({ credential: applicationDefault() });
+      initializeApp({ credential: applicationDefault(), ...(storageBucket ? { storageBucket } : {}) });
     }
   }
   return getFirestore();
+}
+
+export function firebaseStorageBucket(bucketName = firebaseStorageBucketName()) {
+  firestore();
+  return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket();
+}
+
+function firebaseStorageBucketName() {
+  if (process.env.FIREBASE_STORAGE_BUCKET) return process.env.FIREBASE_STORAGE_BUCKET;
+  if (process.env.FIREBASE_PROJECT_ID) return `${process.env.FIREBASE_PROJECT_ID}.firebasestorage.app`;
+  return undefined;
 }
 
 function normalizePrivateKey(value: string) {

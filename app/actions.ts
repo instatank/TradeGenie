@@ -1,13 +1,12 @@
 "use server";
 
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { endOfDay, startOfDay } from "date-fns";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { defaultPromptTemplates } from "@/lib/prompts";
+import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
 import { structureTranscript } from "@/lib/transcript-processor";
@@ -67,15 +66,10 @@ function transcriptType(value: unknown) {
 
 async function saveScreenshot(file: FormDataEntryValue | null, tradeId?: string) {
   if (!(file instanceof File) || file.size === 0 || !tradeId) return;
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-  const fileName = `${tradeId}-${Date.now()}-${safeName}`;
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
-  await writeFile(path.join(uploadDir, fileName), bytes);
+  const filePath = await saveScreenshotFile(file, tradeId);
   await db.create("screenshots", {
     createdAt: new Date(),
-    filePath: `/uploads/${fileName}`,
+    filePath,
     caption: "Trade context",
     linkedTradeId: tradeId,
     linkedDailyJournalId: null,

@@ -130,7 +130,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {trade.screenshots.map((screenshot) => (
               <div key={screenshot.id} className="overflow-hidden rounded-lg border border-forge-line">
-                <Image src={screenshot.filePath} alt={screenshot.caption ?? "Trade screenshot"} width={500} height={300} className="h-auto w-full object-cover" />
+                <Image src={`/api/screenshots/${screenshot.id}`} alt={screenshot.caption ?? "Trade screenshot"} width={500} height={300} className="h-auto w-full object-cover" />
               </div>
             ))}
           </div>

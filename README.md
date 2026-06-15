@@ -52,9 +52,12 @@ For Vercel, create a Firebase service account and add these environment variable
 FIREBASE_PROJECT_ID="your-project-id"
 FIREBASE_CLIENT_EMAIL="firebase-adminsdk-...@your-project.iam.gserviceaccount.com"
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_STORAGE_BUCKET="your-project-id.firebasestorage.app"
 ```
 
 The private key should keep escaped newlines as `\n`. The app converts them at runtime.
+
+Screenshot uploads use Firebase Storage when Firebase is configured. Create/enable Cloud Storage for Firebase in the Firebase console, then set `FIREBASE_STORAGE_BUCKET` to the bucket name shown there without `gs://`. For example, if Firebase shows `gs://PROJECT_ID.firebasestorage.app`, use `PROJECT_ID.firebasestorage.app`.
 
 For local Firebase development, you can either use the same three env vars in `.env.local`, or use:
 
@@ -68,7 +71,7 @@ GOOGLE_APPLICATION_CREDENTIALS="/absolute/path/to/service-account.json"
 2. Framework preset: Next.js.
 3. Build command: `npm run build`.
 4. Install command: `npm install`.
-5. Add Firebase env vars in Project Settings -> Environment Variables.
+5. Add Firebase env vars in Project Settings -> Environment Variables, including `FIREBASE_STORAGE_BUCKET`.
 6. Optional: add `OPENAI_API_KEY` if you want real transcript/weekly synthesis. The deterministic local extractor works without it.
 
 ## Seed Data
