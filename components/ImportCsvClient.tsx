@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 
 const targetFields = [
@@ -18,10 +19,12 @@ const targetFields = [
 ] as const;
 
 export function ImportCsvClient() {
+  const router = useRouter();
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
   const headers = useMemo(() => Object.keys(rows[0] ?? {}), [rows]);
 
   function handleFile(file: File | undefined) {
@@ -44,14 +47,22 @@ export function ImportCsvClient() {
   }
 
   async function importRows() {
+    setIsImporting(true);
     setMessage("Importing...");
-    const response = await fetch("/api/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileName, rows, mapping }),
-    });
-    const result = await response.json() as { message?: string };
-    setMessage(result.message ?? "Import finished.");
+    try {
+      const response = await fetch("/api/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName, rows, mapping }),
+      });
+      const result = await response.json() as { message?: string };
+      setMessage(result.message ?? "Import finished.");
+      router.refresh();
+    } catch {
+      setMessage("Import failed. Please check the CSV and try again.");
+    } finally {
+      setIsImporting(false);
+    }
   }
 
   return (
@@ -102,10 +113,12 @@ export function ImportCsvClient() {
               </tbody>
             </table>
           </div>
-          <button type="button" onClick={importRows} className="button">Import mapped rows</button>
+          <button type="button" onClick={importRows} className="button" disabled={isImporting}>
+            {isImporting ? "Importing..." : "Import mapped rows"}
+          </button>
         </>
       ) : null}
-      {message ? <p className="text-sm text-forge-muted">{message}</p> : null}
+      {message ? <p className="rounded-md bg-forge-panel p-3 text-sm font-medium text-forge-ink">{message}</p> : null}
     </section>
   );
 }

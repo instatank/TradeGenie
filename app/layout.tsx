@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { BookOpenCheck, Search } from "lucide-react";
+import { ActionFeedback } from "@/components/ActionFeedback";
 import { navItems } from "@/lib/constants";
 import "./globals.css";
 
@@ -13,6 +15,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <Suspense fallback={null}>
+          <ActionFeedback />
+        </Suspense>
         <header className="border-b border-forge-line bg-white">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

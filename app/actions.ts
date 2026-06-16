@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { endOfDay, startOfDay } from "date-fns";
+import { endOfDay, format, startOfDay } from "date-fns";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { defaultPromptTemplates } from "@/lib/prompts";
@@ -29,6 +30,29 @@ import {
 } from "@/lib/types";
 
 type StructuredJson = Record<string, unknown>;
+
+function withFeedback(target: string, message: string, type = "success") {
+  const url = new URL(target, "http://tradeforge.local");
+  url.searchParams.set("feedback", message);
+  url.searchParams.set("feedbackType", type);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+async function currentPathFallback(fallback: string) {
+  const headerList = await headers();
+  const referer = headerList.get("referer");
+  if (!referer) return fallback;
+  try {
+    const url = new URL(referer);
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
+async function redirectBackWithFeedback(message: string, fallback: string) {
+  redirect(withFeedback(await currentPathFallback(fallback), message));
+}
 
 function enumValue<T extends Record<string, string>>(enumObject: T, value: FormDataEntryValue | null, fallback: T[keyof T]) {
   const text = typeof value === "string" ? value : "";
@@ -94,6 +118,7 @@ export async function saveTranscriptAction(formData: FormData) {
     aiConfidence: null,
   });
   revalidatePath("/inbox");
+  await redirectBackWithFeedback("Voice note saved.", "/inbox");
 }
 
 export async function structureTranscriptAction(formData: FormData) {
@@ -110,6 +135,7 @@ export async function structureTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
   revalidatePath("/inbox");
+  await redirectBackWithFeedback("Voice note structured. Review the draft before confirming.", "/inbox");
 }
 
 export async function confirmTranscriptAction(formData: FormData) {
@@ -185,6 +211,13 @@ export async function confirmTranscriptAction(formData: FormData) {
   revalidatePath("/trades");
   revalidatePath("/daily");
   revalidatePath("/lessons");
+  if (linkedTradeId && (type === "TRADE_ENTRY_NOTE" || type === "TRADE_EXIT_REVIEW")) {
+    redirect(withFeedback(`/trades/${linkedTradeId}`, type === "TRADE_ENTRY_NOTE" ? "Trade note created from voice note." : "Exit review saved to linked trade."));
+  }
+  if (linkedDailyJournalId && (type === "EOD_REVIEW" || type === "DAILY_CHECKIN")) {
+    redirect(withFeedback(`/daily?date=${format(transcript.transcriptDateTime, "yyyy-MM-dd")}`, type === "EOD_REVIEW" ? "EOD review saved." : "Daily check-in saved."));
+  }
+  redirect(withFeedback("/lessons", "Transcript confirmed and lessons saved."));
 }
 
 export async function archiveTranscriptAction(formData: FormData) {
@@ -193,6 +226,7 @@ export async function archiveTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
   revalidatePath("/inbox");
+  await redirectBackWithFeedback("Voice note archived.", "/inbox");
 }
 
 export async function updateTranscriptAction(formData: FormData) {
@@ -209,6 +243,7 @@ export async function updateTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
   revalidatePath("/inbox");
+  await redirectBackWithFeedback("Voice note edits saved.", "/inbox");
 }
 
 export async function deleteTranscriptAction(formData: FormData) {
@@ -223,6 +258,7 @@ export async function deleteTranscriptAction(formData: FormData) {
   );
   revalidatePath("/inbox");
   revalidatePath("/lessons");
+  await redirectBackWithFeedback("Voice note deleted.", "/inbox");
 }
 
 export async function linkTranscriptAction(formData: FormData) {
@@ -232,6 +268,7 @@ export async function linkTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
   revalidatePath("/inbox");
+  await redirectBackWithFeedback("Voice note links saved.", "/inbox");
 }
 
 export async function extractLessonsAction(formData: FormData) {
@@ -242,6 +279,7 @@ export async function extractLessonsAction(formData: FormData) {
   await createLessonsFromStructured(structured, id, transcript.linkedTradeId ?? undefined);
   revalidatePath("/lessons");
   revalidatePath("/inbox");
+  await redirectBackWithFeedback("Lessons saved from voice note.", "/inbox");
 }
 
 export async function saveDailyJournalAction(formData: FormData) {
@@ -276,6 +314,7 @@ export async function saveDailyJournalAction(formData: FormData) {
   }
   revalidatePath("/daily");
   revalidatePath("/");
+  redirect(withFeedback(`/daily?date=${format(date, "yyyy-MM-dd")}`, "Daily journal saved."));
 }
 
 export async function deleteDailyJournalAction(formData: FormData) {
@@ -291,6 +330,7 @@ export async function deleteDailyJournalAction(formData: FormData) {
   revalidatePath("/daily");
   revalidatePath("/");
   revalidatePath("/inbox");
+  redirect(withFeedback("/daily", "Daily journal deleted."));
 }
 
 export async function createTradeAction(formData: FormData) {
@@ -320,7 +360,7 @@ export async function createTradeAction(formData: FormData) {
   });
   await saveScreenshot(formData.get("screenshot"), trade.id);
   revalidatePath("/trades");
-  redirect(`/trades/${trade.id}`);
+  redirect(withFeedback(`/trades/${trade.id}`, "Trade note saved."));
 }
 
 export async function updateTradeAction(formData: FormData) {
@@ -354,6 +394,7 @@ export async function updateTradeAction(formData: FormData) {
   await saveScreenshot(formData.get("screenshot"), id);
   revalidatePath(`/trades/${id}`);
   revalidatePath("/trades");
+  redirect(withFeedback(`/trades/${id}`, "Trade changes saved."));
 }
 
 export async function deleteTradeAction(formData: FormData) {
@@ -382,7 +423,8 @@ export async function deleteTradeAction(formData: FormData) {
   revalidatePath("/inbox");
   revalidatePath("/lessons");
   revalidatePath("/import");
-  if (redirectTo) redirect(redirectTo);
+  if (redirectTo) redirect(withFeedback(redirectTo, "Trade deleted."));
+  await redirectBackWithFeedback("Trade deleted.", "/trades");
 }
 
 export async function createLessonFromTradeAction(formData: FormData) {
@@ -398,6 +440,7 @@ export async function createLessonFromTradeAction(formData: FormData) {
   });
   revalidatePath(`/trades/${tradeId}`);
   revalidatePath("/lessons");
+  redirect(withFeedback(`/trades/${tradeId}`, "Lesson added from trade."));
 }
 
 export async function addManualLessonAction(formData: FormData) {
@@ -411,6 +454,7 @@ export async function addManualLessonAction(formData: FormData) {
     linkedTranscriptId: null,
   });
   revalidatePath("/lessons");
+  await redirectBackWithFeedback("Lesson added.", "/lessons");
 }
 
 export async function toggleLessonActiveAction(formData: FormData) {
@@ -418,6 +462,7 @@ export async function toggleLessonActiveAction(formData: FormData) {
   const isActive = formData.get("isActive") === "true";
   await db.update("lessons", id, { isActive: !isActive, updatedAt: new Date() });
   revalidatePath("/lessons");
+  await redirectBackWithFeedback(isActive ? "Lesson marked inactive." : "Lesson reactivated.", "/lessons");
 }
 
 export async function updateLessonAction(formData: FormData) {
@@ -430,6 +475,7 @@ export async function updateLessonAction(formData: FormData) {
     updatedAt: new Date(),
   });
   revalidatePath("/lessons");
+  await redirectBackWithFeedback("Lesson changes saved.", "/lessons");
 }
 
 export async function deleteLessonAction(formData: FormData) {
@@ -437,6 +483,7 @@ export async function deleteLessonAction(formData: FormData) {
   await db.deleteWhere("lessons", (lesson) => lesson.id === id);
   revalidatePath("/lessons");
   revalidatePath("/trades");
+  await redirectBackWithFeedback("Lesson deleted.", "/lessons");
 }
 
 export async function linkRawExecutionAction(formData: FormData) {
@@ -445,6 +492,7 @@ export async function linkRawExecutionAction(formData: FormData) {
   await db.update("rawExecutions", rawExecutionId, { linkedTradeId });
   revalidatePath("/import");
   if (linkedTradeId) revalidatePath(`/trades/${linkedTradeId}`);
+  await redirectBackWithFeedback(linkedTradeId ? "Execution linked to trade." : "Execution unlinked.", "/import");
 }
 
 export async function updateRawExecutionAction(formData: FormData) {
@@ -469,6 +517,7 @@ export async function updateRawExecutionAction(formData: FormData) {
     orderId: toText(formData.get("orderId")),
   });
   revalidatePath("/import");
+  await redirectBackWithFeedback("Execution row saved.", "/import");
 }
 
 export async function deleteRawExecutionAction(formData: FormData) {
@@ -476,6 +525,7 @@ export async function deleteRawExecutionAction(formData: FormData) {
   await db.deleteWhere("rawExecutions", (execution) => execution.id === id);
   revalidatePath("/import");
   revalidatePath("/trades");
+  await redirectBackWithFeedback("Execution row deleted.", "/import");
 }
 
 export async function deleteImportBatchAction(formData: FormData) {
@@ -483,6 +533,7 @@ export async function deleteImportBatchAction(formData: FormData) {
   await db.deleteWhere("importBatches", (batch) => batch.id === id);
   await db.deleteWhere("rawExecutions", (execution) => execution.importBatchId === id);
   revalidatePath("/import");
+  await redirectBackWithFeedback("Import batch deleted.", "/import");
 }
 
 export async function saveSettingsAction(formData: FormData) {
@@ -500,6 +551,7 @@ export async function saveSettingsAction(formData: FormData) {
   };
   await saveSettings(settings);
   revalidatePath("/settings");
+  redirect(withFeedback("/settings", "Settings saved."));
 }
 
 export async function generateWeeklyReviewAction(formData: FormData) {
@@ -540,6 +592,7 @@ export async function generateWeeklyReviewAction(formData: FormData) {
   });
   revalidatePath("/weekly-review");
   revalidatePath("/");
+  redirect(withFeedback("/weekly-review", "Weekly review generated and saved."));
 }
 
 export async function updateWeeklyReviewAction(formData: FormData) {
@@ -552,12 +605,14 @@ export async function updateWeeklyReviewAction(formData: FormData) {
     actionItem: toText(formData.get("actionItem")),
   });
   revalidatePath("/weekly-review");
+  await redirectBackWithFeedback("Weekly review saved.", "/weekly-review");
 }
 
 export async function deleteWeeklyReviewAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("weeklyReviews", (review) => review.id === id);
   revalidatePath("/weekly-review");
+  await redirectBackWithFeedback("Weekly review deleted.", "/weekly-review");
 }
 
 function objectiveNumbers(formData: FormData) {
