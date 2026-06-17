@@ -1,4 +1,4 @@
-# TradeForge Journal
+# TradeGenie — magic journal
 
 A low-friction personal trading journal for discretionary crypto and Indian market trading.
 

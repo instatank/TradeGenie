@@ -7,7 +7,7 @@ import { navItems } from "@/lib/constants";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TradeForge Journal",
+  title: "TradeGenie",
   description: "A low-friction personal trading journal and learning system.",
 };
 
@@ -21,9 +21,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="border-b border-forge-line bg-white">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
+              <Link href="/" className="flex items-center gap-2">
                 <BookOpenCheck className="h-5 w-5 text-forge-green" aria-hidden="true" />
-                TradeForge Journal
+                <span className="flex flex-col leading-tight">
+                  <span className="text-lg font-semibold">TradeGenie</span>
+                  <span className="text-xs font-medium text-forge-muted">magic journal</span>
+                </span>
               </Link>
               <form action="/search" className="relative w-full lg:max-w-md">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-forge-muted" aria-hidden="true" />

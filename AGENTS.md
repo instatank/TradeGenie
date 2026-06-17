@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This is the source-of-truth operating guide for Codex and other coding agents working on TradeForge Journal. Keep it concise. Prefer linking to focused docs instead of duplicating long context.
+This is the source-of-truth operating guide for Codex and other coding agents working on TradeGenie. Keep it concise. Prefer linking to focused docs instead of duplicating long context.
 
 ## Project Identity
 
-- Product: TradeForge Journal
+- Product: TradeGenie (tagline: "magic journal")
 - Purpose: low-friction personal trading journal and learning system for one discretionary trader.
 - Core value: help build a daily journaling habit, capture subjective reasoning, review mistakes, and turn trades/voice notes into reusable lessons.
 - This app must not provide financial advice, trade recommendations, signals, broker sync, automated execution, or social/team features.

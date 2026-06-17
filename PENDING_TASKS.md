@@ -1,6 +1,6 @@
 # Pending Tasks
 
-Working backlog for TradeForge Journal, ordered by practical benefit for daily use.
+Working backlog for TradeGenie, ordered by practical benefit for daily use.
 For the working contract and a log of what changed, see `CLAUDE.md`.
 
 ## Recently completed

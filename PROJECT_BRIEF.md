@@ -1,4 +1,4 @@
-# TradeForge Journal — Project Brief
+# TradeGenie (magic journal) — Project Brief
 
 This is the source-of-truth brief for what this app is *for*. It is written by the owner.
 Where this brief and any older doc (AGENTS.md, a prior AI-generated spec, code comments)

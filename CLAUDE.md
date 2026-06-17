@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Working guide for Claude Code on **TradeForge Journal**. Keep it short and current.
+Working guide for Claude Code on **TradeGenie** (tagline: "magic journal"). Keep it short and current.
 Update it when architecture, lean defaults, the working contract, or open items change.
 
 ## Source of truth (read in this order)

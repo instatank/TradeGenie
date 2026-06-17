@@ -34,7 +34,7 @@ export async function GET() {
     settings,
     data,
   };
-  const fileName = `tradeforge-backup-${format(new Date(), "yyyy-MM-dd-HHmm")}.json`;
+  const fileName = `tradegenie-backup-${format(new Date(), "yyyy-MM-dd-HHmm")}.json`;
   return new NextResponse(JSON.stringify(payload, null, 2), {
     headers: {
       "Content-Type": "application/json",
