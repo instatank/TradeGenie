@@ -38,7 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 />
               </form>
             </div>
-            <nav className="flex items-center gap-1 overflow-x-auto pb-1">
+            <nav className="flex flex-wrap items-center gap-1 pb-1">
               {primaryNavItems.map((item) => (
                 <Link
                   key={item.href}
