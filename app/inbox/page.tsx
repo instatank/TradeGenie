@@ -150,19 +150,8 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                     <input type="hidden" name="id" value={transcript.id} />
                     <button className={transcript.structuredJson ? "button-secondary" : "button"} type="submit">
                       <Sparkles className="h-4 w-4" aria-hidden="true" />
-                      Structure note
+                      {transcript.structuredJson ? "Re-structure note" : "Structure note"}
                     </button>
-                  </form>
-                  <form action={confirmTranscriptAction}>
-                    <input type="hidden" name="id" value={transcript.id} />
-                    <button className="button" type="submit" disabled={!transcript.structuredJson || needsTradeLink}>
-                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                      {confirmButtonLabel(detectedType)}
-                    </button>
-                  </form>
-                  <form action={extractLessonsAction}>
-                    <input type="hidden" name="id" value={transcript.id} />
-                    <button className="button-secondary" type="submit">Save lessons only</button>
                   </form>
                   <form action={archiveTranscriptAction}>
                     <input type="hidden" name="id" value={transcript.id} />
@@ -201,16 +190,18 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
               </details>
 
               {transcript.structuredJson ? (
-                <section className="rounded-lg border border-forge-line p-3">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <section className="rounded-lg border-2 border-forge-blue/40 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold">Draft destination</h3>
+                      <h3 className="text-sm font-semibold">Review this draft before saving</h3>
                       <p className="mt-1 text-sm text-forge-muted">{destination}</p>
                     </div>
-                    <span className="inline-flex w-fit items-center gap-1 rounded-md bg-forge-panel px-2 py-1 text-xs font-medium text-forge-muted">
-                      {humanize(getText(structured, "confidence") ?? transcript.aiConfidence ?? "LOW")} confidence
-                    </span>
+                    <ConfidenceBadge level={getText(structured, "confidence") ?? transcript.aiConfidence ?? "LOW"} />
                   </div>
+
+                  {getText(structured, "confidence") === "LOW" || (transcript.aiConfidence === "LOW" && !getText(structured, "confidence")) ? (
+                    <p className="mt-2 text-xs text-amber-700">Low confidence — read the fields carefully and edit the raw note if anything is wrong before confirming.</p>
+                  ) : null}
 
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     {structuredRows(structured).map((row) => (
@@ -221,18 +212,43 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                     ))}
                   </div>
 
-                  {needsTradeLink ? (
+                  {getList(structured, "missingInfo") ? (
                     <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Link this note to the trade it reviews before confirming.
+                      <span className="font-medium">The AI couldn&apos;t fill: </span>{getList(structured, "missingInfo")}. You can add these on the record after confirming.
                     </div>
                   ) : null}
+
+                  {needsTradeLink ? (
+                    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      This is an exit review. Link it to the trade it reviews (below) before you can confirm.
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-forge-line pt-3">
+                    <form action={confirmTranscriptAction}>
+                      <input type="hidden" name="id" value={transcript.id} />
+                      <button className="button" type="submit" disabled={needsTradeLink}>
+                        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                        {confirmButtonLabel(detectedType)}
+                      </button>
+                    </form>
+                    <form action={extractLessonsAction}>
+                      <input type="hidden" name="id" value={transcript.id} />
+                      <button className="button-secondary" type="submit">Save lessons only</button>
+                    </form>
+                    <span className="text-xs text-forge-muted">Confirming writes to your journal. Nothing is saved until you click.</span>
+                  </div>
 
                   <details className="mt-3">
                     <summary className="cursor-pointer text-xs font-semibold text-forge-muted">Raw structured JSON</summary>
                     <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-[#101418] p-3 text-xs text-white">{transcript.structuredJson}</pre>
                   </details>
                 </section>
-              ) : null}
+              ) : (
+                <div className="rounded-lg border border-dashed border-forge-line p-3 text-sm text-forge-muted">
+                  Not structured yet. Click <span className="font-medium text-forge-ink">Structure note</span> above to turn this into a reviewable draft you can confirm.
+                </div>
+              )}
 
               <form action={linkTranscriptAction} className="grid gap-3 rounded-lg border border-forge-line p-3 sm:grid-cols-2">
                 <input type="hidden" name="id" value={transcript.id} />
@@ -304,6 +320,19 @@ function compareTranscripts(a: InboxRow, b: InboxRow, sort: string) {
   return b.transcriptDateTime.getTime() - a.transcriptDateTime.getTime();
 }
 
+function ConfidenceBadge({ level }: { level: string }) {
+  const normalized = level.toUpperCase();
+  const tone =
+    normalized === "HIGH" ? "bg-forge-green/15 text-forge-green" :
+    normalized === "MEDIUM" ? "bg-forge-blue/15 text-forge-blue" :
+    "bg-amber-100 text-amber-800";
+  return (
+    <span className={`inline-flex w-fit items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${tone}`}>
+      {humanize(normalized)} confidence
+    </span>
+  );
+}
+
 function Step({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="flex items-center gap-2">
@@ -353,7 +382,6 @@ function structuredRows(structured: Record<string, unknown> | null) {
     ["Emotion", getText(structured, "emotionalState") ?? getText(structured, "mainEmotion")],
     ["Mistakes", getList(structured, "suggestedMistakeTags") ?? getText(structured, "mainMistake")],
     ["Lessons", getLessons(structured)],
-    ["Missing info", getList(structured, "missingInfo")],
   ];
   return rows
     .filter((row): row is [string, string] => Boolean(row[1]))

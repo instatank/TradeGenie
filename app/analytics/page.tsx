@@ -2,6 +2,7 @@ import { PageTitle } from "@/components/Fields";
 import { conditionLabel, sessionLabels } from "@/lib/constants";
 import { getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
 import {
+  analyticsLeaks,
   averageExitEfficiency,
   averageProcessScore,
   conditionPerformance,
@@ -10,6 +11,7 @@ import {
   sessionPerformance,
   setupPerformance,
   type BucketStats,
+  type LeakInsight,
 } from "@/lib/metrics";
 
 export default async function AnalyticsPage() {
@@ -23,15 +25,25 @@ export default async function AnalyticsPage() {
   const expectancy = expectancyBreakdown(trades);
   const processAvg = averageProcessScore(closed);
   const exitAvg = averageExitEfficiency(closed);
+  const leaks = analyticsLeaks(trades, setups, conditions);
 
   return (
     <main className="page-shell">
-      <PageTitle title="Analytics" subtitle="The patterns that drive learning — sliced by setup, condition, session, and process. Built on closed trades." />
+      <PageTitle title="Analytics" subtitle="Start with what's hurting you. The detailed slices are one click away when you want them." />
 
       {!closed.length ? (
         <div className="panel muted">No closed trades yet. Patterns appear here once you start closing trades with prices filled in.</div>
       ) : (
         <div className="space-y-5">
+          <section className="space-y-3">
+            <h2 className="font-semibold">What&apos;s hurting me</h2>
+            <div className="grid gap-3">
+              {leaks.map((leak) => (
+                <LeakCard key={leak.title} leak={leak} />
+              ))}
+            </div>
+          </section>
+
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="Avg process score" value={processAvg == null ? "NA" : `${processAvg.toFixed(0)}/100`} hint="Rule-following, independent of P&L" tone={processAvg == null ? undefined : processAvg >= 60 ? "good" : "bad"} />
             <Metric label="Avg exit efficiency" value={exitAvg == null ? "NA" : `${(exitAvg * 100).toFixed(0)}%`} hint="Share of the favorable move captured" />
@@ -44,30 +56,41 @@ export default async function AnalyticsPage() {
             />
           </section>
 
-          <section className="panel">
-            <h2 className="mb-1 font-semibold">Expectancy breakdown</h2>
-            <p className="mb-3 text-sm text-forge-muted">Expectancy = win rate × avg win − loss rate × avg loss. The honest version of &quot;am I profitable?&quot;.</p>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <Metric label="Sample size" value={String(expectancy.sampleSize)} />
-              <Metric label="Win rate" value={expectancy.winRate == null ? "NA" : `${(expectancy.winRate * 100).toFixed(0)}%`} />
-              <Metric label="Avg win" value={expectancy.avgWin.toFixed(2)} tone="good" />
-              <Metric label="Avg loss" value={expectancy.avgLoss.toFixed(2)} tone="bad" />
-              <Metric label="Win/loss ratio" value={expectancy.avgLoss ? (expectancy.avgWin / expectancy.avgLoss).toFixed(2) : "NA"} />
+          <details className="panel">
+            <summary className="cursor-pointer font-semibold">Advanced analytics — full breakdowns</summary>
+            <p className="mt-1 text-sm text-forge-muted">The granular tables behind the summary above. Built on closed trades.</p>
+            <div className="mt-4 space-y-5">
+              <section>
+                <h3 className="mb-1 font-semibold">Expectancy breakdown</h3>
+                <p className="mb-3 text-sm text-forge-muted">Expectancy = win rate × avg win − loss rate × avg loss. The honest version of &quot;am I profitable?&quot;.</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <Metric label="Sample size" value={String(expectancy.sampleSize)} />
+                  <Metric label="Win rate" value={expectancy.winRate == null ? "NA" : `${(expectancy.winRate * 100).toFixed(0)}%`} />
+                  <Metric label="Avg win" value={expectancy.avgWin.toFixed(2)} tone="good" />
+                  <Metric label="Avg loss" value={expectancy.avgLoss.toFixed(2)} tone="bad" />
+                  <Metric label="Win/loss ratio" value={expectancy.avgLoss ? (expectancy.avgWin / expectancy.avgLoss).toFixed(2) : "NA"} />
+                </div>
+              </section>
+
+              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={setups} firstColLabel="Setup" />
+              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={sessions} firstColLabel="Session" />
+              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={conditions} firstColLabel="Condition" />
             </div>
-          </section>
-
-          <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={setups} firstColLabel="Setup" />
-          <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={sessions} firstColLabel="Session" />
-          <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={conditions} firstColLabel="Condition" />
-
-          {funding.dragPct != null && funding.dragPct > 0.15 ? (
-            <p className="rounded-lg border-l-4 border-forge-red bg-forge-panel px-3 py-2 text-sm">
-              ⚠️ Funding is eating <span className="font-semibold">{(funding.dragPct * 100).toFixed(0)}%</span> of your gross profit ({funding.fundingPaid.toFixed(2)} paid). Above 15% is the documented red flag for perp traders — favor shorter holds or check funding before entry.
-            </p>
-          ) : null}
+          </details>
         </div>
       )}
     </main>
+  );
+}
+
+function LeakCard({ leak }: { leak: LeakInsight }) {
+  const border = leak.severity === "high" ? "border-forge-red" : leak.severity === "medium" ? "border-amber-500" : "border-forge-green";
+  const titleColor = leak.severity === "high" ? "text-forge-red" : leak.severity === "medium" ? "text-amber-700" : "text-forge-green";
+  return (
+    <div className={`rounded-lg border-l-4 ${border} bg-forge-panel p-3`}>
+      <div className={`text-sm font-semibold ${titleColor}`}>{leak.title}</div>
+      <div className="mt-1 text-sm text-forge-muted">{leak.detail}</div>
+    </div>
   );
 }
 

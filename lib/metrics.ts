@@ -315,6 +315,114 @@ export function calculateExpectancyR(trades: MetricTrade[]) {
   return rValues.reduce((sum, value) => sum + value, 0) / rValues.length;
 }
 
+// --- "What's hurting me": plain-language leak detection for the lean summary ---
+// Turns the same numbers the tables show into prioritized, readable findings so a
+// non-technical trader sees the few things worth fixing without reading a grid.
+export type LeakInsight = {
+  severity: "high" | "medium" | "good";
+  title: string;
+  detail: string;
+};
+
+export function analyticsLeaks(trades: MetricTrade[], setups: BucketStats[], conditions: BucketStats[]): LeakInsight[] {
+  const closed = trades.filter((trade) => trade.status === "CLOSED");
+  const insights: LeakInsight[] = [];
+
+  const funding = fundingSummary(trades);
+  if (funding.dragPct != null && funding.dragPct > 0.15) {
+    insights.push({
+      severity: "high",
+      title: "Funding is bleeding your edge",
+      detail: `Funding paid is ${(funding.dragPct * 100).toFixed(0)}% of your gross profit (${funding.fundingPaid.toFixed(2)} paid). Above 15% is the documented red flag for perp traders — favor shorter holds or check funding before entry.`,
+    });
+  } else if (funding.dragPct != null && funding.dragPct > 0.1) {
+    insights.push({
+      severity: "medium",
+      title: "Funding is starting to add up",
+      detail: `Funding paid is ${(funding.dragPct * 100).toFixed(0)}% of gross profit. Not alarming yet, but watch your hold times.`,
+    });
+  }
+
+  const mistakes = mistakeFrequency(closed);
+  const topMistake = mistakes[0];
+  if (topMistake && closed.length) {
+    const share = topMistake.count / closed.length;
+    if (topMistake.count >= 3 && share >= 0.4) {
+      insights.push({
+        severity: "high",
+        title: `"${topMistake.label}" is your most repeated mistake`,
+        detail: `It shows up in ${topMistake.count} of ${closed.length} closed trades (${(share * 100).toFixed(0)}%). This is the single highest-leverage habit to break.`,
+      });
+    } else if (topMistake.count >= 3) {
+      insights.push({
+        severity: "medium",
+        title: `"${topMistake.label}" keeps recurring`,
+        detail: `Tagged on ${topMistake.count} closed trades. Worth turning into a hard rule before your next session.`,
+      });
+    }
+  }
+
+  const process = averageProcessScore(closed);
+  if (process != null && process < 50) {
+    insights.push({
+      severity: "high",
+      title: "You're often breaking your own rules",
+      detail: `Average process score is ${process.toFixed(0)}/100. Process — not P&L — is what you actually control, and this is low.`,
+    });
+  } else if (process != null && process < 65) {
+    insights.push({
+      severity: "medium",
+      title: "Process is a bit shaky",
+      detail: `Average process score is ${process.toFixed(0)}/100. Tighten plan-following and write cleaner invalidations.`,
+    });
+  }
+
+  const adherence = calculateRuleAdherenceRate(closed);
+  if (adherence != null && adherence < 0.5) {
+    insights.push({
+      severity: "high",
+      title: "Plan adherence is low",
+      detail: `You fully followed your plan on only ${(adherence * 100).toFixed(0)}% of reviewed trades. The edge you backtested only exists if you trade it.`,
+    });
+  }
+
+  const worstSetup = [...setups]
+    .filter((setup) => setup.expectancyR != null && setup.count >= 3)
+    .sort((a, b) => (a.expectancyR ?? 0) - (b.expectancyR ?? 0))[0];
+  if (worstSetup && (worstSetup.expectancyR ?? 0) < 0) {
+    insights.push({
+      severity: "medium",
+      title: `Setup "${worstSetup.label}" is losing money`,
+      detail: `${(worstSetup.expectancyR ?? 0).toFixed(2)}R expectancy over ${worstSetup.count} trades. Consider dropping or reworking this setup.`,
+    });
+  }
+
+  const worstCondition = [...conditions]
+    .filter((condition) => condition.expectancyR != null && condition.count >= 3)
+    .sort((a, b) => (a.expectancyR ?? 0) - (b.expectancyR ?? 0))[0];
+  if (worstCondition && (worstCondition.expectancyR ?? 0) < 0) {
+    insights.push({
+      severity: "medium",
+      title: `You lose in "${worstCondition.label}" conditions`,
+      detail: `${(worstCondition.expectancyR ?? 0).toFixed(2)}R over ${worstCondition.count} trades. This context isn't for you yet — stand aside or size down.`,
+    });
+  }
+
+  const order = { high: 0, medium: 1, good: 2 };
+  insights.sort((a, b) => order[a.severity] - order[b.severity]);
+
+  if (!insights.length) {
+    return [
+      {
+        severity: "good",
+        title: "Nothing major is hurting you right now",
+        detail: "No heavy funding drag, repeated mistake, or losing setup stands out in your closed trades yet. Keep logging — patterns sharpen with sample size.",
+      },
+    ];
+  }
+  return insights.slice(0, 4);
+}
+
 export function expectancyBreakdown(trades: MetricTrade[]) {
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const pnlValues = closed.map(getTradePnl).filter((value): value is number => value != null);
