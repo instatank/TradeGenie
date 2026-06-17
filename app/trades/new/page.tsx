@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Lightbulb, ListChecks, Pin } from "lucide-react";
 import { createTradeAction } from "@/app/actions";
-import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { directions, entryGrades, marketTypes, mindStateOptions, riskPostures, tradeStatuses } from "@/lib/constants";
+import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { conditionTagOptions, directions, entryGrades, marketTypes, mindStateOptions, riskPostures, tradeStatuses } from "@/lib/constants";
 import { getActiveSetups, getResurfacedLessons, getTodayJournal } from "@/lib/data";
 import { getSettings } from "@/lib/settings-store";
 
@@ -107,6 +107,9 @@ export default async function NewTradePage() {
               <span className="label">Screenshot upload</span>
               <input className="input" type="file" name="screenshot" accept="image/*" />
             </label>
+          </div>
+          <div className="mt-4">
+            <CheckboxGroup label="Market conditions" name="conditions" options={conditionTagOptions} />
           </div>
         </details>
 
