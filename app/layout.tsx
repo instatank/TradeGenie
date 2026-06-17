@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { BookOpenCheck, Search } from "lucide-react";
+import { BookOpenCheck, ChevronDown, Search } from "lucide-react";
 import { ActionFeedback } from "@/components/ActionFeedback";
-import { navItems } from "@/lib/constants";
+import { moreNavItems, primaryNavItems } from "@/lib/constants";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -38,8 +38,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 />
               </form>
             </div>
-            <nav className="flex gap-1 overflow-x-auto pb-1">
-              {navItems.map((item) => (
+            <nav className="flex items-center gap-1 overflow-x-auto pb-1">
+              {primaryNavItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -48,6 +48,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   {item.label}
                 </Link>
               ))}
+              <details className="group relative">
+                <summary className="flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink [&::-webkit-details-marker]:hidden">
+                  More
+                  <ChevronDown className="h-4 w-4 transition group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="absolute left-0 z-10 mt-1 flex w-44 flex-col rounded-md border border-forge-line bg-white p-1 shadow-lg">
+                  {moreNavItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink"
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </details>
             </nav>
           </div>
         </header>

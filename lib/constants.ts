@@ -1,9 +1,14 @@
-export const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/inbox", label: "Inbox" },
-  { href: "/daily", label: "Daily" },
-  { href: "/calendar", label: "Calendar" },
+// The daily loop lives in the primary nav; everything else is one click away
+// under "More" so the header stays calm and uncluttered. Nothing is removed.
+export const primaryNavItems = [
+  { href: "/", label: "Today" },
+  { href: "/inbox", label: "Capture" },
   { href: "/trades", label: "Trades" },
+  { href: "/daily", label: "Review" },
+];
+
+export const moreNavItems = [
+  { href: "/calendar", label: "Calendar" },
   { href: "/playbook", label: "Playbook" },
   { href: "/analytics", label: "Analytics" },
   { href: "/lessons", label: "Lessons" },
@@ -11,6 +16,8 @@ export const navItems = [
   { href: "/weekly-review", label: "Weekly Review" },
   { href: "/settings", label: "Settings" },
 ];
+
+export const navItems = [...primaryNavItems, ...moreNavItems];
 
 export const tradingModes = ["LIVE", "PAPER", "OBSERVE_ONLY", "NO_TRADING"] as const;
 export const currentStates = ["CALM", "SHARP", "TIRED", "DISTRACTED", "ANXIOUS", "TILTED", "BORED", "OVERCONFIDENT", "UNKNOWN"] as const;
