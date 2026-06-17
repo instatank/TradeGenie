@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Lightbulb, ListChecks, Pin } from "lucide-react";
 import { createTradeAction } from "@/app/actions";
-import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { conditionTagOptions, directions, emotionalStates, entryGrades, marketTypes, riskPostures, tradeStatuses } from "@/lib/constants";
+import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { directions, entryGrades, marketTypes, mindStateOptions, riskPostures, tradeStatuses } from "@/lib/constants";
 import { getActiveSetups, getResurfacedLessons, getTodayJournal } from "@/lib/data";
 import { getSettings } from "@/lib/settings-store";
 
@@ -83,7 +83,7 @@ export default async function NewTradePage() {
           <textarea name="premortem" rows={2} placeholder="Name your most probable mistake now, while you can still avoid it." className="textarea" />
         </label>
 
-        <details className="rounded-lg border border-forge-line p-3" open>
+        <details className="rounded-lg border border-forge-line p-3">
           <summary className="cursor-pointer text-sm font-semibold">Optional context</summary>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <SelectField label="Market type" name="marketType" options={marketTypes} defaultValue={settings.defaultMarketType} />
@@ -99,7 +99,7 @@ export default async function NewTradePage() {
             <TextField label="Setup name (if not in playbook)" name="setupName" />
             <TextAreaField label="Invalidation" name="invalidation" rows={3} />
             <TextAreaField label="Concern" name="concern" rows={3} />
-            <SelectField label="Emotional state" name="emotionalState" options={emotionalStates} includeBlank />
+            <SelectField label="Mind state" name="emotionalState" options={mindStateOptions} includeBlank />
             <SelectField label="Risk posture" name="riskPosture" options={riskPostures} includeBlank />
             <TextField label="Confidence score" name="confidenceScore" type="number" />
             <SelectField label="Entry grade" name="entryGrade" options={entryGrades} defaultValue="NA" />
@@ -107,9 +107,6 @@ export default async function NewTradePage() {
               <span className="label">Screenshot upload</span>
               <input className="input" type="file" name="screenshot" accept="image/*" />
             </label>
-          </div>
-          <div className="mt-4">
-            <CheckboxGroup label="Market conditions" name="conditions" options={conditionTagOptions} />
           </div>
         </details>
 

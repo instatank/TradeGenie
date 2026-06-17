@@ -6,12 +6,13 @@ import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from 
 import {
   conditionTagOptions,
   directions,
-  emotionalStates,
   entryGrades,
   followedPlanOptions,
   humanize,
   lessonCategories,
   marketTypes,
+  mindStateOptions,
+  primaryMistakeTagNames,
   riskPostures,
   tradeStatuses,
 } from "@/lib/constants";
@@ -103,7 +104,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           <div className="grid gap-4 sm:grid-cols-2">
             <TextAreaField label="Invalidation" name="invalidation" defaultValue={trade.invalidation} rows={3} />
             <TextAreaField label="Concern" name="concern" defaultValue={trade.concern} rows={3} />
-            <SelectField label="Emotional state" name="emotionalState" options={emotionalStates} includeBlank defaultValue={trade.emotionalState} />
+            <SelectField label="Mind state" name="emotionalState" options={mindStateOptions} includeBlank defaultValue={trade.emotionalState} />
             <SelectField label="Risk posture" name="riskPosture" options={riskPostures} includeBlank defaultValue={trade.riskPosture} />
             <TextField label="Confidence score" name="confidenceScore" type="number" defaultValue={trade.confidenceScore} />
             <SelectField label="Entry grade" name="entryGrade" options={entryGrades} defaultValue={trade.entryGrade} />
@@ -157,17 +158,15 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
 
         <details className="panel space-y-4" open={trade.mistakeTags.length > 0}>
           <summary className="cursor-pointer font-semibold">Mistakes</summary>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {sortedMistakeTags.map((tag) => (
-              <label key={tag.id} className="flex items-start gap-2 rounded-md border border-forge-line p-2 text-sm">
-                <input type="checkbox" name="mistakeTagId" value={tag.id} defaultChecked={selectedMistakes.has(tag.id)} className="mt-1" />
-                <span>
-                  <span className="block font-medium">{tag.label}</span>
-                  {tag.description ? <span className="text-xs text-forge-muted">{tag.description}</span> : null}
-                </span>
-              </label>
-            ))}
-          </div>
+          <MistakeTagGrid tags={sortedMistakeTags.filter((t) => primaryMistakeTagNames.has(t.name))} selected={selectedMistakes} />
+          {sortedMistakeTags.some((t) => !primaryMistakeTagNames.has(t.name)) && (
+            <details className="rounded-lg border border-forge-line p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-forge-muted">More tags</summary>
+              <div className="mt-3">
+                <MistakeTagGrid tags={sortedMistakeTags.filter((t) => !primaryMistakeTagNames.has(t.name))} selected={selectedMistakes} />
+              </div>
+            </details>
+          )}
         </details>
 
         <details className="panel space-y-4" open={trade.screenshots.length > 0}>
@@ -230,6 +229,22 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         </div>
       </section>
     </main>
+  );
+}
+
+function MistakeTagGrid({ tags, selected }: { tags: { id: string; name: string; label: string; description: string | null }[]; selected: Set<string> }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      {tags.map((tag) => (
+        <label key={tag.id} className="flex items-start gap-2 rounded-md border border-forge-line p-2 text-sm">
+          <input type="checkbox" name="mistakeTagId" value={tag.id} defaultChecked={selected.has(tag.id)} className="mt-1" />
+          <span>
+            <span className="block font-medium">{tag.label}</span>
+            {tag.description ? <span className="text-xs text-forge-muted">{tag.description}</span> : null}
+          </span>
+        </label>
+      ))}
+    </div>
   );
 }
 

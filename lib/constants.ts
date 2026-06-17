@@ -26,6 +26,28 @@ export const lessonCategories = ["ENTRY_DISCIPLINE", "EXIT_DISCIPLINE", "RISK_MA
 export const lessonSourceTypes = ["TRADE", "DAILY_REVIEW", "WEEKLY_REVIEW", "TRANSCRIPT", "MANUAL"] as const;
 export const setupDirectionBiases = ["LONG", "SHORT", "BOTH"] as const;
 
+// Merged mind-state field: replaces both currentStates (9) and emotionalStates (11).
+// Old stored values (SHARP, DISTRACTED, BORED, REVENGE, UNKNOWN) still display via humanize().
+export const mindStateOptions = ["CALM", "TIRED", "ANXIOUS", "TILTED", "FOMO", "OVERCONFIDENT"] as const;
+
+// Trimmed lesson categories for new entries. Old values (EXIT_DISCIPLINE, MARKET_CONDITION,
+// SETUP_SPECIFIC) stored on existing lessons still display correctly via humanize().
+export const coreLessonCategories = ["ENTRY_DISCIPLINE", "RISK_MANAGEMENT", "PSYCHOLOGY", "PROCESS", "OTHER"] as const;
+
+// The 9 mistake tags shown by default on the trade detail page.
+// The remaining 9 appear under a "More" toggle — no data is removed.
+export const primaryMistakeTagNames = new Set([
+  "FOMO_ENTRY",
+  "REVENGE_TRADE",
+  "OVERSIZED",
+  "MOVED_STOP",
+  "NO_PLAN",
+  "CHASED_BREAKOUT",
+  "CUT_WINNER_EARLY",
+  "HELD_LOSER_TOO_LONG",
+  "OVERTRADED",
+]);
+
 // Tradezella-style "Condition" tag bucket: the market context a trade was taken in.
 // Lets you later ask "do I only make money on trend days and lose in chop?".
 export const conditionTagOptions = [

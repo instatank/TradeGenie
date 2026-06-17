@@ -19,7 +19,7 @@ export const ProcessingStatus = {
 
 export const AiConfidence = { LOW: "LOW", MEDIUM: "MEDIUM", HIGH: "HIGH" } as const;
 export const TradingMode = { LIVE: "LIVE", PAPER: "PAPER", OBSERVE_ONLY: "OBSERVE_ONLY", NO_TRADING: "NO_TRADING" } as const;
-export const CurrentState = { CALM: "CALM", SHARP: "SHARP", TIRED: "TIRED", DISTRACTED: "DISTRACTED", ANXIOUS: "ANXIOUS", TILTED: "TILTED", BORED: "BORED", OVERCONFIDENT: "OVERCONFIDENT", UNKNOWN: "UNKNOWN" } as const;
+export const CurrentState = { CALM: "CALM", SHARP: "SHARP", TIRED: "TIRED", DISTRACTED: "DISTRACTED", ANXIOUS: "ANXIOUS", TILTED: "TILTED", BORED: "BORED", OVERCONFIDENT: "OVERCONFIDENT", FOMO: "FOMO", UNKNOWN: "UNKNOWN" } as const;
 export const MarketType = { CRYPTO_PERP: "CRYPTO_PERP", CRYPTO_SPOT: "CRYPTO_SPOT", INDIAN_INDEX: "INDIAN_INDEX", INDIAN_STOCK: "INDIAN_STOCK", OTHER: "OTHER" } as const;
 export const Direction = { LONG: "LONG", SHORT: "SHORT", UNKNOWN: "UNKNOWN" } as const;
 export const TradeStatus = { IDEA: "IDEA", OPEN: "OPEN", CLOSED: "CLOSED", CANCELLED: "CANCELLED" } as const;

@@ -2,7 +2,7 @@ import { format, startOfDay } from "date-fns";
 import { Trash2 } from "lucide-react";
 import { deleteDailyJournalAction, saveDailyJournalAction } from "@/app/actions";
 import { BoolSelect, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { currentStates, tradingModes } from "@/lib/constants";
+import { mindStateOptions, tradingModes } from "@/lib/constants";
 import { getTodayJournal } from "@/lib/data";
 
 export default async function DailyPage({ searchParams }: { searchParams?: Promise<{ date?: string }> }) {
@@ -37,7 +37,7 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
           <TextField label="Date" name="date" type="date" defaultValue={format(selectedDate, "yyyy-MM-dd")} />
           <div className="grid gap-4 sm:grid-cols-2">
             <SelectField label="Trading mode" name="tradingMode" options={tradingModes} defaultValue={journal?.tradingMode ?? "PAPER"} />
-            <SelectField label="Current state" name="currentState" options={currentStates} includeBlank defaultValue={journal?.currentState} />
+            <SelectField label="Mind state" name="currentState" options={mindStateOptions} includeBlank defaultValue={journal?.currentState} />
             <TextField label="Markets watched" name="marketsWatched" defaultValue={journal?.marketsWatched} placeholder="BTC, ETH, NIFTY..." />
             <TextField label="Max loss for day" name="maxLossForDay" defaultValue={journal?.maxLossForDay} placeholder="Example: -2R or -₹5,000" />
             <TextField label="Max trades for day" name="maxTradesForDay" type="number" defaultValue={journal?.maxTradesForDay} />

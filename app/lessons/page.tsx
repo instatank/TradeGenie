@@ -6,7 +6,7 @@ import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
+import { coreLessonCategories, humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
 import { db } from "@/lib/data";
 import type { Lesson } from "@/lib/types";
 
@@ -50,7 +50,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
           <form action={addManualLessonAction} className="panel space-y-4">
             <h2 className="font-semibold">Add manual lesson</h2>
             <TextAreaField label="Lesson" name="lessonText" required rows={4} />
-            <SelectField label="Category" name="category" options={lessonCategories} defaultValue="PROCESS" />
+            <SelectField label="Category" name="category" options={coreLessonCategories} defaultValue="PROCESS" />
             <button className="button" type="submit">Add lesson</button>
           </form>
 
@@ -61,7 +61,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
             </summary>
             <form className="mt-4 space-y-3">
               <input type="hidden" name="view" value={view} />
-              <SelectField label="Category" name="category" options={lessonCategories} includeBlank defaultValue={params.category} />
+              <SelectField label="Category" name="category" options={coreLessonCategories} includeBlank defaultValue={params.category} />
               <SelectField label="Source type" name="sourceType" options={lessonSourceTypes} includeBlank defaultValue={params.sourceType} />
               <label className="field">
                 <span className="label">Sort</span>
