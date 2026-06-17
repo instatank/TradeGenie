@@ -10,7 +10,7 @@ const promptKeys: PromptTemplateKey[] = ["tradeEntry", "tradeExit", "eodReview",
 
 export default async function SettingsPage() {
   const settings = await getSettings();
-  const hasOpenAiKey = Boolean(process.env.OPENAI_API_KEY);
+  const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
   const storage = storageStatus();
 
   return (
@@ -37,9 +37,9 @@ export default async function SettingsPage() {
           <h2 className="font-semibold">General</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-lg bg-forge-panel p-3">
-              <div className="text-sm font-medium">OpenAI API key</div>
-              <div className={`mt-1 text-sm ${hasOpenAiKey ? "text-forge-green" : "text-forge-muted"}`}>
-                {hasOpenAiKey ? "Present" : "Not present"}
+              <div className="text-sm font-medium">Anthropic API key</div>
+              <div className={`mt-1 text-sm ${hasAnthropicKey ? "text-forge-green" : "text-forge-muted"}`}>
+                {hasAnthropicKey ? "Present" : "Not present (voice notes use the offline fallback)"}
               </div>
             </div>
             <label className="flex items-center gap-2 rounded-lg bg-forge-panel p-3 text-sm font-medium">

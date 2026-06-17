@@ -63,7 +63,9 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   Correctness-critical instruction (rules, emotion mapping, **live mistake-tag list from the
   store**) lives in the code-built system prompt so stale saved templates can't break it.
 - `lib/transcript-processor.ts`: routes each note to ONE prompt by declared type; UNKNOWN uses
-  a classify-first general prompt. Falls back to a regex mock when no AI key.
+  a classify-first general prompt. Calls **Claude** via the official `@anthropic-ai/sdk` with
+  **structured outputs** (raw JSON Schema → schema-valid JSON), thinking disabled. Model is
+  `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`). Falls back to a regex mock when no key.
 - Prompt-template **version gate** (`PROMPT_TEMPLATES_VERSION`): new defaults override
   previously-saved thin prompts; a trader's own edits survive (saving stamps the version).
 - AI output is always shown for review on `/inbox` before it writes to any record.
@@ -76,11 +78,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - Voice-note confirmation: single "Review this draft before saving" card with the confirm CTA
   in its footer; missing-info and link-required surfaced as callouts; color-coded confidence.
 - Rewrote + re-routed the extraction prompts (see above).
+- Swapped the transcript backend from OpenAI to the Anthropic SDK with structured outputs
+  (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`); prompts carried over unchanged.
 
 ## Open items
-- **OpenAI → Anthropic** transcript backend swap (owner runs on Anthropic). Prompt content
-  carries over; the change is transport (Anthropic structured output / tool use vs OpenAI
-  `response_format: json_object`). Pull current Anthropic API specifics at implementation time.
 - **Vercel production branch (permanent fix)**: production is currently pinned via a manual
   "Promote to Production"; the configured Production Branch is still `main`, so a future `main`
   push would override it. Resolve by merging the durability/lean work into `main` OR flipping

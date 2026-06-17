@@ -41,7 +41,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/store.ts`: persistence adapter.
 - `lib/data.ts`: higher-level data fetch helpers.
 - `lib/metrics.ts`: P&L, R, win rate, expectancy, weekly stats, frequency helpers.
-- `lib/transcript-processor.ts`: OpenAI-or-mock transcript structuring.
+- `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
 - `components/TradeLogTable.tsx`: compact Trades table; single-click expands row, double-click opens detail page.
 
 ## Product Areas
@@ -122,9 +122,9 @@ For UI changes, also smoke-check the affected route on the local dev server.
 
 Use `PENDING_TASKS.md` as the backlog. Current recommended sequence:
 
-1. OpenAI → Anthropic transcript backend swap.
-2. Vercel production-branch permanent fix.
-3. Today workspace / dashboard refinement.
+1. Vercel production-branch permanent fix.
+2. Today workspace / dashboard refinement.
+3. Trade lifecycle prompts (unfinished-loop nudges).
 
 ## Known Risks / Gotchas
 

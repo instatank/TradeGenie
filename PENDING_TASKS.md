@@ -16,15 +16,16 @@ For the working contract and a log of what changed, see `CLAUDE.md`.
   "Advanced analytics" toggle.
 - **Transcript prompts** — per-type routing, enum-constrained templates, system-injected
   live mistake-tag list, prompt-template version gate.
+- **Anthropic transcript backend** — swapped from OpenAI to the Anthropic SDK with structured
+  outputs (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`, default `claude-sonnet-4-6`).
 
 ## In progress / next up
-1. **OpenAI → Anthropic** transcript backend swap (prompts carry over; transport change).
-2. **Vercel production branch** permanent fix (currently pinned via manual "Promote"; configured
+1. **Vercel production branch** permanent fix (currently pinned via manual "Promote"; configured
    branch is still `main`).
-3. **Today workspace** — focused Today panel (check-in status, open trades, notes, EOD status).
-4. **Trade lifecycle prompts** — nudge unfinished loops (CLOSED without exit review, mistake
+2. **Today workspace** — focused Today panel (check-in status, open trades, notes, EOD status).
+3. **Trade lifecycle prompts** — nudge unfinished loops (CLOSED without exit review, mistake
    without lesson, transcript structured but unconfirmed, etc.).
-5. **Quick Add** — persistent button/shortcut for voice note, quick trade, EOD, manual lesson.
+4. **Quick Add** — persistent button/shortcut for voice note, quick trade, EOD, manual lesson.
 
 ## Later
 - **Weekly review**: extraction schema strips weekly-only fields on the inbox path — enrich

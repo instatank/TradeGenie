@@ -72,7 +72,7 @@ GOOGLE_APPLICATION_CREDENTIALS="/absolute/path/to/service-account.json"
 3. Build command: `npm run build`.
 4. Install command: `npm install`.
 5. Add Firebase env vars in Project Settings -> Environment Variables, including `FIREBASE_STORAGE_BUCKET`.
-6. Optional: add `OPENAI_API_KEY` if you want real transcript/weekly synthesis. The deterministic local extractor works without it.
+6. Optional: add `ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_MODEL`, default `claude-sonnet-4-6`) for real transcript structuring. The deterministic local extractor works without it.
 
 ## Seed Data
 
@@ -103,7 +103,7 @@ When Firebase env vars are present, seed writes to Firestore. Otherwise it write
 
 ## AI Behavior
 
-If `OPENAI_API_KEY` is present and AI is enabled in settings, transcript structuring uses OpenAI.
+If `ANTHROPIC_API_KEY` is present and AI is enabled in settings, transcript structuring uses Claude (`ANTHROPIC_MODEL`, default `claude-sonnet-4-6`) with structured outputs for schema-valid extraction.
 
 If the key is missing, the app uses a deterministic extractor so the journal remains usable locally and on Vercel.
 

@@ -1,7 +1,10 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { db } from "@/lib/data";
 import { extractionSystemPrompt, generalExtraction, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
+
+const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 const extractionSchema = z.object({
   transcriptType: z.string().default("UNKNOWN"),
@@ -40,11 +43,72 @@ const extractionSchema = z.object({
 
 export type TranscriptExtraction = z.infer<typeof extractionSchema>;
 
+// Plain JSON Schema for Anthropic structured outputs — guarantees the model
+// returns schema-valid JSON. Optional fields are nullable so the model always
+// emits every key; the result is re-parsed through extractionSchema (above) to
+// apply defaults and the lessons union. Kept as raw JSON Schema (not a Zod
+// helper) so it isn't coupled to a specific Zod major version.
+const nullableString = { type: ["string", "null"] } as const;
+const nullableNumberType = { type: ["number", "null"] } as const;
+const nullableBool = { type: ["boolean", "null"] } as const;
+
+const extractionJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    transcriptType: { type: "string" },
+    instrument: nullableString,
+    direction: nullableString,
+    setupName: nullableString,
+    entryThesis: nullableString,
+    invalidation: nullableString,
+    concern: nullableString,
+    emotionalState: nullableString,
+    riskPosture: nullableString,
+    confidenceScore: nullableNumberType,
+    entryGrade: nullableString,
+    exitReason: nullableString,
+    followedPlan: nullableString,
+    suggestedMistakeTags: { type: "array", items: { type: "string" } },
+    lessons: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { lessonText: { type: "string" }, category: nullableString },
+        required: ["lessonText", "category"],
+      },
+    },
+    missingInfo: { type: "array", items: { type: "string" } },
+    tradedToday: nullableBool,
+    followedMaxLoss: nullableBool,
+    followedMaxTrades: nullableBool,
+    bestDecision: nullableString,
+    worstDecision: nullableString,
+    mainEmotion: nullableString,
+    mainMistake: nullableString,
+    oneThingDoneWell: nullableString,
+    oneThingToAvoidTomorrow: nullableString,
+    disciplineScore: nullableNumberType,
+    lesson: nullableString,
+    futureRule: nullableString,
+    confidence: { type: "string" },
+  },
+  required: [
+    "transcriptType", "instrument", "direction", "setupName", "entryThesis", "invalidation",
+    "concern", "emotionalState", "riskPosture", "confidenceScore", "entryGrade", "exitReason",
+    "followedPlan", "suggestedMistakeTags", "lessons", "missingInfo", "tradedToday",
+    "followedMaxLoss", "followedMaxTrades", "bestDecision", "worstDecision", "mainEmotion",
+    "mainMistake", "oneThingDoneWell", "oneThingToAvoidTomorrow", "disciplineScore", "lesson",
+    "futureRule", "confidence",
+  ],
+} as const;
+
 export async function structureTranscript(rawText: string, declaredType = "UNKNOWN") {
   const settings = await getSettings();
-  if (settings.aiEnabled && process.env.OPENAI_API_KEY) {
+  if (settings.aiEnabled && process.env.ANTHROPIC_API_KEY) {
     try {
-      return await openAiExtraction(rawText, declaredType, settings.promptTemplates);
+      return await anthropicExtraction(rawText, declaredType, settings.promptTemplates);
     } catch {
       return mockExtraction(rawText, declaredType);
     }
@@ -78,7 +142,7 @@ async function mistakeTagReference(): Promise<string> {
   return tags.map((tag) => `- ${tag.name} — ${tag.label}`).join("\n");
 }
 
-async function openAiExtraction(rawText: string, declaredType: string, prompts: Record<string, string>) {
+async function anthropicExtraction(rawText: string, declaredType: string, prompts: Record<string, string>) {
   const systemPrompt = extractionSystemPrompt(await mistakeTagReference());
   const userPrompt = [
     selectTemplate(declaredType, prompts),
@@ -88,28 +152,24 @@ async function openAiExtraction(rawText: string, declaredType: string, prompts: 
     `Transcript:\n${rawText}`,
   ].join("\n\n");
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.1,
-    }),
+  const client = new Anthropic();
+  const message = await client.messages.create({
+    model: process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
+    max_tokens: 2048,
+    thinking: { type: "disabled" }, // extraction needs no reasoning — keeps it fast and cheap
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
+    output_config: { format: { type: "json_schema", schema: extractionJsonSchema } },
   });
 
-  if (!response.ok) throw new Error("OpenAI extraction failed");
-  const json = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = json.choices?.[0]?.message?.content;
-  if (!content) throw new Error("OpenAI returned no content");
-  return extractionSchema.parse(JSON.parse(content));
+  const text = message.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+  if (!text.trim()) throw new Error("Anthropic returned no content");
+  // Structured outputs guarantee schema-valid JSON; re-parse through the lenient
+  // schema to apply defaults and the lessons union.
+  return extractionSchema.parse(JSON.parse(text));
 }
 
 function mockExtraction(rawText: string, declaredType: string): TranscriptExtraction {
