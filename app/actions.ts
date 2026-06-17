@@ -105,22 +105,40 @@ async function saveScreenshot(file: FormDataEntryValue | null, tradeId?: string)
 
 export async function saveTranscriptAction(formData: FormData) {
   const now = new Date();
-  await db.create("transcripts", {
+  const declaredType = enumValue(TranscriptType, formData.get("transcriptType"), TranscriptType.UNKNOWN);
+  const rawText = toText(formData.get("rawText")) ?? "";
+  const created = await db.create("transcripts", {
     createdAt: now,
     updatedAt: now,
     transcriptDateTime: dateFromForm(formData.get("transcriptDateTime")),
     sourceTool: toText(formData.get("sourceTool")),
-    rawText: toText(formData.get("rawText")) ?? "",
+    rawText,
     cleanedSummary: null,
-    transcriptType: enumValue(TranscriptType, formData.get("transcriptType"), TranscriptType.UNKNOWN),
+    transcriptType: declaredType,
     processingStatus: ProcessingStatus.UNPROCESSED,
     linkedTradeId: null,
     linkedDailyJournalId: null,
     structuredJson: null,
     aiConfidence: null,
   });
+
+  // Auto-structure on save so the note lands as a reviewable draft in a single
+  // step — no separate "Structure" click. structureTranscript() never throws
+  // (it falls back to a regex mock), so a failure still leaves a usable note.
+  if (rawText.trim()) {
+    const extraction = await structureTranscript(rawText, declaredType);
+    await db.update("transcripts", created.id, {
+      transcriptType: transcriptType(extraction.transcriptType),
+      structuredJson: JSON.stringify(extraction, null, 2),
+      processingStatus: ProcessingStatus.STRUCTURED,
+      aiConfidence: aiConfidence(extraction.confidence),
+      cleanedSummary: buildTranscriptSummary(extraction),
+      updatedAt: new Date(),
+    });
+  }
+
   revalidatePath("/inbox");
-  await redirectBackWithFeedback("Voice note saved.", "/inbox");
+  redirect(withFeedback("/inbox", "Saved and structured. Review the draft below, then confirm."));
 }
 
 export async function structureTranscriptAction(formData: FormData) {
@@ -144,7 +162,10 @@ export async function confirmTranscriptAction(formData: FormData) {
   const id = String(formData.get("id"));
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
-  const structured = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : {};
+  // Merge any edits the trader made on the review card over the AI draft, so the
+  // confirmed record reflects what they actually see and corrected on screen.
+  const draft = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : {};
+  const structured: StructuredJson = { ...draft, ...readReviewOverrides(formData) };
   const type = transcriptType(structured.transcriptType ?? transcript.transcriptType);
   let linkedTradeId = transcript.linkedTradeId;
   let linkedDailyJournalId = transcript.linkedDailyJournalId;
@@ -156,12 +177,20 @@ export async function confirmTranscriptAction(formData: FormData) {
   }
 
   if (type === "TRADE_EXIT_REVIEW" && linkedTradeId) {
+    const existingTrade = await db.get("trades", linkedTradeId);
+    const exitPrice = nullableNumber(structured.exitPrice);
+    const realizedPnl = nullableNumber(structured.realizedPnl);
     await db.update("trades", linkedTradeId, {
       status: TradeStatus.CLOSED,
       exitReason: nullableString(structured.exitReason),
       followedPlan: enumFromText(FollowedPlan, structured.followedPlan, FollowedPlan.NA),
       emotionalState: enumFromText(EmotionalState, structured.emotionalState, EmotionalState.UNKNOWN),
       lesson: nullableString(structured.lesson),
+      ...(exitPrice != null ? { exitPrice } : {}),
+      ...(realizedPnl != null ? { realizedPnl, netPnl: calculateNetPnl(realizedPnl, existingTrade?.fees, existingTrade?.funding) } : {}),
+      ...(exitPrice != null && existingTrade
+        ? { rMultiple: calculateRMultiple({ entryPrice: existingTrade.entryPrice, stopPrice: existingTrade.stopPrice, exitPrice, direction: existingTrade.direction }) }
+        : {}),
       updatedAt: new Date(),
     });
     await linkSuggestedMistakes(linkedTradeId, structured.suggestedMistakeTags);
@@ -214,7 +243,9 @@ export async function confirmTranscriptAction(formData: FormData) {
   revalidatePath("/daily");
   revalidatePath("/lessons");
   if (linkedTradeId && (type === "TRADE_ENTRY_NOTE" || type === "TRADE_EXIT_REVIEW")) {
-    redirect(withFeedback(`/trades/${linkedTradeId}`, type === "TRADE_ENTRY_NOTE" ? "Trade note created from voice note." : "Exit review saved to linked trade."));
+    // Stay on the inbox instead of forcing a second confirmation on the trade
+    // page. The confirmed note links straight to the saved trade if needed.
+    redirect(withFeedback("/inbox?view=confirmed", type === "TRADE_ENTRY_NOTE" ? "Trade saved to your log." : "Exit review saved to the linked trade."));
   }
   if (linkedDailyJournalId && (type === "EOD_REVIEW" || type === "DAILY_CHECKIN")) {
     redirect(withFeedback(`/daily?date=${format(transcript.transcriptDateTime, "yyyy-MM-dd")}`, type === "EOD_REVIEW" ? "EOD review saved." : "Daily check-in saved."));
@@ -730,14 +761,23 @@ export async function toggleLessonPinAction(formData: FormData) {
 }
 
 async function createTradeFromStructured(tradeDateTime: Date, structured: StructuredJson) {
+  // Carry the spoken numbers through to the trade so the trader doesn't have to
+  // re-type prices/size on the trade page. Derived fields are computed here.
+  const direction = enumFromText(Direction, structured.direction, Direction.UNKNOWN);
+  const entryPrice = nullableNumber(structured.entryPrice);
+  const stopPrice = nullableNumber(structured.stopPrice);
+  const exitPrice = nullableNumber(structured.exitPrice);
+  const realizedPnl = nullableNumber(structured.realizedPnl);
+  const order = calculateOrderFields({ price: entryPrice, quantity: nullableNumber(structured.quantity), totalOrderValue: null });
+  const hasExit = exitPrice != null || realizedPnl != null;
   return db.create("trades", {
     createdAt: new Date(),
     updatedAt: new Date(),
     tradeDateTime,
     marketType: MarketType.CRYPTO_PERP,
     instrument: String(structured.instrument ?? "UNKNOWN").toUpperCase(),
-    direction: enumFromText(Direction, structured.direction, Direction.UNKNOWN),
-    status: TradeStatus.IDEA,
+    direction,
+    status: hasExit ? TradeStatus.CLOSED : TradeStatus.IDEA,
     setupName: nullableString(structured.setupName),
     entryThesis: nullableString(structured.entryThesis),
     invalidation: nullableString(structured.invalidation),
@@ -746,23 +786,53 @@ async function createTradeFromStructured(tradeDateTime: Date, structured: Struct
     riskPosture: enumFromText(RiskPosture, structured.riskPosture, RiskPosture.UNKNOWN),
     confidenceScore: nullableNumber(structured.confidenceScore),
     entryGrade: enumFromText(EntryGrade, structured.entryGrade, EntryGrade.NA),
-    exitReason: null,
+    exitReason: hasExit ? nullableString(structured.exitReason) : null,
     followedPlan: null,
     lesson: null,
     notes: null,
-    entryPrice: null,
-    stopPrice: null,
-    targetPrice: null,
-    exitPrice: null,
-    quantity: null,
-    totalOrderValue: null,
-    leverage: null,
-    realizedPnl: null,
+    entryPrice,
+    stopPrice,
+    targetPrice: nullableNumber(structured.targetPrice),
+    exitPrice,
+    quantity: order.quantity,
+    totalOrderValue: order.totalOrderValue,
+    leverage: nullableNumber(structured.leverage),
+    realizedPnl,
     fees: null,
     funding: null,
-    netPnl: null,
-    rMultiple: null,
+    netPnl: calculateNetPnl(realizedPnl, null, null),
+    rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
   });
+}
+
+// Pull the trader's on-screen edits from the review-card form. Only keys that
+// were actually submitted override the AI draft, so each note type's card can
+// surface just its relevant fields without wiping the others.
+function readReviewOverrides(formData: FormData): StructuredJson {
+  const overrides: StructuredJson = {};
+  const textKeys = [
+    "transcriptType", "instrument", "direction", "setupName", "entryThesis", "invalidation",
+    "concern", "emotionalState", "riskPosture", "exitReason", "followedPlan", "bestDecision",
+    "worstDecision", "mainEmotion", "mainMistake", "oneThingDoneWell", "oneThingToAvoidTomorrow",
+  ];
+  for (const key of textKeys) {
+    if (formData.has(key)) overrides[key] = toText(formData.get(key));
+  }
+  const numberKeys = ["entryPrice", "stopPrice", "targetPrice", "exitPrice", "quantity", "leverage", "realizedPnl", "confidenceScore", "disciplineScore"];
+  for (const key of numberKeys) {
+    if (formData.has(key)) overrides[key] = toNumber(formData.get(key));
+  }
+  const boolKeys = ["tradedToday", "followedMaxLoss", "followedMaxTrades"];
+  for (const key of boolKeys) {
+    if (formData.has(key)) overrides[key] = boolFromForm(formData.get(key));
+  }
+  if (formData.has("lessonsText")) {
+    overrides.lessons = String(formData.get("lessonsText") ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+  return overrides;
 }
 
 async function linkSuggestedMistakes(tradeId: string, tags: unknown) {

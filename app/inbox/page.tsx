@@ -12,16 +12,15 @@ import {
   updateTranscriptAction,
 } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
-import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { BoolSelect, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { humanize, transcriptTypes } from "@/lib/constants";
+import { directions, followedPlanOptions, humanize, mindStateOptions, riskPostures, transcriptTypes } from "@/lib/constants";
 import { db, getTranscriptsWithLinks } from "@/lib/data";
 import { getSettings } from "@/lib/settings-store";
 
 const inboxViews = [
-  { label: "Unprocessed", value: "unprocessed" },
-  { label: "Structured", value: "structured" },
+  { label: "To review", value: "review" },
   { label: "Needs Link", value: "needs-link" },
   { label: "Confirmed", value: "confirmed" },
   { label: "Archived", value: "archived" },
@@ -36,7 +35,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
     db.list("trades"),
     db.list("dailyJournals"),
   ]);
-  const view = params.view ?? "unprocessed";
+  const view = params.view ?? "review";
   const sort = params.sort ?? "date-desc";
   const page = normalizePage(params.page);
   const pageSize = normalizePageSize(params.pageSize, [5, 10, 25], 10);
@@ -51,7 +50,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
 
   return (
     <main className="page-shell">
-      <PageTitle title="Voice Inbox" subtitle="Drop dictated notes here first. The app turns them into draft trade, daily, exit, or lesson records only after you confirm." />
+      <PageTitle title="Voice Inbox" subtitle="Drop a note. It auto-structures into a draft you review, edit, and confirm in one place — nothing is saved until you confirm." />
 
       <ViewTabs basePath="/inbox" current={view} params={params} tabs={inboxViews} />
       <CalendarRangeControls basePath="/inbox" params={params} range={calendarRange} total={filteredTranscripts.length} />
@@ -72,13 +71,13 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
           <TextField label="Note time" name="transcriptDateTime" type="datetime-local" defaultValue={format(new Date(), "yyyy-MM-dd'T'HH:mm")} />
           <TextField label="Dictation source" name="sourceTool" defaultValue={settings.defaultSourceTool} />
           <SelectField label="Save as" name="transcriptType" options={transcriptTypes} defaultValue="UNKNOWN" />
-          <button className="button" type="submit">Save voice note</button>
+          <button className="button" type="submit">Save &amp; review</button>
           <div className="rounded-lg bg-forge-panel p-3 text-sm text-forge-muted">
-            <p className="font-medium text-forge-ink">Current flow</p>
+            <p className="font-medium text-forge-ink">How it works</p>
             <div className="mt-2 grid gap-2">
-              <Step icon={<FileText className="h-4 w-4" />} text="Save the raw note" />
-              <Step icon={<Sparkles className="h-4 w-4" />} text="Structure it into suggested fields" />
-              <Step icon={<CheckCircle2 className="h-4 w-4" />} text="Confirm the draft into the right journal record" />
+              <Step icon={<FileText className="h-4 w-4" />} text="Paste or dictate your note" />
+              <Step icon={<Sparkles className="h-4 w-4" />} text="It auto-structures into a draft" />
+              <Step icon={<CheckCircle2 className="h-4 w-4" />} text="Review, edit, and confirm in one place" />
             </div>
           </div>
         </form>
@@ -193,51 +192,43 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                 <section className="rounded-lg border-2 border-forge-blue/40 p-4">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold">Review this draft before saving</h3>
+                      <h3 className="text-sm font-semibold">Review &amp; edit this draft</h3>
                       <p className="mt-1 text-sm text-forge-muted">{destination}</p>
                     </div>
                     <ConfidenceBadge level={getText(structured, "confidence") ?? transcript.aiConfidence ?? "LOW"} />
                   </div>
 
                   {getText(structured, "confidence") === "LOW" || (transcript.aiConfidence === "LOW" && !getText(structured, "confidence")) ? (
-                    <p className="mt-2 text-xs text-amber-700">Low confidence — read the fields carefully and edit the raw note if anything is wrong before confirming.</p>
+                    <p className="mt-2 text-xs text-amber-700">Low confidence — read the fields carefully and fix anything below before confirming.</p>
                   ) : null}
 
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {structuredRows(structured).map((row) => (
-                      <div key={row.label} className="rounded-md bg-forge-panel p-3">
-                        <div className="text-xs font-medium uppercase tracking-wide text-forge-muted">{row.label}</div>
-                        <div className="mt-1 text-sm">{row.value}</div>
+                  <form action={confirmTranscriptAction} className="mt-3 space-y-3">
+                    <input type="hidden" name="id" value={transcript.id} />
+                    <ReviewFields structured={structured} detectedType={detectedType} />
+
+                    {getList(structured, "suggestedMistakeTags") ? (
+                      <p className="text-xs text-forge-muted">Mistakes detected: {getList(structured, "suggestedMistakeTags")} (saved with this record).</p>
+                    ) : null}
+
+                    {needsTradeLink ? (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        This is an exit review. Link it to the trade it reviews (below) before you can confirm.
                       </div>
-                    ))}
-                  </div>
+                    ) : null}
 
-                  {getList(structured, "missingInfo") ? (
-                    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      <span className="font-medium">The AI couldn&apos;t fill: </span>{getList(structured, "missingInfo")}. You can add these on the record after confirming.
-                    </div>
-                  ) : null}
-
-                  {needsTradeLink ? (
-                    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      This is an exit review. Link it to the trade it reviews (below) before you can confirm.
-                    </div>
-                  ) : null}
-
-                  <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-forge-line pt-3">
-                    <form action={confirmTranscriptAction}>
-                      <input type="hidden" name="id" value={transcript.id} />
+                    <div className="flex flex-wrap items-center gap-2 border-t border-forge-line pt-3">
                       <button className="button" type="submit" disabled={needsTradeLink}>
                         <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                         {confirmButtonLabel(detectedType)}
                       </button>
-                    </form>
-                    <form action={extractLessonsAction}>
-                      <input type="hidden" name="id" value={transcript.id} />
-                      <button className="button-secondary" type="submit">Save lessons only</button>
-                    </form>
-                    <span className="text-xs text-forge-muted">Confirming writes to your journal. Nothing is saved until you click.</span>
-                  </div>
+                      <span className="text-xs text-forge-muted">Confirming writes to your journal. Nothing is saved until you click.</span>
+                    </div>
+                  </form>
+
+                  <form action={extractLessonsAction} className="mt-2">
+                    <input type="hidden" name="id" value={transcript.id} />
+                    <button className="button-secondary" type="submit">Save lessons only</button>
+                  </form>
 
                   <details className="mt-3">
                     <summary className="cursor-pointer text-xs font-semibold text-forge-muted">Raw structured JSON</summary>
@@ -301,6 +292,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
 type InboxRow = Awaited<ReturnType<typeof getTranscriptsWithLinks>>[number];
 
 function applyInboxView(transcript: InboxRow, view: string) {
+  if (view === "review") return transcript.processingStatus === "UNPROCESSED" || transcript.processingStatus === "STRUCTURED";
   if (view === "unprocessed") return transcript.processingStatus === "UNPROCESSED";
   if (view === "structured") return transcript.processingStatus === "STRUCTURED";
   if (view === "confirmed") return transcript.processingStatus === "CONFIRMED";
@@ -368,25 +360,83 @@ function confirmButtonLabel(type: string) {
   return "Confirm draft";
 }
 
-function structuredRows(structured: Record<string, unknown> | null) {
-  if (!structured) return [];
-  const rows = [
-    ["Type", getText(structured, "transcriptType")],
-    ["Instrument", getText(structured, "instrument")],
-    ["Direction", getText(structured, "direction")],
-    ["Setup", getText(structured, "setupName")],
-    ["Thesis", getText(structured, "entryThesis")],
-    ["Invalidation", getText(structured, "invalidation")],
-    ["Exit reason", getText(structured, "exitReason")],
-    ["Followed plan", getText(structured, "followedPlan")],
-    ["Emotion", getText(structured, "emotionalState") ?? getText(structured, "mainEmotion")],
-    ["Mistakes", getList(structured, "suggestedMistakeTags") ?? getText(structured, "mainMistake")],
-    ["Lessons", getLessons(structured)],
-  ];
-  return rows
-    .filter((row): row is [string, string] => Boolean(row[1]))
-    .slice(0, 10)
-    .map(([label, value]) => ({ label, value }));
+// Editable review card. Only the fields relevant to the detected note type are
+// shown; the confirm action reads back exactly the inputs that were rendered.
+function ReviewFields({ structured, detectedType }: { structured: Record<string, unknown> | null; detectedType: string }) {
+  const v = (key: string) => getText(structured, key);
+  const isTrade = detectedType === "TRADE_ENTRY_NOTE" || detectedType === "TRADE_EXIT_REVIEW";
+  const isExit = detectedType === "TRADE_EXIT_REVIEW";
+  const isDaily = detectedType === "EOD_REVIEW" || detectedType === "DAILY_CHECKIN";
+
+  if (isTrade) {
+    return (
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SelectField label="Type" name="transcriptType" options={transcriptTypes} defaultValue={detectedType} />
+          <TextField label="Instrument" name="instrument" defaultValue={v("instrument")} />
+          <SelectField label="Direction" name="direction" options={directions} defaultValue={v("direction") ?? "UNKNOWN"} />
+          <TextField label="Setup" name="setupName" defaultValue={v("setupName")} />
+          <SelectField label="Mind state" name="emotionalState" options={mindStateOptions} defaultValue={v("emotionalState")} includeBlank />
+          {!isExit ? <SelectField label="Risk posture" name="riskPosture" options={riskPostures} defaultValue={v("riskPosture") ?? "NORMAL"} /> : null}
+        </div>
+        <TextAreaField label="Thesis" name="entryThesis" rows={2} defaultValue={v("entryThesis")} />
+        <TextField label="Invalidation" name="invalidation" defaultValue={v("invalidation")} />
+        {isExit ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TextAreaField label="Exit reason" name="exitReason" rows={2} defaultValue={v("exitReason")} />
+            <SelectField label="Followed plan" name="followedPlan" options={followedPlanOptions} defaultValue={v("followedPlan") ?? "NA"} />
+          </div>
+        ) : null}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <TextField label="Entry price" name="entryPrice" type="number" defaultValue={v("entryPrice")} />
+          <TextField label="Stop price" name="stopPrice" type="number" defaultValue={v("stopPrice")} />
+          <TextField label="Target price" name="targetPrice" type="number" defaultValue={v("targetPrice")} />
+          <TextField label="Exit price" name="exitPrice" type="number" defaultValue={v("exitPrice")} />
+          <TextField label="Quantity" name="quantity" type="number" defaultValue={v("quantity")} />
+          <TextField label="Leverage" name="leverage" type="number" defaultValue={v("leverage")} />
+          <TextField label="Realized P&amp;L" name="realizedPnl" type="number" defaultValue={v("realizedPnl")} />
+        </div>
+        <LessonsField structured={structured} />
+      </div>
+    );
+  }
+
+  if (isDaily) {
+    return (
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <SelectField label="Type" name="transcriptType" options={transcriptTypes} defaultValue={detectedType} />
+          <SelectField label="Main emotion" name="mainEmotion" options={mindStateOptions} defaultValue={v("mainEmotion")} includeBlank />
+          <BoolSelect label="Traded today" name="tradedToday" defaultValue={getBool(structured, "tradedToday")} />
+          <BoolSelect label="Followed max loss" name="followedMaxLoss" defaultValue={getBool(structured, "followedMaxLoss")} />
+          <BoolSelect label="Followed max trades" name="followedMaxTrades" defaultValue={getBool(structured, "followedMaxTrades")} />
+          <TextField label="Discipline (1-10)" name="disciplineScore" type="number" defaultValue={v("disciplineScore")} />
+        </div>
+        <TextField label="Best decision" name="bestDecision" defaultValue={v("bestDecision")} />
+        <TextField label="Worst decision" name="worstDecision" defaultValue={v("worstDecision")} />
+        <TextField label="Main mistake" name="mainMistake" defaultValue={v("mainMistake")} />
+        <TextField label="One thing done well" name="oneThingDoneWell" defaultValue={v("oneThingDoneWell")} />
+        <TextField label="Avoid tomorrow" name="oneThingToAvoidTomorrow" defaultValue={v("oneThingToAvoidTomorrow")} />
+        <LessonsField structured={structured} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <SelectField label="Type" name="transcriptType" options={transcriptTypes} defaultValue={detectedType} />
+      <LessonsField structured={structured} />
+    </div>
+  );
+}
+
+function LessonsField({ structured }: { structured: Record<string, unknown> | null }) {
+  return <TextAreaField label="Lessons (one per line)" name="lessonsText" rows={3} defaultValue={getLessonsList(structured).join("\n")} />;
+}
+
+function getBool(structured: Record<string, unknown> | null, key: string) {
+  const value = structured?.[key];
+  return typeof value === "boolean" ? value : null;
 }
 
 function getText(structured: Record<string, unknown> | null, key: string) {
@@ -402,15 +452,14 @@ function getList(structured: Record<string, unknown> | null, key: string) {
   return value.map((item) => String(item)).join(", ");
 }
 
-function getLessons(structured: Record<string, unknown> | null) {
+function getLessonsList(structured: Record<string, unknown> | null): string[] {
   const value = structured?.lessons;
-  if (!Array.isArray(value) || !value.length) return null;
+  if (!Array.isArray(value) || !value.length) return [];
   return value
     .map((item) => {
       if (typeof item === "string") return item;
-      if (item && typeof item === "object" && "lessonText" in item) return String(item.lessonText);
+      if (item && typeof item === "object" && "lessonText" in item) return String((item as { lessonText: unknown }).lessonText);
       return null;
     })
-    .filter(Boolean)
-    .join("; ");
+    .filter((item): item is string => Boolean(item));
 }
