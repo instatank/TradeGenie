@@ -2,8 +2,9 @@ import Image from "next/image";
 import { format } from "date-fns";
 import { Trash2 } from "lucide-react";
 import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, updateTradeAction } from "@/app/actions";
-import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import {
+  conditionTagOptions,
   directions,
   emotionalStates,
   entryGrades,
@@ -14,17 +15,21 @@ import {
   riskPostures,
   tradeStatuses,
 } from "@/lib/constants";
-import { db, getTradeDetail } from "@/lib/data";
+import { db, getActiveSetups, getTradeDetail } from "@/lib/data";
+import { exitEfficiency, tradeProcessScore } from "@/lib/metrics";
 
 export default async function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [trade, mistakeTags, unlinkedExecutions] = await Promise.all([
+  const [trade, mistakeTags, unlinkedExecutions, setups] = await Promise.all([
     getTradeDetail(id),
     db.list("mistakeTags"),
     db.list("rawExecutions"),
+    getActiveSetups(),
   ]);
   if (!trade) throw new Error("Trade not found");
   const sortedMistakeTags = mistakeTags.sort((a, b) => a.label.localeCompare(b.label));
+  const processScore = tradeProcessScore(trade);
+  const efficiency = exitEfficiency(trade);
   const availableExecutions = unlinkedExecutions
     .filter((execution) => !execution.linkedTradeId)
     .sort((a, b) => b.executionDateTime.getTime() - a.executionDateTime.getTime())
@@ -62,8 +67,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <MiniMetric label="Net P&L" value={formatMaybe(trade.netPnl)} tone={Number(trade.netPnl ?? 0) >= 0 ? "good" : "bad"} />
           <MiniMetric label="R multiple" value={formatMaybe(trade.rMultiple)} />
-          <MiniMetric label="Entry" value={formatMaybe(trade.entryPrice)} />
-          <MiniMetric label="Order value" value={formatMaybe(trade.totalOrderValue)} />
+          <MiniMetric label="Process score" value={processScore == null ? "NA" : `${processScore}/100`} tone={processScore == null ? undefined : processScore >= 60 ? "good" : "bad"} />
+          <MiniMetric label="Exit efficiency" value={efficiency == null ? "NA" : `${(efficiency * 100).toFixed(0)}%`} />
           <MiniMetric label="Plan" value={humanize(trade.followedPlan)} />
         </div>
       </section>
@@ -78,13 +83,23 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <SelectField label="Direction" name="direction" options={directions} defaultValue={trade.direction} />
             <SelectField label="Status" name="status" options={tradeStatuses} defaultValue={trade.status} />
             <SelectField label="Market type" name="marketType" options={marketTypes} defaultValue={trade.marketType} />
-            <TextField label="Setup name" name="setupName" defaultValue={trade.setupName} />
+            <label className="field">
+              <span className="label">Playbook setup</span>
+              <select name="setupId" defaultValue={trade.setupId ?? ""} className="input">
+                <option value="">None / freeform</option>
+                {setups.map((setup) => (
+                  <option key={setup.id} value={setup.id}>{setup.name}</option>
+                ))}
+              </select>
+            </label>
+            <TextField label="Setup name (freeform)" name="setupName" defaultValue={trade.setupName} />
           </div>
         </details>
 
         <details className="panel space-y-4" open>
           <summary className="cursor-pointer font-semibold">Subjective entry note</summary>
           <TextAreaField label="Entry thesis" name="entryThesis" defaultValue={trade.entryThesis} rows={4} />
+          <TextAreaField label="Pre-mortem — what was most likely to make this fail?" name="premortem" defaultValue={trade.premortem} rows={2} />
           <div className="grid gap-4 sm:grid-cols-2">
             <TextAreaField label="Invalidation" name="invalidation" defaultValue={trade.invalidation} rows={3} />
             <TextAreaField label="Concern" name="concern" defaultValue={trade.concern} rows={3} />
@@ -93,6 +108,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Confidence score" name="confidenceScore" type="number" defaultValue={trade.confidenceScore} />
             <SelectField label="Entry grade" name="entryGrade" options={entryGrades} defaultValue={trade.entryGrade} />
           </div>
+          <CheckboxGroup label="Market conditions" name="conditions" options={conditionTagOptions} selected={trade.conditions ?? []} />
         </details>
 
         <details className="panel space-y-4">
@@ -102,6 +118,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Stop price" name="stopPrice" type="number" step="0.01" defaultValue={trade.stopPrice} />
             <TextField label="Target price" name="targetPrice" type="number" step="0.01" defaultValue={trade.targetPrice} />
             <TextField label="Exit price" name="exitPrice" type="number" step="0.01" defaultValue={trade.exitPrice} />
+            <TextField label="Best price reached (MFE)" name="mfePrice" type="number" step="0.01" defaultValue={trade.mfePrice} />
+            <TextField label="Worst price reached (MAE)" name="maePrice" type="number" step="0.01" defaultValue={trade.maePrice} />
             <TextField label="Quantity / size" name="quantity" type="number" step="any" defaultValue={trade.quantity} />
             <TextField label="Total order value" name="totalOrderValue" type="number" step="0.01" defaultValue={trade.totalOrderValue} />
             <TextField label="Leverage" name="leverage" type="number" defaultValue={trade.leverage} />
@@ -116,9 +134,14 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
               <div className="text-xs text-forge-muted">R multiple</div>
               <div className="text-lg font-semibold">{trade.rMultiple?.toFixed(2) ?? "NA"}</div>
             </div>
+            <div className="rounded-lg bg-forge-panel p-3">
+              <div className="text-xs text-forge-muted">Exit efficiency</div>
+              <div className="text-lg font-semibold">{efficiency == null ? "NA" : `${(efficiency * 100).toFixed(0)}%`}</div>
+            </div>
           </div>
           <p className="text-sm text-forge-muted">
             Order value is calculated from entry price x quantity when blank. If quantity is blank, it is calculated from order value / entry price.
+            Exit efficiency = how much of the best favorable move (MFE) you captured at exit.
           </p>
         </details>
 

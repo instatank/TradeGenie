@@ -4,6 +4,8 @@ export const navItems = [
   { href: "/daily", label: "Daily" },
   { href: "/calendar", label: "Calendar" },
   { href: "/trades", label: "Trades" },
+  { href: "/playbook", label: "Playbook" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/lessons", label: "Lessons" },
   { href: "/import", label: "Import" },
   { href: "/weekly-review", label: "Weekly Review" },
@@ -22,6 +24,36 @@ export const followedPlanOptions = ["YES", "NO", "PARTIAL", "NA"] as const;
 export const transcriptTypes = ["UNKNOWN", "DAILY_CHECKIN", "TRADE_ENTRY_NOTE", "TRADE_EXIT_REVIEW", "EOD_REVIEW", "WEEKLY_REFLECTION", "PLAYBOOK_NOTE", "GENERAL_LEARNING_NOTE", "MISTAKE_REFLECTION"] as const;
 export const lessonCategories = ["ENTRY_DISCIPLINE", "EXIT_DISCIPLINE", "RISK_MANAGEMENT", "PSYCHOLOGY", "MARKET_CONDITION", "SETUP_SPECIFIC", "PROCESS", "OTHER"] as const;
 export const lessonSourceTypes = ["TRADE", "DAILY_REVIEW", "WEEKLY_REVIEW", "TRANSCRIPT", "MANUAL"] as const;
+export const setupDirectionBiases = ["LONG", "SHORT", "BOTH"] as const;
+
+// Tradezella-style "Condition" tag bucket: the market context a trade was taken in.
+// Lets you later ask "do I only make money on trend days and lose in chop?".
+export const conditionTagOptions = [
+  ["TREND_DAY", "Trend day", "Clear directional trend across the session."],
+  ["RANGE_CHOP", "Range / chop", "Sideways, choppy, mean-reverting conditions."],
+  ["NEWS_DRIVEN", "News driven", "Move driven by a scheduled or breaking news catalyst."],
+  ["HIGH_FUNDING", "High funding", "Funding rate was elevated, raising the cost of holding."],
+  ["LOW_LIQUIDITY", "Low liquidity", "Thin book, wide spreads, weekend or off-hours."],
+  ["HIGH_VOLATILITY", "High volatility", "Large, fast candles and expanded ranges."],
+  ["LOW_VOLATILITY", "Low volatility", "Compressed ranges, slow tape."],
+  ["MAJOR_LEVEL", "At major level", "Trade taken at a significant HTF level."],
+  ["COUNTER_TREND", "Counter trend", "Trade taken against the prevailing trend."],
+  ["BTC_LED", "BTC led", "Move was driven by BTC rather than the instrument itself."],
+] as const;
+
+export const conditionTagValues: string[] = conditionTagOptions.map(([value]) => value);
+
+export function conditionLabel(value: string) {
+  return conditionTagOptions.find(([tag]) => tag === value)?.[1] ?? humanize(value);
+}
+
+// Crypto-relevant 24/7 session buckets (UTC).
+export const sessionLabels: Record<string, string> = {
+  ASIA: "Asia (00–08 UTC)",
+  EU: "Europe (08–13 UTC)",
+  US: "US (13–21 UTC)",
+  LATE: "Late/Asia open (21–24 UTC)",
+};
 
 export function humanize(value: string | null | undefined) {
   if (!value) return "None";

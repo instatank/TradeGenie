@@ -13,6 +13,7 @@ import {
   MarketType,
   ProcessingStatus,
   RiskPosture,
+  SetupDirectionBias,
   TradeStatus,
   TranscriptType,
   TradingMode,
@@ -30,8 +31,32 @@ async function main() {
     }
   }
 
+  if (!(await db.list("setups")).length) {
+    const now = new Date();
+    const setupSeeds = [
+      { name: "Range reclaim", directionBias: SetupDirectionBias.LONG, idealRiskReward: 2, rules: "Price loses a range, sweeps liquidity, then reclaims and holds the prior range low on the retest.", checklist: "Sweep present? Reclaim confirmed? Holding VWAP/range edge on retest?" },
+      { name: "Failed breakout", directionBias: SetupDirectionBias.SHORT, idealRiskReward: 2.5, rules: "Price breaks a key level, fails to hold, and rejects back inside while the broader market is heavy.", checklist: "Clear level? Failure + rejection? BTC/market aligned?" },
+      { name: "Momentum pullback", directionBias: SetupDirectionBias.BOTH, idealRiskReward: 2, rules: "Strong impulse, then a controlled pullback into support/resistance with continuation signs.", checklist: "Trend intact? Pullback orderly? Entry near level, not mid-air?" },
+    ];
+    for (const seed of setupSeeds) {
+      await db.create("setups", {
+        createdAt: now,
+        updatedAt: now,
+        name: seed.name,
+        directionBias: seed.directionBias,
+        rules: seed.rules,
+        checklist: seed.checklist,
+        idealRiskReward: seed.idealRiskReward,
+        notes: null,
+        isActive: true,
+      });
+    }
+  }
+
   if (!(await db.list("trades")).length) {
     const tags = await db.list("mistakeTags");
+    const setups = await db.list("setups");
+    const setupIdByName = new Map(setups.map((setup) => [setup.name, setup.id]));
     const tradeInputs = [
       {
         dateOffset: -6,
@@ -47,11 +72,15 @@ async function main() {
         entryPrice: 104200,
         stopPrice: 103450,
         exitPrice: 105850,
+        mfePrice: 106400,
+        maePrice: 103900,
         quantity: 0.25,
         realizedPnl: 420,
         fees: 18,
         funding: -4,
         followedPlan: FollowedPlan.YES,
+        premortem: "Most likely failure: chasing the reclaim candle instead of waiting for the retest.",
+        conditions: ["TREND_DAY", "MAJOR_LEVEL"],
         lesson: "The best entries this week came after waiting for the retest, not the first breakout candle.",
         mistakes: [],
       },
@@ -69,11 +98,15 @@ async function main() {
         entryPrice: 158,
         stopPrice: 161,
         exitPrice: 151,
+        mfePrice: 149,
+        maePrice: 159.5,
         quantity: 50,
         realizedPnl: 360,
         fees: 12,
         funding: 0,
         followedPlan: FollowedPlan.YES,
+        premortem: "Most likely failure: shorting into a reclaim if BTC turns up.",
+        conditions: ["COUNTER_TREND", "BTC_LED"],
         lesson: "Failed breakouts are cleaner when the broader market is also heavy.",
         mistakes: [],
       },
@@ -91,11 +124,15 @@ async function main() {
         entryPrice: 3720,
         stopPrice: 3680,
         exitPrice: 3695,
+        mfePrice: 3735,
+        maePrice: 3678,
         quantity: 8,
         realizedPnl: -210,
         fees: 15,
         funding: -2,
         followedPlan: FollowedPlan.PARTIAL,
+        premortem: "Most likely failure: entering late and oversizing after missing the first move.",
+        conditions: ["HIGH_VOLATILITY", "COUNTER_TREND"],
         lesson: "Do not increase size just because the first entry was missed.",
         mistakes: ["FOMO_ENTRY", "OVERSIZED", "ENTERED_LATE"],
       },
@@ -153,9 +190,12 @@ async function main() {
         direction: input.direction,
         status: input.status,
         setupName: input.setupName,
+        setupId: setupIdByName.get(input.setupName) ?? null,
         entryThesis: input.entryThesis,
         invalidation: input.invalidation,
         concern: null,
+        premortem: "premortem" in input ? (input as { premortem?: string }).premortem ?? null : null,
+        conditions: "conditions" in input ? (input as { conditions?: string[] }).conditions ?? [] : [],
         emotionalState: input.emotionalState,
         riskPosture: input.riskPosture,
         confidenceScore: null,
@@ -168,6 +208,8 @@ async function main() {
         stopPrice: input.stopPrice ?? null,
         targetPrice: null,
         exitPrice: input.exitPrice ?? null,
+        maePrice: "maePrice" in input ? (input as { maePrice?: number }).maePrice ?? null : null,
+        mfePrice: "mfePrice" in input ? (input as { mfePrice?: number }).mfePrice ?? null : null,
         quantity: orderFields.quantity,
         totalOrderValue: orderFields.totalOrderValue,
         leverage: null,
@@ -242,6 +284,7 @@ async function main() {
       linkedTradeId: null,
       linkedTranscriptId: null,
       isActive: true,
+      isPinned: true,
     });
     await db.create("lessons", {
       createdAt: now,

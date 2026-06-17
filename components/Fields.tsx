@@ -104,6 +104,36 @@ export function BoolSelect({ label, name, defaultValue }: { label: string; name:
   );
 }
 
+export function CheckboxGroup({
+  label,
+  name,
+  options,
+  selected = [],
+}: {
+  label: string;
+  name: string;
+  options: readonly (readonly [string, string, string?])[];
+  selected?: string[];
+}) {
+  const selectedSet = new Set(selected);
+  return (
+    <fieldset className="field">
+      <span className="label">{label}</span>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {options.map(([value, text, description]) => (
+          <label key={value} className="flex items-start gap-2 rounded-md border border-forge-line p-2 text-sm">
+            <input type="checkbox" name={name} value={value} defaultChecked={selectedSet.has(value)} className="mt-1" />
+            <span>
+              <span className="block font-medium">{text}</span>
+              {description ? <span className="text-xs text-forge-muted">{description}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 export function PageTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="mb-5">

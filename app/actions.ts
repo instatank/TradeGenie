@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { endOfDay, format, startOfDay } from "date-fns";
+import { conditionTagValues } from "@/lib/constants";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { defaultPromptTemplates } from "@/lib/prompts";
@@ -23,6 +24,7 @@ import {
   MarketType,
   ProcessingStatus,
   RiskPosture,
+  SetupDirectionBias,
   TradeStatus,
   TranscriptType,
   TradingMode,
@@ -346,6 +348,9 @@ export async function createTradeAction(formData: FormData) {
     status: enumValue(TradeStatus, formData.get("status"), TradeStatus.IDEA),
     entryThesis: toText(formData.get("entryThesis")),
     setupName: toText(formData.get("setupName")),
+    setupId: toText(formData.get("setupId")),
+    premortem: toText(formData.get("premortem")),
+    conditions: cleanConditions(formData.getAll("conditions")),
     invalidation: toText(formData.get("invalidation")),
     concern: toText(formData.get("concern")),
     emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
@@ -373,6 +378,9 @@ export async function updateTradeAction(formData: FormData) {
     direction: enumValue(Direction, formData.get("direction"), Direction.UNKNOWN),
     status: enumValue(TradeStatus, formData.get("status"), TradeStatus.IDEA),
     setupName: toText(formData.get("setupName")),
+    setupId: toText(formData.get("setupId")),
+    premortem: toText(formData.get("premortem")),
+    conditions: cleanConditions(formData.getAll("conditions")),
     entryThesis: toText(formData.get("entryThesis")),
     invalidation: toText(formData.get("invalidation")),
     concern: toText(formData.get("concern")),
@@ -633,6 +641,8 @@ function objectiveNumbers(formData: FormData) {
     stopPrice,
     targetPrice: toNumber(formData.get("targetPrice")),
     exitPrice,
+    maePrice: toNumber(formData.get("maePrice")),
+    mfePrice: toNumber(formData.get("mfePrice")),
     quantity: orderFields.quantity,
     totalOrderValue: orderFields.totalOrderValue,
     leverage: toNumber(formData.get("leverage")),
@@ -642,6 +652,80 @@ function objectiveNumbers(formData: FormData) {
     netPnl: calculateNetPnl(realizedPnl, fees, funding),
     rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
   };
+}
+
+function cleanConditions(values: FormDataEntryValue[]) {
+  const allowed = new Set(conditionTagValues);
+  return values.map(String).filter((value) => allowed.has(value));
+}
+
+export async function createSetupAction(formData: FormData) {
+  const name = toText(formData.get("name"));
+  if (!name) return;
+  const now = new Date();
+  await db.create("setups", {
+    createdAt: now,
+    updatedAt: now,
+    name,
+    directionBias: enumValue(SetupDirectionBias, formData.get("directionBias"), SetupDirectionBias.BOTH),
+    rules: toText(formData.get("rules")),
+    checklist: toText(formData.get("checklist")),
+    idealRiskReward: toNumber(formData.get("idealRiskReward")),
+    notes: toText(formData.get("notes")),
+    isActive: true,
+  });
+  revalidatePath("/playbook");
+  revalidatePath("/trades/new");
+  await redirectBackWithFeedback("Setup added to playbook.", "/playbook");
+}
+
+export async function updateSetupAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const name = toText(formData.get("name"));
+  if (!name) return;
+  await db.update("setups", id, {
+    name,
+    directionBias: enumValue(SetupDirectionBias, formData.get("directionBias"), SetupDirectionBias.BOTH),
+    rules: toText(formData.get("rules")),
+    checklist: toText(formData.get("checklist")),
+    idealRiskReward: toNumber(formData.get("idealRiskReward")),
+    notes: toText(formData.get("notes")),
+    updatedAt: new Date(),
+  });
+  revalidatePath("/playbook");
+  revalidatePath("/trades/new");
+  await redirectBackWithFeedback("Setup updated.", "/playbook");
+}
+
+export async function toggleSetupActiveAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const isActive = formData.get("isActive") === "true";
+  await db.update("setups", id, { isActive: !isActive, updatedAt: new Date() });
+  revalidatePath("/playbook");
+  await redirectBackWithFeedback(isActive ? "Setup archived." : "Setup reactivated.", "/playbook");
+}
+
+export async function deleteSetupAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  await db.deleteWhere("setups", (setup) => setup.id === id);
+  const trades = await db.list("trades");
+  await Promise.all(
+    trades
+      .filter((trade) => trade.setupId === id)
+      .map((trade) => db.update("trades", trade.id, { setupId: null, updatedAt: new Date() })),
+  );
+  revalidatePath("/playbook");
+  revalidatePath("/trades");
+  await redirectBackWithFeedback("Setup deleted.", "/playbook");
+}
+
+export async function toggleLessonPinAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const isPinned = formData.get("isPinned") === "true";
+  await db.update("lessons", id, { isPinned: !isPinned, updatedAt: new Date() });
+  revalidatePath("/lessons");
+  revalidatePath("/trades/new");
+  await redirectBackWithFeedback(isPinned ? "Lesson unpinned." : "Lesson pinned.", "/lessons");
 }
 
 async function createTradeFromStructured(tradeDateTime: Date, structured: StructuredJson) {

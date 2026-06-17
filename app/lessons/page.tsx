@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { format } from "date-fns";
-import { Pencil, Trash2 } from "lucide-react";
-import { addManualLessonAction, deleteLessonAction, toggleLessonActiveAction, updateLessonAction } from "@/app/actions";
+import { Pencil, Pin, Trash2 } from "lucide-react";
+import { addManualLessonAction, deleteLessonAction, toggleLessonActiveAction, toggleLessonPinAction, updateLessonAction } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
@@ -115,6 +115,13 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                   </div>
                 </div>
                 <div className="flex justify-end gap-1">
+                  <form action={toggleLessonPinAction}>
+                    <input type="hidden" name="id" value={lesson.id} />
+                    <input type="hidden" name="isPinned" value={String(Boolean(lesson.isPinned))} />
+                    <button className={`button-secondary min-h-8 px-2 ${lesson.isPinned ? "text-forge-blue" : ""}`} type="submit" title={lesson.isPinned ? "Unpin lesson" : "Pin lesson"} aria-label={lesson.isPinned ? "Unpin lesson" : "Pin lesson"}>
+                      <Pin className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </form>
                   <form action={toggleLessonActiveAction}>
                     <input type="hidden" name="id" value={lesson.id} />
                     <input type="hidden" name="isActive" value={String(lesson.isActive)} />

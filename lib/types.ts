@@ -29,6 +29,7 @@ export const EntryGrade = { A: "A", B: "B", C: "C", NA: "NA" } as const;
 export const FollowedPlan = { YES: "YES", NO: "NO", PARTIAL: "PARTIAL", NA: "NA" } as const;
 export const LessonSourceType = { TRADE: "TRADE", DAILY_REVIEW: "DAILY_REVIEW", WEEKLY_REVIEW: "WEEKLY_REVIEW", TRANSCRIPT: "TRANSCRIPT", MANUAL: "MANUAL" } as const;
 export const LessonCategory = { ENTRY_DISCIPLINE: "ENTRY_DISCIPLINE", EXIT_DISCIPLINE: "EXIT_DISCIPLINE", RISK_MANAGEMENT: "RISK_MANAGEMENT", PSYCHOLOGY: "PSYCHOLOGY", MARKET_CONDITION: "MARKET_CONDITION", SETUP_SPECIFIC: "SETUP_SPECIFIC", PROCESS: "PROCESS", OTHER: "OTHER" } as const;
+export const SetupDirectionBias = { LONG: "LONG", SHORT: "SHORT", BOTH: "BOTH" } as const;
 
 export type TranscriptType = ValueOf<typeof TranscriptType>;
 export type ProcessingStatus = ValueOf<typeof ProcessingStatus>;
@@ -44,6 +45,7 @@ export type EntryGrade = ValueOf<typeof EntryGrade>;
 export type FollowedPlan = ValueOf<typeof FollowedPlan>;
 export type LessonSourceType = ValueOf<typeof LessonSourceType>;
 export type LessonCategory = ValueOf<typeof LessonCategory>;
+export type SetupDirectionBias = ValueOf<typeof SetupDirectionBias>;
 
 type ValueOf<T> = T[keyof T];
 
@@ -98,9 +100,12 @@ export type Trade = {
   direction: Direction;
   status: TradeStatus;
   setupName: string | null;
+  setupId?: string | null;
   entryThesis: string | null;
   invalidation: string | null;
   concern: string | null;
+  premortem?: string | null;
+  conditions?: string[];
   emotionalState: EmotionalState | null;
   riskPosture: RiskPosture | null;
   confidenceScore: number | null;
@@ -113,6 +118,8 @@ export type Trade = {
   stopPrice: number | null;
   targetPrice: number | null;
   exitPrice: number | null;
+  maePrice?: number | null;
+  mfePrice?: number | null;
   quantity: number | null;
   totalOrderValue?: number | null;
   leverage: number | null;
@@ -121,6 +128,19 @@ export type Trade = {
   funding: number | null;
   netPnl: number | null;
   rMultiple: number | null;
+};
+
+export type Setup = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  name: string;
+  directionBias: SetupDirectionBias;
+  rules: string | null;
+  checklist: string | null;
+  idealRiskReward: number | null;
+  notes: string | null;
+  isActive: boolean;
 };
 
 export type MistakeTag = { id: string; name: string; label: string; description: string | null };
@@ -138,6 +158,7 @@ export type Lesson = {
   linkedTradeId: string | null;
   linkedTranscriptId: string | null;
   isActive: boolean;
+  isPinned?: boolean;
 };
 
 export type RawExecution = {

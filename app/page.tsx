@@ -3,21 +3,23 @@ import { format, startOfWeek } from "date-fns";
 import { ArrowRight, Mic, NotebookPen, Plus, Sunset } from "lucide-react";
 import { DashboardCharts } from "@/components/DashboardCharts";
 import { PageTitle } from "@/components/Fields";
-import { db, getLatestLesson, getTradesWithMistakes } from "@/lib/data";
+import { db, getResurfacedLessons, getTradesWithMistakes } from "@/lib/data";
 import {
+  averageProcessScore,
   calculateTotalR,
   calculateWinRate,
   emotionalStateFrequency,
+  fundingSummary,
   getTradePnl,
   mistakeFrequency,
 } from "@/lib/metrics";
 
 export default async function DashboardPage() {
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-  const [trades, journals, latestLesson] = await Promise.all([
+  const [trades, journals, resurfacedLessons] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
-    getLatestLesson(),
+    getResurfacedLessons(3),
   ]);
 
   const weeklyTrades = trades.filter((trade) => trade.tradeDateTime >= weekStart);
@@ -27,6 +29,8 @@ export default async function DashboardPage() {
   const winRate = calculateWinRate(closedTrades);
   const mistakeData = mistakeFrequency(trades);
   const emotionData = emotionalStateFrequency(trades);
+  const processScore = averageProcessScore(closedTrades);
+  const funding = fundingSummary(trades);
   const scoredJournals = journals.filter((journal) => journal.disciplineScore != null).sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 20);
   const disciplineAverage = scoredJournals.length
     ? scoredJournals.reduce((sum, journal) => sum + (journal.disciplineScore ?? 0), 0) / scoredJournals.length
@@ -42,26 +46,42 @@ export default async function DashboardPage() {
       <PageTitle title="Dashboard" subtitle="A quick read on trading behavior, not a command center." />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Trades this week" value={weeklyTrades.length} />
-        <Metric label="Closed trades" value={closedTrades.length} />
+        <Metric label="Process score" value={processScore == null ? "NA" : `${processScore.toFixed(0)}/100`} tone={processScore == null ? undefined : processScore >= 60 ? "good" : "bad"} />
         <Metric label="Net P&L" value={formatMoney(netPnl)} tone={netPnl >= 0 ? "good" : "bad"} />
         <Metric label="Total R" value={totalR == null ? "NA" : totalR.toFixed(2)} />
         <Metric label="Win rate" value={winRate == null ? "NA" : `${(winRate * 100).toFixed(0)}%`} />
+        <Metric label="Trades this week" value={weeklyTrades.length} />
+        <Metric label="Funding drag" value={funding.dragPct == null ? "NA" : `${(funding.dragPct * 100).toFixed(0)}%`} tone={funding.dragPct == null ? undefined : funding.dragPct > 0.15 ? "bad" : "good"} />
         <Metric label="Discipline average" value={disciplineAverage == null ? "NA" : disciplineAverage.toFixed(1)} />
         <Metric label="Most common mistake" value={mistakeData[0]?.label ?? "None yet"} />
-        <Metric label="Latest lesson" value={latestLesson?.lessonText ?? "No lesson yet"} />
       </section>
+      <p className="mt-2 text-xs text-forge-muted">Process score = did you follow your rules, independent of P&amp;L. For your first months this matters more than money. Full breakdowns in <Link href="/analytics" className="text-forge-blue hover:underline">Analytics</Link>.</p>
 
       <section className="mt-5 grid gap-4 lg:grid-cols-[1fr_320px]">
         <DashboardCharts pnlData={pnlData} mistakeData={mistakeData} emotionData={emotionData} />
-        <div className="panel h-fit">
-          <h2 className="mb-3 font-semibold">Today&apos;s actions</h2>
-          <div className="grid gap-2">
-            <Action href="/daily" label="Start daily check-in" icon={<NotebookPen className="h-4 w-4" />} />
-            <Action href="/inbox" label="Add voice transcript" icon={<Mic className="h-4 w-4" />} />
-            <Action href="/trades/new" label="Add quick trade note" icon={<Plus className="h-4 w-4" />} />
-            <Action href="/daily#eod" label="Add EOD review" icon={<Sunset className="h-4 w-4" />} />
+        <div className="h-fit space-y-4">
+          <div className="panel">
+            <h2 className="mb-3 font-semibold">Today&apos;s actions</h2>
+            <div className="grid gap-2">
+              <Action href="/daily" label="Start daily check-in" icon={<NotebookPen className="h-4 w-4" />} />
+              <Action href="/inbox" label="Add voice transcript" icon={<Mic className="h-4 w-4" />} />
+              <Action href="/trades/new" label="Add quick trade note" icon={<Plus className="h-4 w-4" />} />
+              <Action href="/daily#eod" label="Add EOD review" icon={<Sunset className="h-4 w-4" />} />
+            </div>
           </div>
+          {resurfacedLessons.length ? (
+            <div className="panel">
+              <h2 className="mb-3 font-semibold">Active lessons</h2>
+              <ul className="space-y-2 text-sm">
+                {resurfacedLessons.map((lesson) => (
+                  <li key={lesson.id} className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-forge-blue" />
+                    <span>{lesson.lessonText}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </section>
     </main>

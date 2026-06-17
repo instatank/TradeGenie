@@ -13,6 +13,7 @@ import type {
   Lesson,
   RawExecution,
   Screenshot,
+  Setup,
   Trade,
   TradeMistakeWithTag,
   TradeWithMistakes,
@@ -87,6 +88,25 @@ export async function getLatestLesson() {
   return lessons.filter((lesson) => lesson.isActive).sort(descCreated)[0] ?? null;
 }
 
+// Lessons you can't see at decision time are dead weight. Pinned first, then recent.
+export async function getResurfacedLessons(limit = 3) {
+  const lessons = await listRecords("lessons");
+  return lessons
+    .filter((lesson) => lesson.isActive)
+    .sort((a, b) => Number(Boolean(b.isPinned)) - Number(Boolean(a.isPinned)) || descCreated(a, b))
+    .slice(0, limit);
+}
+
+export async function getActiveSetups() {
+  const setups = await listRecords("setups");
+  return setups.filter((setup) => setup.isActive).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getSetupNameMap() {
+  const setups = await listRecords("setups");
+  return new Map(setups.map((setup) => [setup.id, setup.name]));
+}
+
 export async function getTodayJournal(date: Date) {
   const day = startOfDay(date).getTime();
   const journals = await listRecords("dailyJournals");
@@ -117,4 +137,4 @@ function descExecution(a: RawExecution, b: RawExecution) {
 
 export type TradeDetail = NonNullable<Awaited<ReturnType<typeof getTradeDetail>>>;
 export type TranscriptWithLinks = Awaited<ReturnType<typeof getTranscriptsWithLinks>>[number];
-export type { DailyJournal, Lesson, Screenshot, Trade, Transcript };
+export type { DailyJournal, Lesson, Screenshot, Setup, Trade, Transcript };

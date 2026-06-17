@@ -11,6 +11,7 @@ import type {
   MistakeTag,
   RawExecution,
   Screenshot,
+  Setup,
   Trade,
   TradeMistake,
   Transcript,
@@ -23,6 +24,7 @@ export type StoreShape = {
   transcripts: Transcript[];
   dailyJournals: DailyJournal[];
   trades: Trade[];
+  setups: Setup[];
   mistakeTags: MistakeTag[];
   tradeMistakes: TradeMistake[];
   lessons: Lesson[];
@@ -36,6 +38,7 @@ const emptyStore: StoreShape = {
   transcripts: [],
   dailyJournals: [],
   trades: [],
+  setups: [],
   mistakeTags: [],
   tradeMistakes: [],
   lessons: [],
