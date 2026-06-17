@@ -18,6 +18,13 @@ const extractionSchema = z.object({
   riskPosture: z.string().nullable().optional(),
   confidenceScore: z.number().nullable().optional(),
   entryGrade: z.string().nullable().optional(),
+  entryPrice: z.number().nullable().optional(),
+  stopPrice: z.number().nullable().optional(),
+  targetPrice: z.number().nullable().optional(),
+  exitPrice: z.number().nullable().optional(),
+  quantity: z.number().nullable().optional(),
+  leverage: z.number().nullable().optional(),
+  realizedPnl: z.number().nullable().optional(),
   exitReason: z.string().nullable().optional(),
   followedPlan: z.string().nullable().optional(),
   suggestedMistakeTags: z.array(z.string()).default([]),
@@ -67,6 +74,13 @@ const extractionJsonSchema = {
     riskPosture: nullableString,
     confidenceScore: nullableNumberType,
     entryGrade: nullableString,
+    entryPrice: nullableNumberType,
+    stopPrice: nullableNumberType,
+    targetPrice: nullableNumberType,
+    exitPrice: nullableNumberType,
+    quantity: nullableNumberType,
+    leverage: nullableNumberType,
+    realizedPnl: nullableNumberType,
     exitReason: nullableString,
     followedPlan: nullableString,
     suggestedMistakeTags: { type: "array", items: { type: "string" } },
@@ -96,7 +110,9 @@ const extractionJsonSchema = {
   },
   required: [
     "transcriptType", "instrument", "direction", "setupName", "entryThesis", "invalidation",
-    "concern", "emotionalState", "riskPosture", "confidenceScore", "entryGrade", "exitReason",
+    "concern", "emotionalState", "riskPosture", "confidenceScore", "entryGrade",
+    "entryPrice", "stopPrice", "targetPrice", "exitPrice", "quantity", "leverage", "realizedPnl",
+    "exitReason",
     "followedPlan", "suggestedMistakeTags", "lessons", "missingInfo", "tradedToday",
     "followedMaxLoss", "followedMaxTrades", "bestDecision", "worstDecision", "mainEmotion",
     "mainMistake", "oneThingDoneWell", "oneThingToAvoidTomorrow", "disciplineScore", "lesson",
@@ -206,10 +222,14 @@ function mockExtraction(rawText: string, declaredType: string): TranscriptExtrac
     });
   }
 
+  const numbers = extractNumbers(text);
+
   if (isExit) {
     return extractionSchema.parse({
       transcriptType: "TRADE_EXIT_REVIEW",
       instrument,
+      exitPrice: numbers.exitPrice,
+      realizedPnl: numbers.realizedPnl,
       exitReason: sentenceContaining(rawText, ["exit", "closed", "target", "stopped"]),
       followedPlan: text.includes("followed plan") ? "YES" : text.includes("broke plan") || text.includes("did not follow") ? "NO" : "NA",
       emotionalState: emotion,
@@ -232,11 +252,40 @@ function mockExtraction(rawText: string, declaredType: string): TranscriptExtrac
     riskPosture: text.includes("small") || text.includes("reduced") ? "REDUCED" : text.includes("aggressive") ? "AGGRESSIVE" : "NORMAL",
     confidenceScore: findScore(text),
     entryGrade: "NA",
+    entryPrice: numbers.entryPrice,
+    stopPrice: numbers.stopPrice,
+    targetPrice: numbers.targetPrice,
+    leverage: numbers.leverage,
     suggestedMistakeTags: mistakes,
     lessons,
     missingInfo: buildMissingInfo({ instrument, direction, invalidation }),
     confidence: instrument && direction !== "UNKNOWN" ? "MEDIUM" : "LOW",
   });
+}
+
+// Best-effort number capture for the no-API-key dev fallback. The real value
+// comes from the Claude path (driven by the prompt); this just keeps the mock
+// from silently dropping every spoken price.
+function extractNumbers(text: string) {
+  const find = (labels: string[]) => {
+    for (const label of labels) {
+      const match = text.match(new RegExp(`${label}[^0-9$-]{0,12}(-?\\$?[0-9][0-9,]*\\.?[0-9]*)`, "i"));
+      if (match) {
+        const value = Number(match[1].replace(/[$,]/g, ""));
+        if (Number.isFinite(value)) return value;
+      }
+    }
+    return null;
+  };
+  const leverageMatch = text.match(/(\d+(?:\.\d+)?)\s*x\b/i);
+  return {
+    entryPrice: find(["entry", "entered at", "got in at", "bought at", "long at", "short at", "in at"]),
+    stopPrice: find(["stop loss", "stop", "invalidation at"]),
+    targetPrice: find(["target", "take profit", "\\btp\\b"]),
+    exitPrice: find(["exit", "exited at", "closed at", "out at", "sold at", "took profit at"]),
+    realizedPnl: find(["pnl", "p&l", "made", "lost", "profit of", "loss of"]),
+    leverage: leverageMatch ? Number(leverageMatch[1]) : null,
+  };
 }
 
 function findInstrument(rawText: string) {

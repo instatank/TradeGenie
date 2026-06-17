@@ -8,7 +8,7 @@ export type PromptTemplateKey =
 // Bump this when the default templates change in a way that should override
 // previously-saved settings. getSettings() resets stored templates to these
 // defaults when the saved version is older, so improvements actually ship.
-export const PROMPT_TEMPLATES_VERSION = 2;
+export const PROMPT_TEMPLATES_VERSION = 3;
 
 export const defaultPromptTemplates: Record<PromptTemplateKey, string> = {
   tradeEntry: `Extract a TRADE ENTRY note. Return JSON with these fields:
@@ -23,13 +23,20 @@ export const defaultPromptTemplates: Record<PromptTemplateKey, string> = {
 - riskPosture: REDUCED | NORMAL | AGGRESSIVE | UNKNOWN
 - confidenceScore: integer 1-10 if stated, else null
 - entryGrade: A | B | C | NA
+- entryPrice: the entry price as a number if stated, else null
+- stopPrice: the stop / invalidation price as a number if stated, else null
+- targetPrice: the target / take-profit price as a number if stated, else null
+- quantity: position size in units/contracts as a number if stated, else null
+- leverage: leverage as a number (e.g. 10 for "10x") if stated, else null
 - suggestedMistakeTags: array of exact mistake-tag identifiers (usually empty for a fresh entry)
 - lessons: array of { lessonText, category } with category one of ENTRY_DISCIPLINE | RISK_MANAGEMENT | PSYCHOLOGY | PROCESS | OTHER
 - missingInfo: array of field names the trader did not provide
 - confidence: LOW | MEDIUM | HIGH
 
+Numbers: capture prices/size/leverage only when the trader actually says them. Never invent or estimate a number.
+
 Example:
-{"transcriptType":"TRADE_ENTRY_NOTE","instrument":"SOL","direction":"LONG","setupName":"Range reclaim","entryThesis":"Buyers defended the retest of the range low, expecting continuation back to range highs.","invalidation":"A close back inside the range","concern":null,"emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":6,"entryGrade":"NA","suggestedMistakeTags":[],"lessons":[],"missingInfo":["stop price","target"],"confidence":"MEDIUM"}`,
+{"transcriptType":"TRADE_ENTRY_NOTE","instrument":"SOL","direction":"LONG","setupName":"Range reclaim","entryThesis":"Buyers defended the retest of the range low, expecting continuation back to range highs.","invalidation":"A close back inside the range","concern":null,"emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":6,"entryGrade":"NA","entryPrice":142.5,"stopPrice":138,"targetPrice":155,"quantity":null,"leverage":5,"suggestedMistakeTags":[],"lessons":[],"missingInfo":["target"],"confidence":"MEDIUM"}`,
 
   tradeExit: `Extract a TRADE EXIT review. Return JSON with these fields:
 - transcriptType: "TRADE_EXIT_REVIEW"
@@ -37,13 +44,17 @@ Example:
 - exitReason: why the trade was closed (target hit, stopped out, discretionary), else null
 - followedPlan: YES | NO | PARTIAL | NA
 - emotionalState: one allowed emotional-state value (see system instructions)
+- exitPrice: the price the trade was closed at, as a number, if stated, else null
+- realizedPnl: realized profit/loss as a number (negative for a loss) if stated, else null
 - suggestedMistakeTags: array of exact mistake-tag identifiers actually described
 - lesson: the single most important takeaway, else null
 - futureRule: a concrete rule for next time if stated, else null
 - confidence: LOW | MEDIUM | HIGH
 
+Numbers: capture exit price / realized P&L only when the trader actually says them. Never invent a number.
+
 Example:
-{"transcriptType":"TRADE_EXIT_REVIEW","instrument":"BTC","exitReason":"Closed early out of fear before the target.","followedPlan":"PARTIAL","emotionalState":"ANXIOUS","suggestedMistakeTags":["CUT_WINNER_EARLY"],"lesson":"Let the trade reach its planned target instead of reacting to a wick.","futureRule":"No discretionary exits before target unless the invalidation is hit.","confidence":"HIGH"}`,
+{"transcriptType":"TRADE_EXIT_REVIEW","instrument":"BTC","exitReason":"Closed early out of fear before the target.","followedPlan":"PARTIAL","emotionalState":"ANXIOUS","exitPrice":61200,"realizedPnl":-120,"suggestedMistakeTags":["CUT_WINNER_EARLY"],"lesson":"Let the trade reach its planned target instead of reacting to a wick.","futureRule":"No discretionary exits before target unless the invalidation is hit.","confidence":"HIGH"}`,
 
   eodReview: `Extract an END-OF-DAY review. This template also handles pre-session daily check-ins. Return JSON with these fields:
 - transcriptType: "EOD_REVIEW", or "DAILY_CHECKIN" if this is a pre-session plan rather than a recap
@@ -96,8 +107,8 @@ First set transcriptType to exactly one of:
 TRADE_ENTRY_NOTE | TRADE_EXIT_REVIEW | DAILY_CHECKIN | EOD_REVIEW | WEEKLY_REFLECTION | GENERAL_LEARNING_NOTE | UNKNOWN
 
 Then fill ONLY the fields that match that type, leaving everything else null:
-- TRADE_ENTRY_NOTE: instrument, direction (LONG|SHORT|UNKNOWN), setupName, entryThesis, invalidation, concern, emotionalState, riskPosture (REDUCED|NORMAL|AGGRESSIVE|UNKNOWN), confidenceScore (1-10), entryGrade (A|B|C|NA)
-- TRADE_EXIT_REVIEW: instrument, exitReason, followedPlan (YES|NO|PARTIAL|NA), emotionalState, lesson, futureRule
+- TRADE_ENTRY_NOTE: instrument, direction (LONG|SHORT|UNKNOWN), setupName, entryThesis, invalidation, concern, emotionalState, riskPosture (REDUCED|NORMAL|AGGRESSIVE|UNKNOWN), confidenceScore (1-10), entryGrade (A|B|C|NA), entryPrice, stopPrice, targetPrice, quantity, leverage (numbers, only if stated)
+- TRADE_EXIT_REVIEW: instrument, exitReason, followedPlan (YES|NO|PARTIAL|NA), emotionalState, exitPrice, realizedPnl (numbers, only if stated), lesson, futureRule
 - EOD_REVIEW / DAILY_CHECKIN: tradedToday, followedMaxLoss, followedMaxTrades, bestDecision, worstDecision, mainEmotion, mainMistake, oneThingDoneWell, oneThingToAvoidTomorrow, disciplineScore (1-10)
 - Any type: suggestedMistakeTags (exact identifiers), lessons ([{lessonText, category}]), missingInfo, confidence (LOW|MEDIUM|HIGH)
 
