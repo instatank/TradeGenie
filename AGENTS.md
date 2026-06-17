@@ -122,13 +122,13 @@ For UI changes, also smoke-check the affected route on the local dev server.
 
 Use `PENDING_TASKS.md` as the backlog. Current recommended sequence:
 
-1. Firebase persistence + Vercel-safe storage.
-2. Voice note confirmation flow cleanup.
+1. OpenAI → Anthropic transcript backend swap.
+2. Vercel production-branch permanent fix.
 3. Today workspace / dashboard refinement.
 
 ## Known Risks / Gotchas
 
-- Firestore is not currently confirmed configured; local JSON may be the active store.
+- Firestore is configured and confirmed durable in production (service account); local JSON is the dev-only fallback. `storageStatus()` in `lib/store.ts` is the source of truth.
 - Vercel serverless filesystem is not durable, so local JSON and local upload fallback are not production-safe.
 - Firebase Admin/server libraries bypass Firestore security rules; protect service account credentials and use least-privilege IAM where practical.
 - No auth is planned for MVP, so production deployment should be treated as private/personal access unless auth is later added.
