@@ -7,7 +7,7 @@ import { endOfDay, format, startOfDay } from "date-fns";
 import { conditionTagValues } from "@/lib/constants";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
-import { defaultPromptTemplates } from "@/lib/prompts";
+import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
@@ -549,6 +549,7 @@ export async function saveSettingsAction(formData: FormData) {
     aiEnabled: formData.get("aiEnabled") === "on",
     defaultMarketType: String(formData.get("defaultMarketType") ?? "CRYPTO_PERP"),
     defaultSourceTool: String(formData.get("defaultSourceTool") ?? "Voice memo"),
+    promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,
     promptTemplates: {
       tradeEntry: String(formData.get("tradeEntry") ?? defaultPromptTemplates.tradeEntry),
       tradeExit: String(formData.get("tradeExit") ?? defaultPromptTemplates.tradeExit),

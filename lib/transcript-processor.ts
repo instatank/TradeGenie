@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { db } from "@/lib/data";
+import { extractionSystemPrompt, generalExtraction, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
 
 const extractionSchema = z.object({
@@ -50,12 +52,36 @@ export async function structureTranscript(rawText: string, declaredType = "UNKNO
   return mockExtraction(rawText, declaredType);
 }
 
+// Route a declared note type to the single most relevant prompt template.
+// UNKNOWN falls back to a classify-first general prompt instead of sending all
+// templates at once, which keeps the instructions focused and the call cheaper.
+function selectTemplate(declaredType: string, prompts: Record<string, string>): string {
+  const byType: Record<string, PromptTemplateKey> = {
+    TRADE_ENTRY_NOTE: "tradeEntry",
+    TRADE_EXIT_REVIEW: "tradeExit",
+    EOD_REVIEW: "eodReview",
+    DAILY_CHECKIN: "eodReview",
+    WEEKLY_REFLECTION: "weeklyReview",
+    PLAYBOOK_NOTE: "lessonExtraction",
+    GENERAL_LEARNING_NOTE: "lessonExtraction",
+    MISTAKE_REFLECTION: "lessonExtraction",
+  };
+  const key = byType[declaredType];
+  return key ? prompts[key] : generalExtraction;
+}
+
+// Pull the real mistake-tag vocabulary from the store so the model is told the
+// exact identifiers that linkSuggestedMistakes() will match — no hardcoded drift.
+async function mistakeTagReference(): Promise<string> {
+  const tags = await db.list("mistakeTags");
+  if (!tags.length) return "(no mistake tags configured)";
+  return tags.map((tag) => `- ${tag.name} — ${tag.label}`).join("\n");
+}
+
 async function openAiExtraction(rawText: string, declaredType: string, prompts: Record<string, string>) {
-  const prompt = [
-    prompts.tradeEntry,
-    prompts.tradeExit,
-    prompts.eodReview,
-    prompts.lessonExtraction,
+  const systemPrompt = extractionSystemPrompt(await mistakeTagReference());
+  const userPrompt = [
+    selectTemplate(declaredType, prompts),
     "Respect the declared type when it is specific. Only override it when the transcript clearly belongs to another category.",
     "Do not classify an entry note as an exit review merely because the trader mentions where they may exit in the future.",
     `Declared type: ${declaredType}`,
@@ -72,11 +98,8 @@ async function openAiExtraction(rawText: string, declaredType: string, prompts: 
       model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
       response_format: { type: "json_object" },
       messages: [
-        {
-          role: "system",
-          content: "You extract personal trading journal notes. Return strict JSON only. Do not provide financial advice or recommendations.",
-        },
-        { role: "user", content: prompt },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
       temperature: 0.1,
     }),
@@ -245,15 +268,13 @@ function buildConcern(rawText: string) {
 }
 
 function detectEmotion(text: string) {
+  // Maps onto the lean-6 emotional vocabulary the UI and prompts now use.
   if (text.includes("fomo")) return "FOMO";
-  if (text.includes("revenge")) return "REVENGE";
-  if (text.includes("anxious")) return "ANXIOUS";
-  if (text.includes("tilt")) return "TILTED";
-  if (text.includes("bored")) return "BORED";
-  if (text.includes("tired")) return "TIRED";
-  if (text.includes("overconfident")) return "OVERCONFIDENT";
-  if (text.includes("calm")) return "CALM";
-  if (text.includes("sharp")) return "SHARP";
+  if (text.includes("revenge") || text.includes("tilt") || text.includes("frustrat") || text.includes("angry")) return "TILTED";
+  if (text.includes("anxious") || text.includes("nervous") || text.includes("fear")) return "ANXIOUS";
+  if (text.includes("tired") || text.includes("exhaust") || text.includes("sleepy")) return "TIRED";
+  if (text.includes("overconfident") || text.includes("greedy") || text.includes("euphoric")) return "OVERCONFIDENT";
+  if (text.includes("calm") || text.includes("sharp") || text.includes("composed")) return "CALM";
   return "UNKNOWN";
 }
 

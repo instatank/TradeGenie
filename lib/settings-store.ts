@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
-import { defaultPromptTemplates } from "@/lib/prompts";
+import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { getFirestoreDb, usesFirebase } from "@/lib/store";
 
 export type AppSettings = {
   aiEnabled: boolean;
   defaultMarketType: string;
   defaultSourceTool: string;
+  promptTemplatesVersion: number;
   promptTemplates: typeof defaultPromptTemplates;
 };
 
@@ -18,6 +19,7 @@ export const defaultSettings: AppSettings = {
   aiEnabled: true,
   defaultMarketType: "CRYPTO_PERP",
   defaultSourceTool: "Voice memo",
+  promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,
   promptTemplates: defaultPromptTemplates,
 };
 
@@ -45,12 +47,16 @@ export async function saveSettings(settings: AppSettings) {
 }
 
 function mergeSettings(parsed: Partial<AppSettings> | null | undefined): AppSettings {
+  // If the saved templates predate the current version, ignore them and use the
+  // improved defaults — otherwise old thin prompts would shadow the new ones.
+  // A trader's own customizations survive because saving stamps the current version.
+  const templatesAreCurrent = parsed?.promptTemplatesVersion === PROMPT_TEMPLATES_VERSION;
   return {
     ...defaultSettings,
     ...(parsed ?? {}),
-    promptTemplates: {
-      ...defaultPromptTemplates,
-      ...(parsed?.promptTemplates ?? {}),
-    },
+    promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,
+    promptTemplates: templatesAreCurrent
+      ? { ...defaultPromptTemplates, ...(parsed?.promptTemplates ?? {}) }
+      : defaultPromptTemplates,
   };
 }
