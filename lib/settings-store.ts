@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { defaultPromptTemplates } from "@/lib/prompts";
+import { getFirestoreDb, usesFirebase } from "@/lib/store";
 
 export type AppSettings = {
   aiEnabled: boolean;
@@ -9,7 +10,9 @@ export type AppSettings = {
   promptTemplates: typeof defaultPromptTemplates;
 };
 
-const settingsPath = path.join(process.cwd(), "data", "settings.json");
+const SETTINGS_COLLECTION = "appSettings";
+const SETTINGS_DOC_ID = "singleton";
+const localSettingsPath = path.join(process.cwd(), "data", "settings.json");
 
 export const defaultSettings: AppSettings = {
   aiEnabled: true,
@@ -19,23 +22,35 @@ export const defaultSettings: AppSettings = {
 };
 
 export async function getSettings(): Promise<AppSettings> {
+  if (usesFirebase()) {
+    const doc = await getFirestoreDb().collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC_ID).get();
+    const parsed = (doc.exists ? doc.data() : null) as Partial<AppSettings> | null;
+    return mergeSettings(parsed);
+  }
   try {
-    const raw = await readFile(settingsPath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<AppSettings>;
-    return {
-      ...defaultSettings,
-      ...parsed,
-      promptTemplates: {
-        ...defaultPromptTemplates,
-        ...(parsed.promptTemplates ?? {}),
-      },
-    };
+    const raw = await readFile(localSettingsPath, "utf8");
+    return mergeSettings(JSON.parse(raw) as Partial<AppSettings>);
   } catch {
     return defaultSettings;
   }
 }
 
 export async function saveSettings(settings: AppSettings) {
-  await mkdir(path.dirname(settingsPath), { recursive: true });
-  await writeFile(settingsPath, JSON.stringify(settings, null, 2));
+  if (usesFirebase()) {
+    await getFirestoreDb().collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC_ID).set(settings, { merge: true });
+    return;
+  }
+  await mkdir(path.dirname(localSettingsPath), { recursive: true });
+  await writeFile(localSettingsPath, JSON.stringify(settings, null, 2));
+}
+
+function mergeSettings(parsed: Partial<AppSettings> | null | undefined): AppSettings {
+  return {
+    ...defaultSettings,
+    ...(parsed ?? {}),
+    promptTemplates: {
+      ...defaultPromptTemplates,
+      ...(parsed?.promptTemplates ?? {}),
+    },
+  };
 }

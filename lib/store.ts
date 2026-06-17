@@ -50,12 +50,50 @@ const emptyStore: StoreShape = {
 
 const localStorePath = path.join(process.cwd(), "data", "tradeforge-store.json");
 
+// Storage status, single source of truth.
+// - "firestore": all required Firebase Admin credentials are present and valid-shaped.
+// - "local": no Firebase credentials at all; safe only on a developer machine.
+// - "invalid": partially configured — we refuse to proceed silently so we never
+//   pretend to be durable while writing to an ephemeral fallback (or vice versa).
+export type StorageStatus =
+  | { mode: "firestore"; durable: true; source: "service-account" | "application-default" }
+  | { mode: "local"; durable: false }
+  | { mode: "invalid"; durable: false; missing: string[]; message: string };
+
+export function storageStatus(): StorageStatus {
+  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.trim();
+  const adc = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+
+  if (adc && !projectId && !clientEmail && !privateKey) {
+    return { mode: "firestore", durable: true, source: "application-default" };
+  }
+
+  const anyServiceAccount = Boolean(projectId || clientEmail || privateKey);
+  if (anyServiceAccount) {
+    const missing: string[] = [];
+    if (!projectId) missing.push("FIREBASE_PROJECT_ID");
+    if (!clientEmail) missing.push("FIREBASE_CLIENT_EMAIL");
+    if (!privateKey) missing.push("FIREBASE_PRIVATE_KEY");
+    if (missing.length === 0) {
+      return { mode: "firestore", durable: true, source: "service-account" };
+    }
+    return {
+      mode: "invalid",
+      durable: false,
+      missing,
+      message: `Firebase is partially configured. Missing: ${missing.join(", ")}. Set all three or none — never a partial set, otherwise data is unsafe.`,
+    };
+  }
+
+  return { mode: "local", durable: false };
+}
+
 export function usesFirebase() {
-  return Boolean(
-    process.env.FIREBASE_PROJECT_ID ||
-      process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-      process.env.FIREBASE_CLIENT_EMAIL,
-  );
+  const status = storageStatus();
+  if (status.mode === "invalid") throw new Error(status.message);
+  return status.mode === "firestore";
 }
 
 export function newId() {
@@ -159,6 +197,10 @@ async function readLocalStore(): Promise<StoreShape> {
 async function writeLocalStore(store: StoreShape) {
   await mkdir(path.dirname(localStorePath), { recursive: true });
   await writeFile(localStorePath, JSON.stringify(dehydrate(store), null, 2));
+}
+
+export function getFirestoreDb() {
+  return firestore();
 }
 
 function firestore() {
