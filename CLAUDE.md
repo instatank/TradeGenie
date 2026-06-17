@@ -58,6 +58,24 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - Required env: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
   (+ `FIREBASE_STORAGE_BUCKET`). Production is confirmed durable (Firestore service account).
 
+## Capture flow (one screen — the daily loop)
+- `/inbox` is **paste → review → confirm**, all on one screen. Saving a note
+  (`saveTranscriptAction`) **auto-structures it immediately** (no separate "Structure" click).
+- The review card is **editable in place** (`ReviewFields` in `app/inbox/page.tsx`), type-aware
+  for trade / daily / general notes. `confirmTranscriptAction` merges the on-screen edits
+  (`readReviewOverrides`) over the AI draft before writing the record.
+- Confirm writes the final record and **stays on `/inbox`** (no forced second confirmation on
+  the trade page); the confirmed note still links to the saved trade. Default inbox view is
+  **"To review"** (unprocessed + structured).
+- Spoken **numbers are captured**: entry/stop/target/exit price, quantity, leverage, realized
+  P&L flow through extraction → editable card → trade (`createTradeFromStructured` derives
+  netPnl + R-multiple). Strict "only if actually stated, never invent" rule in the prompts.
+
+## Navigation (lean header)
+- Primary nav = the daily loop only: **Today · Capture · Trades · Review** (`primaryNavItems`).
+  Everything else (Calendar, Playbook, Analytics, Lessons, Import, Weekly Review, Settings) is
+  under a **"More"** `<details>` dropdown (`moreNavItems`). Nothing removed.
+
 ## Transcript → AI structuring
 - `lib/prompts.ts`: per-type templates (field spec + enum values + null rule + JSON example).
   Correctness-critical instruction (rules, emotion mapping, **live mistake-tag list from the
@@ -77,6 +95,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   expectancy + setup/session/condition tables moved behind an "Advanced analytics" toggle.
 - Voice-note confirmation: single "Review this draft before saving" card with the confirm CTA
   in its footer; missing-info and link-required surfaced as callouts; color-coded confidence.
+- **Friction overhaul** (see "Capture flow" + "Navigation" above): collapsed the
+  save→structure→confirm→re-fill pipeline into one editable review card with auto-structure on
+  save; taught extraction to capture spoken prices/size/P&L; trimmed the 11-item nav to a
+  4-item daily loop + "More" dropdown.
 - Rewrote + re-routed the extraction prompts (see above).
 - Swapped the transcript backend from OpenAI to the Anthropic SDK with structured outputs
   (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`); prompts carried over unchanged.

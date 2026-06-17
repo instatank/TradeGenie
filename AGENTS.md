@@ -48,7 +48,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 
 - `/`: dashboard
 - `/calendar`: day/week/month activity view
-- `/inbox`: voice/transcript inbox
+- `/inbox`: voice/transcript inbox — one-screen capture (paste → auto-structure → editable review card → confirm)
 - `/daily`: daily check-in and EOD review
 - `/trades`: compact trade log with filters, saved views, calendar range, sorting, pagination
 - `/trades/new`: low-friction quick trade note
@@ -81,7 +81,9 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - double-click row: open trade detail/edit page
   - pencil icon: open detail/edit page
   - bin icon: delete
-- Inbox, Lessons, and Import use compact default rows with full details/actions hidden behind expandable controls.
+- Inbox auto-structures a note on save and shows one editable, type-aware review card; confirming writes the record (with spoken numbers) and stays on the inbox. Default view is "To review".
+- Top nav is lean: primary = Today / Capture / Trades / Review; everything else sits under a "More" dropdown.
+- Lessons and Import use compact default rows with full details/actions hidden behind expandable controls.
 - Trade detail starts with a compact summary and organizes editing fields into collapsible sections.
 - Calendar filtering uses `period=day|week|month` and `date=yyyy-MM-dd`.
 
