@@ -17,16 +17,20 @@ One non-technical discretionary crypto-perp trader. A personal daily-habit journ
 product. No multi-user, auth, payments, broker sync, signals, or financial advice, ever.
 
 ## Working contract (non-negotiable)
-- **Never push to GitHub or deploy to Vercel without an explicit ask for that change.**
-- **Leave `main` untouched.** Develop on the designated `claude/*` feature branch
-  (currently `claude/nifty-meitner-mwr75f`). Create it locally if missing.
+- **`main` is the single working branch _and_ the Vercel production branch.** Commit work
+  directly to `main`; there is no separate `claude/*` feature branch anymore. (Old policy:
+  develop on a feature branch and leave `main` untouched — that has been retired by the owner.)
+- **A push to `main` auto-deploys to production.** So: only push when asked, and never push a
+  red build. Always run `typecheck` + `lint` + `build` (build/route smoke-check for UI) and
+  report failures honestly *before* pushing. If a deploy misbehaves, `git revert` + push to
+  roll back fast — Vercel keeps the last good build if a new one fails to build.
+- **Never push to GitHub (i.e. deploy) without an explicit ask for that change.** Local
+  commits to `main` are fine; the push is the gated step.
 - **Don't revert the owner's changes or unrelated dirty work.**
 - Small, scoped changes, one concern at a time. No broad rewrites unless asked.
 - When something is a real tradeoff or changes the daily workflow, **stop and ask in plain
   English** — don't quietly decide. Default bias: if a thing doesn't earn its place for a
   solo beginner, leave it out and flag it.
-- Before calling work done: `npm run typecheck` and `npm run lint` (build/route smoke-check
-  for UI changes). Report failures honestly.
 
 ## Friction budgets (hard requirements)
 Daily check-in < 60s · quick trade note < 30s · transcript paste/save < 20s · EOD review 2–4 min.
@@ -104,10 +108,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`); prompts carried over unchanged.
 
 ## Open items
-- **Vercel production branch (permanent fix)**: production is currently pinned via a manual
-  "Promote to Production"; the configured Production Branch is still `main`, so a future `main`
-  push would override it. Resolve by merging the durability/lean work into `main` OR flipping
-  the Production Branch — owner's call.
+- **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
+  into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
+  single working branch and the production branch, so every pushed commit auto-deploys. (The
+  old two-agent `claude/*` branches are fully contained in `main` and can be deleted anytime.)
 - **Weekly review limitation**: the extraction schema strips weekly-only fields
   (`summaryText`, `whatImproved`, …), so weekly voice notes mainly yield lessons on the inbox
   path. Richer weekly synthesis lives in the separate weekly-review generator.
