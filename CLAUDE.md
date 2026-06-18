@@ -25,12 +25,12 @@ product. No multi-user, auth, payments, broker sync, signals, or financial advic
 - **`main` is the single working branch _and_ the Vercel production branch.** Commit work
   directly to `main`; there is no separate `claude/*` feature branch anymore. (Old policy:
   develop on a feature branch and leave `main` untouched — that has been retired by the owner.)
-- **A push to `main` auto-deploys to production.** So: only push when asked, and never push a
-  red build. Always run `typecheck` + `lint` + `build` (build/route smoke-check for UI) and
-  report failures honestly *before* pushing. If a deploy misbehaves, `git revert` + push to
-  roll back fast — Vercel keeps the last good build if a new one fails to build.
-- **Never push to GitHub (i.e. deploy) without an explicit ask for that change.** Local
-  commits to `main` are fine; the push is the gated step.
+- **A push to `main` auto-deploys to production.** The owner has standing authorization to
+  push/deploy by default — push when the work is ready *without* asking first. The only hard
+  gate is build health: always run `typecheck` + `lint` + `build` (build/route smoke-check for
+  UI) and **never push a red build**; report failures honestly instead. The owner will say so
+  explicitly when they want to hold off on a push/deploy. If a deploy misbehaves, `git revert`
+  + push to roll back fast — Vercel keeps the last good build if a new one fails to build.
 - **Don't revert the owner's changes or unrelated dirty work.**
 - Small, scoped changes, one concern at a time. No broad rewrites unless asked.
 - When something is a real tradeoff or changes the daily workflow, **stop and ask in plain
