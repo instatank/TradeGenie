@@ -4,6 +4,7 @@ export const primaryNavItems = [
   { href: "/", label: "Today" },
   { href: "/inbox", label: "Capture" },
   { href: "/trades", label: "Trades" },
+  { href: "/assets", label: "Assets" },
   { href: "/daily", label: "Review" },
 ];
 
@@ -32,6 +33,9 @@ export const transcriptTypes = ["UNKNOWN", "DAILY_CHECKIN", "TRADE_ENTRY_NOTE", 
 export const lessonCategories = ["ENTRY_DISCIPLINE", "EXIT_DISCIPLINE", "RISK_MANAGEMENT", "PSYCHOLOGY", "MARKET_CONDITION", "SETUP_SPECIFIC", "PROCESS", "OTHER"] as const;
 export const lessonSourceTypes = ["TRADE", "DAILY_REVIEW", "WEEKLY_REVIEW", "TRANSCRIPT", "MANUAL"] as const;
 export const setupDirectionBiases = ["LONG", "SHORT", "BOTH"] as const;
+
+// Timeframe chip for an asset thread note. GENERAL = no specific timeframe.
+export const assetTimeframes = ["HTF", "MTF", "LTF", "GENERAL"] as const;
 
 // Merged mind-state field: replaces both currentStates (9) and emotionalStates (11).
 // Old stored values (SHARP, DISTRACTED, BORED, REVENGE, UNKNOWN) still display via humanize().

@@ -5,6 +5,8 @@ import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import type {
+  Asset,
+  AssetNote,
   DailyJournal,
   ImportBatch,
   Lesson,
@@ -32,6 +34,8 @@ export type StoreShape = {
   importBatches: ImportBatch[];
   screenshots: Screenshot[];
   weeklyReviews: WeeklyReview[];
+  assets: Asset[];
+  assetNotes: AssetNote[];
 };
 
 const emptyStore: StoreShape = {
@@ -46,6 +50,8 @@ const emptyStore: StoreShape = {
   importBatches: [],
   screenshots: [],
   weeklyReviews: [],
+  assets: [],
+  assetNotes: [],
 };
 
 const localStorePath = path.join(process.cwd(), "data", "tradeforge-store.json");

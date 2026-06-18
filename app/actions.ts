@@ -14,6 +14,7 @@ import { newId } from "@/lib/store";
 import { structureTranscript } from "@/lib/transcript-processor";
 import {
   AiConfidence,
+  AssetTimeframe,
   CurrentState,
   Direction,
   EmotionalState,
@@ -689,6 +690,97 @@ function objectiveNumbers(formData: FormData) {
 function cleanConditions(values: FormDataEntryValue[]) {
   const allowed = new Set(conditionTagValues);
   return values.map(String).filter((value) => allowed.has(value));
+}
+
+export async function createAssetAction(formData: FormData) {
+  const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase();
+  if (!symbol) {
+    redirect(withFeedback(await currentPathFallback("/assets"), "Add a symbol to start tracking an asset.", "error"));
+  }
+  const existing = (await db.list("assets")).find((asset) => asset.symbol.toUpperCase() === symbol);
+  if (existing) {
+    redirect(withFeedback(`/assets/${existing.id}`, `Already tracking ${symbol}.`));
+  }
+  const now = new Date();
+  const asset = await db.create("assets", {
+    createdAt: now,
+    updatedAt: now,
+    symbol,
+    marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
+    htfBias: null,
+    ltfBias: null,
+    levels: null,
+    gamePlan: null,
+    isArchived: false,
+  });
+  revalidatePath("/assets");
+  redirect(withFeedback(`/assets/${asset.id}`, `Now tracking ${symbol}.`));
+}
+
+export async function updateAssetAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  await db.update("assets", id, {
+    htfBias: toText(formData.get("htfBias")),
+    ltfBias: toText(formData.get("ltfBias")),
+    levels: toText(formData.get("levels")),
+    gamePlan: toText(formData.get("gamePlan")),
+    marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
+    updatedAt: new Date(),
+  });
+  revalidatePath(`/assets/${id}`);
+  revalidatePath("/assets");
+  await redirectBackWithFeedback("Asset view updated.", `/assets/${id}`);
+}
+
+export async function deleteAssetAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  await db.deleteWhere("assetNotes", (note) => note.assetId === id);
+  await db.deleteWhere("assets", (asset) => asset.id === id);
+  revalidatePath("/assets");
+  redirect(withFeedback("/assets", "Asset removed."));
+}
+
+export async function addAssetNoteAction(formData: FormData) {
+  const assetId = String(formData.get("assetId"));
+  const text = toText(formData.get("text"));
+  if (!text) {
+    redirect(withFeedback(await currentPathFallback(`/assets/${assetId}`), "Write something before saving the note.", "error"));
+  }
+  const now = new Date();
+  await db.create("assetNotes", {
+    createdAt: now,
+    updatedAt: now,
+    assetId,
+    timeframe: optionalEnum(AssetTimeframe, formData.get("timeframe")),
+    text,
+  });
+  // Touch the asset so it bubbles to the top of the index on new activity.
+  await db.update("assets", assetId, { updatedAt: now });
+  revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/assets");
+  await redirectBackWithFeedback("Note added to the thread.", `/assets/${assetId}`);
+}
+
+export async function updateAssetNoteAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const assetId = String(formData.get("assetId"));
+  const text = toText(formData.get("text"));
+  if (!text) return;
+  await db.update("assetNotes", id, {
+    text,
+    timeframe: optionalEnum(AssetTimeframe, formData.get("timeframe")),
+    updatedAt: new Date(),
+  });
+  revalidatePath(`/assets/${assetId}`);
+  await redirectBackWithFeedback("Note updated.", `/assets/${assetId}`);
+}
+
+export async function deleteAssetNoteAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const assetId = String(formData.get("assetId"));
+  await db.deleteWhere("assetNotes", (note) => note.id === id);
+  revalidatePath(`/assets/${assetId}`);
+  await redirectBackWithFeedback("Note deleted.", `/assets/${assetId}`);
 }
 
 export async function createSetupAction(formData: FormData) {

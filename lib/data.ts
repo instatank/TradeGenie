@@ -97,6 +97,41 @@ export async function getResurfacedLessons(limit = 3) {
     .slice(0, limit);
 }
 
+// Index view: every tracked asset with its note count and freshest activity first.
+export async function getAssetsIndex() {
+  const [assets, notes] = await Promise.all([listRecords("assets"), listRecords("assetNotes")]);
+  return assets
+    .map((asset) => {
+      const assetNotes = notes.filter((note) => note.assetId === asset.id);
+      const lastNoteAt = assetNotes.reduce<Date | null>(
+        (latest, note) => (!latest || note.createdAt > latest ? note.createdAt : latest),
+        null,
+      );
+      const lastActivity = lastNoteAt && lastNoteAt > asset.updatedAt ? lastNoteAt : asset.updatedAt;
+      return { ...asset, noteCount: assetNotes.length, lastActivity };
+    })
+    .sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime());
+}
+
+// Full tracker workspace: the asset header, its append-only thread (newest first),
+// and any trades logged on the same symbol so the page ties back to real trades.
+export async function getAssetWorkspace(id: string) {
+  const [asset, notes, trades] = await Promise.all([
+    getRecord("assets", id),
+    listRecords("assetNotes"),
+    listRecords("trades"),
+  ]);
+  if (!asset) return null;
+  const symbol = asset.symbol.toUpperCase();
+  return {
+    ...asset,
+    notes: notes.filter((note) => note.assetId === id).sort(descCreated),
+    relatedTrades: trades
+      .filter((trade) => trade.instrument.toUpperCase().includes(symbol))
+      .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime()),
+  };
+}
+
 export async function getActiveSetups() {
   const setups = await listRecords("setups");
   return setups.filter((setup) => setup.isActive).sort((a, b) => a.name.localeCompare(b.name));
@@ -135,6 +170,8 @@ function descExecution(a: RawExecution, b: RawExecution) {
   return b.executionDateTime.getTime() - a.executionDateTime.getTime();
 }
 
+export type AssetIndexRow = Awaited<ReturnType<typeof getAssetsIndex>>[number];
+export type AssetWorkspace = NonNullable<Awaited<ReturnType<typeof getAssetWorkspace>>>;
 export type TradeDetail = NonNullable<Awaited<ReturnType<typeof getTradeDetail>>>;
 export type TranscriptWithLinks = Awaited<ReturnType<typeof getTranscriptsWithLinks>>[number];
 export type { DailyJournal, Lesson, Screenshot, Setup, Trade, Transcript };

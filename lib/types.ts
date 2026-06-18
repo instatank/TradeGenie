@@ -30,6 +30,7 @@ export const FollowedPlan = { YES: "YES", NO: "NO", PARTIAL: "PARTIAL", NA: "NA"
 export const LessonSourceType = { TRADE: "TRADE", DAILY_REVIEW: "DAILY_REVIEW", WEEKLY_REVIEW: "WEEKLY_REVIEW", TRANSCRIPT: "TRANSCRIPT", MANUAL: "MANUAL" } as const;
 export const LessonCategory = { ENTRY_DISCIPLINE: "ENTRY_DISCIPLINE", EXIT_DISCIPLINE: "EXIT_DISCIPLINE", RISK_MANAGEMENT: "RISK_MANAGEMENT", PSYCHOLOGY: "PSYCHOLOGY", MARKET_CONDITION: "MARKET_CONDITION", SETUP_SPECIFIC: "SETUP_SPECIFIC", PROCESS: "PROCESS", OTHER: "OTHER" } as const;
 export const SetupDirectionBias = { LONG: "LONG", SHORT: "SHORT", BOTH: "BOTH" } as const;
+export const AssetTimeframe = { HTF: "HTF", MTF: "MTF", LTF: "LTF", GENERAL: "GENERAL" } as const;
 
 export type TranscriptType = ValueOf<typeof TranscriptType>;
 export type ProcessingStatus = ValueOf<typeof ProcessingStatus>;
@@ -46,6 +47,7 @@ export type FollowedPlan = ValueOf<typeof FollowedPlan>;
 export type LessonSourceType = ValueOf<typeof LessonSourceType>;
 export type LessonCategory = ValueOf<typeof LessonCategory>;
 export type SetupDirectionBias = ValueOf<typeof SetupDirectionBias>;
+export type AssetTimeframe = ValueOf<typeof AssetTimeframe>;
 
 type ValueOf<T> = T[keyof T];
 
@@ -159,6 +161,32 @@ export type Lesson = {
   linkedTranscriptId: string | null;
   isActive: boolean;
   isPinned?: boolean;
+};
+
+// A tracked asset is a living page per symbol (e.g. BTC, HYPE). The header fields
+// below are the always-current "glance" view that the owner edits in place; the
+// running history of dated thoughts lives in AssetNote (append-only thread).
+export type Asset = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  symbol: string;
+  marketType: MarketType;
+  htfBias: string | null;
+  ltfBias: string | null;
+  levels: string | null;
+  gamePlan: string | null;
+  isArchived: boolean;
+};
+
+// One dated entry in an asset's running thread — a free-form thought dump.
+export type AssetNote = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  assetId: string;
+  timeframe: AssetTimeframe | null;
+  text: string;
 };
 
 export type RawExecution = {
