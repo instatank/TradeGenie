@@ -9,6 +9,7 @@ import {
   updateAssetAction,
   updateAssetNoteAction,
 } from "@/app/actions";
+import { AssetNoteComposer } from "@/components/AssetNoteComposer";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { assetTimeframes, humanize, marketTypes } from "@/lib/constants";
 import { getAssetWorkspace } from "@/lib/data";
@@ -81,21 +82,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
         {/* The thread — append-only running thought log, newest first. */}
         <div className="space-y-4">
-          <form action={addAssetNoteAction} className="panel space-y-3">
-            <h2 className="font-semibold">Add to the thread</h2>
-            <TextAreaField
-              label="What are you thinking right now?"
-              name="text"
-              required
-              rows={6}
-              placeholder="Dump your thought process — analysis, what changed, what you're watching for. Free-form."
-            />
-            <div className="grid gap-3 sm:grid-cols-[200px_auto] sm:items-end">
-              <SelectField label="Timeframe (optional)" name="timeframe" options={assetTimeframes} includeBlank />
-              <button className="button" type="submit">Add note</button>
-            </div>
-            <input type="hidden" name="assetId" value={asset.id} />
-          </form>
+          <AssetNoteComposer assetId={asset.id} addAction={addAssetNoteAction} />
 
           <div className="space-y-3">
             {asset.notes.map((note) => (

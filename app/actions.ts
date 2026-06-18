@@ -8,6 +8,7 @@ import { conditionTagValues } from "@/lib/constants";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
+import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
@@ -738,6 +739,12 @@ export async function deleteAssetAction(formData: FormData) {
   await db.deleteWhere("assets", (asset) => asset.id === id);
   revalidatePath("/assets");
   redirect(withFeedback("/assets", "Asset removed."));
+}
+
+// Called from the asset-note composer (client) to tidy a raw thought-dump.
+// Returns the structured text for in-place review; nothing is saved here.
+export async function structureAssetNoteDraftAction(rawText: string) {
+  return structureAssetNote(typeof rawText === "string" ? rawText : "");
 }
 
 export async function addAssetNoteAction(formData: FormData) {
