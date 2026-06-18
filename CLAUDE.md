@@ -6,9 +6,14 @@ Update it when architecture, lean defaults, the working contract, or open items 
 ## Source of truth (read in this order)
 1. **`PROJECT_BRIEF.md`** — the owner's vision, friction budgets, lean defaults, non-goals.
    **This wins all conflicts.** When unsure, optimize for its goals, not feature completeness.
-2. **`AGENTS.md`** — stack, file map, product areas, commands, deployment workflow.
-3. **`PENDING_TASKS.md`** — backlog.
-4. This file — the working contract + a log of decisions made during active development.
+2. **`DayOS_cheatsheet.md`** — taste, UX patterns, trimming/minimalism principles, AI patterns
+   carried over from the owner's previous journaling app (DayOS). The **founder** and
+   **working principles** sections are hard rules for collaboration; the UX/trimming sections
+   are strong defaults; the AI section is directional, not prescriptive. Don't port DayOS code
+   or architecture — this is about taste and scar tissue, not implementation.
+3. **`AGENTS.md`** — stack, file map, product areas, commands, deployment workflow.
+4. **`PENDING_TASKS.md`** — backlog.
+5. This file — the working contract + a log of decisions made during active development.
 
 Don't duplicate the stack/file/route lists here; they live in `AGENTS.md`.
 
