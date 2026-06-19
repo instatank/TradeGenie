@@ -120,16 +120,28 @@ const extractionJsonSchema = {
   ],
 } as const;
 
-export async function structureTranscript(rawText: string, declaredType = "UNKNOWN") {
+// Whether the structured draft came from the Claude model ("ai") or the offline
+// regex fallback ("basic"). Surfaced to the trader so a silent AI failure (expired
+// key, network blip) can't masquerade as a full-quality extraction.
+export type ExtractionMode = "ai" | "basic";
+
+export async function structureTranscriptWithMode(
+  rawText: string,
+  declaredType = "UNKNOWN",
+): Promise<{ extraction: TranscriptExtraction; mode: ExtractionMode }> {
   const settings = await getSettings();
   if (settings.aiEnabled && process.env.ANTHROPIC_API_KEY) {
     try {
-      return await anthropicExtraction(rawText, declaredType, settings.promptTemplates);
+      return { extraction: await anthropicExtraction(rawText, declaredType, settings.promptTemplates), mode: "ai" };
     } catch {
-      return mockExtraction(rawText, declaredType);
+      return { extraction: mockExtraction(rawText, declaredType), mode: "basic" };
     }
   }
-  return mockExtraction(rawText, declaredType);
+  return { extraction: mockExtraction(rawText, declaredType), mode: "basic" };
+}
+
+export async function structureTranscript(rawText: string, declaredType = "UNKNOWN") {
+  return (await structureTranscriptWithMode(rawText, declaredType)).extraction;
 }
 
 // Route a declared note type to the single most relevant prompt template.

@@ -69,7 +69,7 @@ vi.mock("next/navigation", () => ({
 
 // Import AFTER the mocks are registered so the actions bind to the in-memory store.
 const actions = await import("@/app/actions");
-const { structureTranscript } = await import("@/lib/transcript-processor");
+const { structureTranscript, structureTranscriptWithMode } = await import("@/lib/transcript-processor");
 
 function form(fields: Record<string, string>) {
   const fd = new FormData();
@@ -212,6 +212,22 @@ describe("confirm: on-screen edits win over the AI draft", () => {
     expect(trade.instrument).toBe("ETH");
     expect(trade.entryThesis).toBe("My corrected thesis");
     expect(trade.direction).toBe("LONG"); // untouched fields keep the AI value
+  });
+});
+
+describe("extraction mode signalling (the 'basic mode' badge)", () => {
+  it("reports 'basic' when there is no API key, and the saved draft records it", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    const { mode } = await structureTranscriptWithMode("Long BTC. Entry 50000.", "TRADE_ENTRY_NOTE");
+    expect(mode).toBe("basic");
+
+    await runRedirecting(() => actions.saveTranscriptAction(form({
+      transcriptType: "TRADE_ENTRY_NOTE",
+      rawText: "Long BTC. Entry 50000.",
+    })));
+    const transcript = store.data.transcripts.at(-1)!;
+    const draft = JSON.parse(transcript.structuredJson!) as { _extractionMode?: string };
+    expect(draft._extractionMode).toBe("basic");
   });
 });
 

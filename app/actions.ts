@@ -12,7 +12,7 @@ import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
-import { structureTranscript } from "@/lib/transcript-processor";
+import { structureTranscriptWithMode } from "@/lib/transcript-processor";
 import {
   AiConfidence,
   AssetTimeframe,
@@ -143,10 +143,10 @@ export async function saveTranscriptAction(formData: FormData) {
   // step — no separate "Structure" click. structureTranscript() never throws
   // (it falls back to a regex mock), so a failure still leaves a usable note.
   if (rawText.trim()) {
-    const extraction = await structureTranscript(rawText, declaredType);
+    const { extraction, mode } = await structureTranscriptWithMode(rawText, declaredType);
     await db.update("transcripts", created.id, {
       transcriptType: transcriptType(extraction.transcriptType),
-      structuredJson: JSON.stringify(extraction, null, 2),
+      structuredJson: JSON.stringify({ ...extraction, _extractionMode: mode }, null, 2),
       processingStatus: ProcessingStatus.STRUCTURED,
       aiConfidence: aiConfidence(extraction.confidence),
       cleanedSummary: buildTranscriptSummary(extraction),
@@ -162,10 +162,10 @@ export async function structureTranscriptAction(formData: FormData) {
   const id = String(formData.get("id"));
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
-  const extraction = await structureTranscript(transcript.rawText, transcript.transcriptType);
+  const { extraction, mode } = await structureTranscriptWithMode(transcript.rawText, transcript.transcriptType);
   await db.update("transcripts", id, {
     transcriptType: transcriptType(extraction.transcriptType),
-    structuredJson: JSON.stringify(extraction, null, 2),
+    structuredJson: JSON.stringify({ ...extraction, _extractionMode: mode }, null, 2),
     processingStatus: ProcessingStatus.STRUCTURED,
     aiConfidence: aiConfidence(extraction.confidence),
     cleanedSummary: buildTranscriptSummary(extraction),
@@ -325,7 +325,9 @@ export async function extractLessonsAction(formData: FormData) {
   const id = String(formData.get("id"));
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
-  const structured = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : await structureTranscript(transcript.rawText, transcript.transcriptType);
+  const structured = transcript.structuredJson
+    ? JSON.parse(transcript.structuredJson) as StructuredJson
+    : (await structureTranscriptWithMode(transcript.rawText, transcript.transcriptType)).extraction as StructuredJson;
   await createLessonsFromStructured(structured, id, transcript.linkedTradeId ?? undefined);
   revalidatePath("/lessons");
   revalidatePath("/inbox");

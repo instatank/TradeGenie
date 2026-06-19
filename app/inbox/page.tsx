@@ -195,10 +195,19 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                       <h3 className="text-sm font-semibold">Review &amp; edit this draft</h3>
                       <p className="mt-1 text-sm text-forge-muted">{destination}</p>
                     </div>
-                    <ConfidenceBadge level={getText(structured, "confidence") ?? transcript.aiConfidence ?? "LOW"} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      {getText(structured, "_extractionMode") === "basic" ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="The AI extractor was unavailable, so this draft was structured with the basic offline parser. Check the fields carefully.">
+                          Basic mode
+                        </span>
+                      ) : null}
+                      <ConfidenceBadge level={getText(structured, "confidence") ?? transcript.aiConfidence ?? "LOW"} />
+                    </div>
                   </div>
 
-                  {getText(structured, "confidence") === "LOW" || (transcript.aiConfidence === "LOW" && !getText(structured, "confidence")) ? (
+                  {getText(structured, "_extractionMode") === "basic" ? (
+                    <p className="mt-2 text-xs text-amber-700">Structured offline (basic mode) — the AI extractor wasn’t available, so this is a rough draft. Read every field before confirming.</p>
+                  ) : getText(structured, "confidence") === "LOW" || (transcript.aiConfidence === "LOW" && !getText(structured, "confidence")) ? (
                     <p className="mt-2 text-xs text-amber-700">Low confidence — read the fields carefully and fix anything below before confirming.</p>
                   ) : null}
 

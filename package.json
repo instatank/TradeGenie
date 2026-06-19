@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:extraction": "tsx scripts/eval-extraction.ts",
     "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
