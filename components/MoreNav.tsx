@@ -39,7 +39,7 @@ export function MoreNav({ items }: { items: { href: string; label: string }[] })
         <ChevronDown className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       {open ? (
-        <div className="absolute left-0 z-10 mt-1 flex w-44 flex-col rounded-md border border-forge-line bg-white p-1 shadow-lg">
+        <div className="absolute right-0 z-40 mt-1 flex w-44 flex-col rounded-md border border-forge-line bg-white p-1 shadow-lg">
           {items.map((item) => (
             <Link
               key={item.href}

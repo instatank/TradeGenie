@@ -23,6 +23,24 @@ button {
   font: inherit;
 }
 
+/* Phone-only adjustments (the bottom tab bar lives below lg = 1024px). */
+@media (max-width: 1023px) {
+  /* Keep the fixed bottom tab bar from covering the last bit of any page. */
+  body {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+
+  /* iOS auto-zooms when a focused input's font is < 16px; bump just the controls
+     so focusing a field on a phone no longer jumps the whole page. */
+  .input,
+  .textarea,
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
 @layer components {
   .page-shell {
     @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8;

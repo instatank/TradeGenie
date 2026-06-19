@@ -1,15 +1,23 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { BookOpenCheck, Search } from "lucide-react";
 import { ActionFeedback } from "@/components/ActionFeedback";
 import { MoreNav } from "@/components/MoreNav";
+import { MobileNav } from "@/components/MobileNav";
 import { moreNavItems, primaryNavItems } from "@/lib/constants";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "TradeGenie",
   description: "A low-friction personal trading journal and learning system.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+  width: "device-width",
+  initialScale: 1,
+  // No maximumScale — leave pinch-zoom enabled for accessibility.
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -22,13 +30,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="border-b border-forge-line bg-white">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <Link href="/" className="flex items-center gap-2">
-                <BookOpenCheck className="h-5 w-5 text-forge-green" aria-hidden="true" />
-                <span className="flex flex-col leading-tight">
-                  <span className="text-lg font-semibold">TradeGenie</span>
-                  <span className="text-xs font-medium text-forge-muted">magic journal</span>
-                </span>
-              </Link>
+              <div className="flex items-center justify-between gap-2">
+                <Link href="/" className="flex items-center gap-2">
+                  <BookOpenCheck className="h-5 w-5 text-forge-green" aria-hidden="true" />
+                  <span className="flex flex-col leading-tight">
+                    <span className="text-lg font-semibold">TradeGenie</span>
+                    <span className="text-xs font-medium text-forge-muted">magic journal</span>
+                  </span>
+                </Link>
+                {/* On phones the daily-loop tabs live in the bottom bar; this keeps
+                    the secondary ("More") destinations reachable from the header. */}
+                <div className="lg:hidden">
+                  <MoreNav items={moreNavItems} />
+                </div>
+              </div>
               <form action="/search" className="relative w-full lg:max-w-md">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-forge-muted" aria-hidden="true" />
                 <input
@@ -39,7 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 />
               </form>
             </div>
-            <nav className="flex flex-wrap items-center gap-1 pb-1">
+            <nav className="hidden flex-wrap items-center gap-1 pb-1 lg:flex">
               {primaryNavItems.map((item) => (
                 <Link
                   key={item.href}
@@ -54,6 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
         {children}
+        <MobileNav items={primaryNavItems} />
       </body>
     </html>
   );
