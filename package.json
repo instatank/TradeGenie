@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:extraction": "tsx scripts/eval-extraction.ts",
+    "smoke": "tsx scripts/smoke-routes.ts",
     "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {

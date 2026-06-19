@@ -106,10 +106,14 @@ fast test loop, since it costs tokens):
   the simple cases, so the no-API-key dev experience doesn't diverge from production.
 
 #### Tier 4 — One end-to-end smoke (do fourth; cheap insurance)
-A single Playwright script over the **daily loop** against `next dev` + local store: open Capture
-→ paste a note → see the review card → confirm → see it in Trades → open Today and see it
-reflected. This catches the "whole thing is broken" class of failure that unit tests miss. Keep
-it to **one happy-path flow**, not a suite.
+A smoke that catches the "whole thing is broken" class of failure unit tests miss.
+**Implemented as a headless route smoke** (`npm run smoke`, `scripts/smoke-routes.ts`): it boots
+the real built app (`next start`) and requests every primary page, asserting none returns a 5xx —
+catching server-component render errors, bad imports, and top-level throws. Wired into CI after
+the build. (A browser-based Playwright flow was the original idea, but this repo's remote dev
+sandbox blocks the Playwright browser CDN and can't host a long-lived server; the headless smoke
+gives the same "a page is broken" signal, runs in CI and locally, and needs no browser. A full
+click-through Playwright test can still be added later on a machine with browser access.)
 
 #### Tier 5 — Durability tests (do alongside Tier 2)
 `lib/store.ts` is the data-safety contract; test it directly:

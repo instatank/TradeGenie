@@ -21,3 +21,6 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
+      # Route smoke needs the build output; boots `next start` and checks every
+      # page renders (no 5xx). Runs on the CI runner, not in restricted sandboxes.
+      - run: npm run smoke

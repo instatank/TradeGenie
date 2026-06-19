@@ -4,11 +4,17 @@ Working backlog for TradeGenie, ordered by practical benefit for daily use.
 For the working contract and a log of what changed, see `CLAUDE.md`.
 
 ## Recently completed
-- **Test foundation (Phase 0+1)** — Vitest harness + CI (`.github/workflows/ci.yml` runs
-  typecheck/lint/test/build on every push). `tests/metrics.test.ts` locks down the P&L / R /
-  win-rate / expectancy / process-score / funding-drag / leak-detection math (41 tests). See
-  `EVALUATION_PLAN.md` for the remaining tiers (capture→record integration, AI extraction eval,
-  E2E smoke, durability).
+- **Test foundation (Phases 0–4)** — Vitest + CI (`.github/workflows/ci.yml` runs
+  typecheck/lint/test/build/smoke on every push). `tests/metrics.test.ts` locks the P&L / R /
+  process-score / leak math; `tests/actions.test.ts` covers the capture→record pipeline
+  (entry→trade, exit close + R/PnL, EOD dedupe, edits-win, never-invent, phantom-trade
+  regression); `tests/store.test.ts` covers durability (storageStatus/usesFirebase, Date
+  round-trip, backup coverage). `npm run eval:extraction` is the AI extraction eval harness;
+  `npm run smoke` boots the app and checks every route renders. 56 unit/integration tests.
+- **Fixes from the eval pass** — guarded `confirmTranscriptAction` so exit/EOD/daily/weekly
+  notes never spawn a phantom trade; surfaced a "Basic mode" badge when AI extraction falls back
+  to the offline parser; `/api/export` now derives its collection list from the store, so the
+  asset tracker (`assets`/`assetNotes`) — previously **missing from every backup** — is included.
 - **Durable persistence** — Firestore wired for dev + Vercel; fail-loud on partial config.
 - **Backup/export** — one-click full JSON export at `/api/export`; storage banner on `/settings`.
 - **Compact expandable rows** — Inbox, Lessons, Import.

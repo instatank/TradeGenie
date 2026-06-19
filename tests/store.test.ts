@@ -58,6 +58,21 @@ describe("storageStatus / usesFirebase (the durability source of truth)", () => 
   });
 });
 
+describe("backup coverage (no collection silently left out)", () => {
+  it("collectionNames includes every collection the store can hold", async () => {
+    const { collectionNames } = await import("@/lib/store");
+    // The asset tracker (assets/assetNotes) was once missing from /api/export;
+    // this guards against any future collection being dropped from backups.
+    for (const required of [
+      "transcripts", "dailyJournals", "trades", "setups", "mistakeTags",
+      "tradeMistakes", "lessons", "rawExecutions", "importBatches", "screenshots",
+      "weeklyReviews", "assets", "assetNotes",
+    ]) {
+      expect(collectionNames).toContain(required);
+    }
+  });
+});
+
 describe("local store round-trip preserves Date types through JSON", () => {
   const saved: Record<string, string | undefined> = {};
   const originalCwd = process.cwd();

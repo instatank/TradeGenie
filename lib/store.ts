@@ -54,6 +54,10 @@ const emptyStore: StoreShape = {
   assetNotes: [],
 };
 
+// Single source of truth for "every collection that exists" — derived from the
+// empty store so a new collection can't be silently left out of backups/exports.
+export const collectionNames = Object.keys(emptyStore) as CollectionName[];
+
 const localStorePath = path.join(process.cwd(), "data", "tradeforge-store.json");
 
 // Storage status, single source of truth.

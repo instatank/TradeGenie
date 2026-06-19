@@ -2,21 +2,12 @@ import { NextResponse } from "next/server";
 import { format } from "date-fns";
 import { db } from "@/lib/data";
 import { getSettings } from "@/lib/settings-store";
-import { storageStatus, type CollectionName } from "@/lib/store";
+import { collectionNames, storageStatus } from "@/lib/store";
 
-const COLLECTIONS: CollectionName[] = [
-  "transcripts",
-  "dailyJournals",
-  "trades",
-  "setups",
-  "mistakeTags",
-  "tradeMistakes",
-  "lessons",
-  "rawExecutions",
-  "importBatches",
-  "screenshots",
-  "weeklyReviews",
-];
+// Derive the backup's collection list from the store itself so new collections
+// (e.g. assets/assetNotes) are always included — a hand-maintained list here had
+// silently dropped the asset tracker from every export.
+const COLLECTIONS = collectionNames;
 
 export const dynamic = "force-dynamic";
 
