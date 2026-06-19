@@ -4,6 +4,11 @@ Working backlog for TradeGenie, ordered by practical benefit for daily use.
 For the working contract and a log of what changed, see `CLAUDE.md`.
 
 ## Recently completed
+- **Test foundation (Phase 0+1)** — Vitest harness + CI (`.github/workflows/ci.yml` runs
+  typecheck/lint/test/build on every push). `tests/metrics.test.ts` locks down the P&L / R /
+  win-rate / expectancy / process-score / funding-drag / leak-detection math (41 tests). See
+  `EVALUATION_PLAN.md` for the remaining tiers (capture→record integration, AI extraction eval,
+  E2E smoke, durability).
 - **Durable persistence** — Firestore wired for dev + Vercel; fail-loud on partial config.
 - **Backup/export** — one-click full JSON export at `/api/export`; storage banner on `/settings`.
 - **Compact expandable rows** — Inbox, Lessons, Import.
