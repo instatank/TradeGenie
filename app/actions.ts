@@ -35,6 +35,21 @@ import {
 
 type StructuredJson = Record<string, unknown>;
 
+// Review/journal note types must never spawn a fresh trade from a bare instrument
+// mention. In particular an exit review with no linked entry would otherwise create
+// a duplicate/phantom trade instead of being treated as an exit (the UI asks the
+// trader to link it first). Entry-like notes still auto-create via the explicit
+// TRADE_ENTRY_NOTE branch, and a stray instrument in a general/unknown note still
+// becomes a trade idea.
+function autoCreatesTradeFromInstrument(type: TranscriptType) {
+  return (
+    type !== TranscriptType.TRADE_EXIT_REVIEW &&
+    type !== TranscriptType.EOD_REVIEW &&
+    type !== TranscriptType.DAILY_CHECKIN &&
+    type !== TranscriptType.WEEKLY_REFLECTION
+  );
+}
+
 function withFeedback(target: string, message: string, type = "success") {
   const url = new URL(target, "http://tradeforge.local");
   url.searchParams.set("feedback", message);
@@ -172,7 +187,7 @@ export async function confirmTranscriptAction(formData: FormData) {
   let linkedTradeId = transcript.linkedTradeId;
   let linkedDailyJournalId = transcript.linkedDailyJournalId;
 
-  if (type === "TRADE_ENTRY_NOTE" || (structured.instrument && !linkedTradeId && type !== "EOD_REVIEW")) {
+  if (type === "TRADE_ENTRY_NOTE" || (structured.instrument && !linkedTradeId && autoCreatesTradeFromInstrument(type))) {
     const trade = await createTradeFromStructured(transcript.transcriptDateTime, structured);
     linkedTradeId = trade.id;
     await linkSuggestedMistakes(trade.id, structured.suggestedMistakeTags);
