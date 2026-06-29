@@ -17,6 +17,8 @@ export type MetricTrade = {
   exitPrice?: number | null;
   maePrice?: number | null;
   mfePrice?: number | null;
+  quantity?: number | null;
+  totalOrderValue?: number | null;
   realizedPnl?: number | null;
   fees?: number | null;
   funding?: number | null;
@@ -55,6 +57,47 @@ export function calculateRMultiple(args: {
   const reward = direction === "SHORT" ? entryPrice - exitPrice : exitPrice - entryPrice;
   const value = reward / risk;
   return Number.isFinite(value) ? value : null;
+}
+
+// Gross realized P&L derived from price movement and position size, so a trade
+// with entry, exit, and either quantity or order value computes its P&L even when
+// the trader never typed a realized number. Direction sets the sign; size can come
+// from quantity directly or be backed out of order value (notional / entry price).
+export function calculateRealizedPnl(args: {
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  quantity?: number | null;
+  totalOrderValue?: number | null;
+  direction?: string | null;
+}): number | null {
+  const { entryPrice, exitPrice, direction } = args;
+  if (entryPrice == null || exitPrice == null || !direction || direction === "UNKNOWN") return null;
+  let quantity = args.quantity ?? null;
+  if (quantity == null && args.totalOrderValue != null && entryPrice) {
+    quantity = args.totalOrderValue / entryPrice;
+  }
+  if (quantity == null) return null;
+  const perUnit = direction === "SHORT" ? entryPrice - exitPrice : exitPrice - entryPrice;
+  const value = perUnit * quantity;
+  return Number.isFinite(value) ? roundTo(value, 2) : null;
+}
+
+// One intuitive resolve for the objective numbers: an explicitly entered realized
+// P&L wins; otherwise derive it from entry/exit/size. Then net out fees and funding,
+// each treated as 0 when left blank. Returns nulls only when there's truly nothing
+// to compute from.
+export function resolveObjectivePnl(args: {
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  quantity?: number | null;
+  totalOrderValue?: number | null;
+  direction?: string | null;
+  realizedPnl?: number | null;
+  fees?: number | null;
+  funding?: number | null;
+}): { realizedPnl: number | null; netPnl: number | null } {
+  const realizedPnl = args.realizedPnl ?? calculateRealizedPnl(args);
+  return { realizedPnl, netPnl: calculateNetPnl(realizedPnl, args.fees, args.funding) };
 }
 
 export function calculateOrderFields(args: {
@@ -175,7 +218,18 @@ export function weekBounds(date = new Date()) {
 
 export function getTradePnl(trade: MetricTrade) {
   if (trade.netPnl != null) return trade.netPnl;
-  return calculateNetPnl(trade.realizedPnl, trade.fees, trade.funding);
+  // Fall back to a derived realized P&L (from entry/exit/size) so older trades and
+  // analytics stay correct even if netPnl was never persisted.
+  return resolveObjectivePnl({
+    entryPrice: trade.entryPrice,
+    exitPrice: trade.exitPrice,
+    quantity: trade.quantity,
+    totalOrderValue: trade.totalOrderValue,
+    direction: trade.direction,
+    realizedPnl: trade.realizedPnl,
+    fees: trade.fees,
+    funding: trade.funding,
+  }).netPnl;
 }
 
 // --- Process score: did I follow my own rules, independent of P&L? ---

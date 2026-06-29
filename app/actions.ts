@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { endOfDay, format, startOfDay } from "date-fns";
 import { conditionTagValues } from "@/lib/constants";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
-import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
+import { calculateOrderFields, calculateRMultiple, resolveObjectivePnl, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
@@ -181,7 +181,17 @@ export async function confirmTranscriptAction(formData: FormData) {
   if (type === "TRADE_EXIT_REVIEW" && linkedTradeId) {
     const existingTrade = await db.get("trades", linkedTradeId);
     const exitPrice = nullableNumber(structured.exitPrice);
-    const realizedPnl = nullableNumber(structured.realizedPnl);
+    const effectiveExit = exitPrice ?? existingTrade?.exitPrice ?? null;
+    const objective = resolveObjectivePnl({
+      entryPrice: existingTrade?.entryPrice,
+      exitPrice: effectiveExit,
+      quantity: existingTrade?.quantity,
+      totalOrderValue: existingTrade?.totalOrderValue,
+      direction: existingTrade?.direction,
+      realizedPnl: nullableNumber(structured.realizedPnl) ?? existingTrade?.realizedPnl,
+      fees: existingTrade?.fees,
+      funding: existingTrade?.funding,
+    });
     await db.update("trades", linkedTradeId, {
       status: TradeStatus.CLOSED,
       exitReason: nullableString(structured.exitReason),
@@ -189,7 +199,8 @@ export async function confirmTranscriptAction(formData: FormData) {
       emotionalState: enumFromText(EmotionalState, structured.emotionalState, EmotionalState.UNKNOWN),
       lesson: nullableString(structured.lesson),
       ...(exitPrice != null ? { exitPrice } : {}),
-      ...(realizedPnl != null ? { realizedPnl, netPnl: calculateNetPnl(realizedPnl, existingTrade?.fees, existingTrade?.funding) } : {}),
+      ...(objective.realizedPnl != null ? { realizedPnl: objective.realizedPnl } : {}),
+      ...(objective.netPnl != null ? { netPnl: objective.netPnl } : {}),
       ...(exitPrice != null && existingTrade
         ? { rMultiple: calculateRMultiple({ entryPrice: existingTrade.entryPrice, stopPrice: existingTrade.stopPrice, exitPrice, direction: existingTrade.direction }) }
         : {}),
@@ -670,6 +681,16 @@ function objectiveNumbers(formData: FormData) {
     quantity: toNumber(formData.get("quantity")),
     totalOrderValue: toNumber(formData.get("totalOrderValue")),
   });
+  const objective = resolveObjectivePnl({
+    entryPrice,
+    exitPrice,
+    quantity: orderFields.quantity,
+    totalOrderValue: orderFields.totalOrderValue,
+    direction,
+    realizedPnl,
+    fees,
+    funding,
+  });
   return {
     entryPrice,
     stopPrice,
@@ -680,10 +701,10 @@ function objectiveNumbers(formData: FormData) {
     quantity: orderFields.quantity,
     totalOrderValue: orderFields.totalOrderValue,
     leverage: toNumber(formData.get("leverage")),
-    realizedPnl,
+    realizedPnl: objective.realizedPnl,
     fees,
     funding,
-    netPnl: calculateNetPnl(realizedPnl, fees, funding),
+    netPnl: objective.netPnl,
     rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
   };
 }
@@ -879,8 +900,18 @@ async function createTradeFromStructured(tradeDateTime: Date, structured: Struct
   const entryPrice = nullableNumber(structured.entryPrice);
   const stopPrice = nullableNumber(structured.stopPrice);
   const exitPrice = nullableNumber(structured.exitPrice);
-  const realizedPnl = nullableNumber(structured.realizedPnl);
   const order = calculateOrderFields({ price: entryPrice, quantity: nullableNumber(structured.quantity), totalOrderValue: null });
+  const objective = resolveObjectivePnl({
+    entryPrice,
+    exitPrice,
+    quantity: order.quantity,
+    totalOrderValue: order.totalOrderValue,
+    direction,
+    realizedPnl: nullableNumber(structured.realizedPnl),
+    fees: null,
+    funding: null,
+  });
+  const realizedPnl = objective.realizedPnl;
   const hasExit = exitPrice != null || realizedPnl != null;
   return db.create("trades", {
     createdAt: new Date(),
@@ -912,7 +943,7 @@ async function createTradeFromStructured(tradeDateTime: Date, structured: Struct
     realizedPnl,
     fees: null,
     funding: null,
-    netPnl: calculateNetPnl(realizedPnl, null, null),
+    netPnl: objective.netPnl,
     rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
   });
 }
