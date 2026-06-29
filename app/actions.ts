@@ -720,17 +720,30 @@ export async function createAssetAction(formData: FormData) {
 
 export async function updateAssetAction(formData: FormData) {
   const id = String(formData.get("id"));
+  const now = new Date();
   await db.update("assets", id, {
     htfBias: toText(formData.get("htfBias")),
     ltfBias: toText(formData.get("ltfBias")),
     levels: toText(formData.get("levels")),
     gamePlan: toText(formData.get("gamePlan")),
     marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
-    updatedAt: new Date(),
+    updatedAt: now,
   });
+  // Sweep up any unsent draft from the note composer so a single "Save current
+  // view" click also commits a note-in-progress (no separate "Add note" needed).
+  const noteText = toText(formData.get("noteText"));
+  if (noteText) {
+    await db.create("assetNotes", {
+      createdAt: now,
+      updatedAt: now,
+      assetId: id,
+      timeframe: optionalEnum(AssetTimeframe, formData.get("noteTimeframe")),
+      text: noteText,
+    });
+  }
   revalidatePath(`/assets/${id}`);
   revalidatePath("/assets");
-  await redirectBackWithFeedback("Asset view updated.", `/assets/${id}`);
+  await redirectBackWithFeedback(noteText ? "Asset view updated · note added." : "Asset view updated.", `/assets/${id}`);
 }
 
 export async function deleteAssetAction(formData: FormData) {

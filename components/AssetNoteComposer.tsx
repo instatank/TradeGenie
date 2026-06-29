@@ -58,6 +58,7 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
         <span className="label">What are you thinking right now?</span>
         <textarea
           ref={textareaRef}
+          id="asset-note-draft"
           name="text"
           required
           rows={6}
@@ -82,7 +83,7 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
       <div className="grid gap-3 sm:grid-cols-[200px_1fr_auto] sm:items-end">
         <label className="field">
           <span className="label">Timeframe (optional)</span>
-          <select name="timeframe" defaultValue="" className="input">
+          <select id="asset-note-draft-timeframe" name="timeframe" defaultValue="" className="input">
             <option value="">None</option>
             {assetTimeframes.map((option) => (
               <option key={option} value={option}>

@@ -10,8 +10,9 @@ import {
   updateAssetNoteAction,
 } from "@/app/actions";
 import { AssetNoteComposer } from "@/components/AssetNoteComposer";
-import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { assetTimeframes, humanize, marketTypes } from "@/lib/constants";
+import { CurrentViewForm } from "@/components/CurrentViewForm";
+import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
+import { assetTimeframes, humanize } from "@/lib/constants";
 import { getAssetWorkspace } from "@/lib/data";
 
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
@@ -37,29 +38,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
         {/* Current view — always-current, edited in place. The glance you open daily. */}
         <div className="space-y-4 self-start">
-          <form action={updateAssetAction} className="panel space-y-4">
-            <h2 className="font-semibold">Current view</h2>
-            <p className="-mt-2 text-xs text-forge-muted">Your live snapshot. Edit it as the picture changes — history lives in the thread.</p>
-            <TextField label="HTF bias" name="htfBias" defaultValue={asset.htfBias} placeholder="e.g. Accumulation, higher lows intact" />
-            <TextField label="LTF bias" name="ltfBias" defaultValue={asset.ltfBias} placeholder="e.g. Pullback to support, watching reaction" />
-            <TextAreaField
-              label="Levels I'm watching"
-              name="levels"
-              defaultValue={asset.levels}
-              rows={4}
-              placeholder={"e.g.\nSupport 38.2 — tracking for hold\nIf breaks → next target 35.0\nSFP off 41.4"}
-            />
-            <TextAreaField
-              label="Current thesis & game plan"
-              name="gamePlan"
-              defaultValue={asset.gamePlan}
-              rows={6}
-              placeholder="What you want to do and why — the plan you'd want to re-read tomorrow."
-            />
-            <SelectField label="Market" name="marketType" options={marketTypes} defaultValue={asset.marketType} />
-            <input type="hidden" name="id" value={asset.id} />
-            <button className="button" type="submit">Save current view</button>
-          </form>
+          <CurrentViewForm asset={asset} action={updateAssetAction} />
 
           {asset.relatedTrades.length ? (
             <div className="panel space-y-2">
