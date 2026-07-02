@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { Trash2 } from "lucide-react";
 import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, updateTradeAction } from "@/app/actions";
 import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { FormattedText } from "@/components/FormattedText";
 import {
   conditionTagOptions,
   directions,
@@ -194,7 +195,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <button className="button-secondary" type="submit">Add lesson</button>
           </form>
           {trade.lessons.map((lesson) => (
-            <p key={lesson.id} className="rounded-md bg-forge-panel p-3 text-sm">{lesson.lessonText}</p>
+            <FormattedText key={lesson.id} text={lesson.lessonText} className="rounded-md bg-forge-panel p-3 text-sm" />
           ))}
         </div>
 

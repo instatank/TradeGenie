@@ -4,6 +4,7 @@ import { PageTitle } from "@/components/Fields";
 import { humanize } from "@/lib/constants";
 import { db, getTranscriptsWithLinks, getTradesWithMistakes } from "@/lib/data";
 import { getTradePnl } from "@/lib/metrics";
+import { stripFormatting } from "@/lib/richtext";
 
 export default async function SearchPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
@@ -94,7 +95,7 @@ export default async function SearchPage({ searchParams }: { searchParams?: Prom
           <ResultSection title="Lessons" count={results.lessons.length}>
             {results.lessons.slice(0, 10).map((lesson) => (
               <Link key={lesson.id} href="/lessons" className="block rounded-md border border-forge-line p-3 transition hover:bg-forge-panel">
-                <div className="font-medium">{lesson.lessonText}</div>
+                <div className="font-medium">{stripFormatting(lesson.lessonText)}</div>
                 <div className="mt-1 text-sm text-forge-muted">{humanize(lesson.category)} · {humanize(lesson.sourceType)}</div>
               </Link>
             ))}
@@ -111,7 +112,7 @@ export default async function SearchPage({ searchParams }: { searchParams?: Prom
             {results.weeklyReviews.slice(0, 10).map((review) => (
               <Link key={review.id} href="/weekly-review" className="block rounded-md border border-forge-line p-3 transition hover:bg-forge-panel">
                 <div className="font-medium">{format(review.weekStart, "dd MMM")} - {format(review.weekEnd, "dd MMM yyyy")}</div>
-                <div className="mt-1 text-sm text-forge-muted">{preview(review.summaryText)}</div>
+                <div className="mt-1 text-sm text-forge-muted">{preview(stripFormatting(review.summaryText))}</div>
               </Link>
             ))}
           </ResultSection>

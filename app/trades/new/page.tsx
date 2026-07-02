@@ -4,6 +4,7 @@ import { createTradeAction } from "@/app/actions";
 import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { conditionTagOptions, directions, entryGrades, marketTypes, mindStateOptions, riskPostures, tradeStatuses } from "@/lib/constants";
 import { getActiveSetups, getResurfacedLessons, getTodayJournal } from "@/lib/data";
+import { stripFormatting } from "@/lib/richtext";
 import { getSettings } from "@/lib/settings-store";
 
 const preTradeChecklist = [
@@ -37,7 +38,7 @@ export default async function NewTradePage() {
             {lessons.map((lesson) => (
               <li key={lesson.id} className="flex items-start gap-2">
                 {lesson.isPinned ? <Pin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-forge-blue" aria-hidden="true" /> : <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-forge-muted" />}
-                <span>{lesson.lessonText}</span>
+                <span>{stripFormatting(lesson.lessonText)}</span>
               </li>
             ))}
           </ul>
@@ -78,10 +79,12 @@ export default async function NewTradePage() {
         </div>
         <TextAreaField label="Entry thesis" name="entryThesis" required placeholder="Why this trade, why now?" rows={4} />
 
-        <label className="field">
-          <span className="label">Pre-mortem — what is most likely to make this trade fail?</span>
-          <textarea name="premortem" rows={2} placeholder="Name your most probable mistake now, while you can still avoid it." className="textarea" />
-        </label>
+        <TextAreaField
+          label="Pre-mortem — what is most likely to make this trade fail?"
+          name="premortem"
+          rows={2}
+          placeholder="Name your most probable mistake now, while you can still avoid it."
+        />
 
         <details className="rounded-lg border border-forge-line p-3">
           <summary className="cursor-pointer text-sm font-semibold">Optional context</summary>

@@ -3,10 +3,12 @@
 import { useRef, useState, useTransition } from "react";
 import { Sparkles, Undo2 } from "lucide-react";
 import { structureAssetNoteDraftAction } from "@/app/actions";
+import { RichTextToolbar, useRichTextShortcuts } from "@/components/RichTextToolbar";
 import { assetTimeframes, humanize } from "@/lib/constants";
 
 export function AssetNoteComposer({ assetId, addAction }: { assetId: string; addAction: (formData: FormData) => void }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleKeyDown = useRichTextShortcuts(textareaRef);
   const [pending, startTransition] = useTransition();
   const [original, setOriginal] = useState<string | null>(null);
   const [source, setSource] = useState<"ai" | "basic" | null>(null);
@@ -56,6 +58,7 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
       <h2 className="font-semibold">Add to the thread</h2>
       <label className="field">
         <span className="label">What are you thinking right now?</span>
+        <RichTextToolbar textareaRef={textareaRef} />
         <textarea
           ref={textareaRef}
           id="asset-note-draft"
@@ -64,6 +67,7 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
           rows={6}
           placeholder="Dump your thought process — analysis, what changed, what you're watching for. Free-form; tidy it after."
           className="textarea"
+          onKeyDown={handleKeyDown}
         />
       </label>
 

@@ -7,6 +7,7 @@ import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { humanize } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
 import { calculateTotalR, calculateWinRate, getTradePnl } from "@/lib/metrics";
+import { stripFormatting } from "@/lib/richtext";
 
 export default async function CalendarPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
@@ -90,7 +91,7 @@ export default async function CalendarPage({ searchParams }: { searchParams?: Pr
           ) : null}
           {dayLessons.slice(0, 2).map((lesson) => (
             <Link key={lesson.id} href={`/lessons?period=day&date=${dayValue}`} className="rounded-md bg-forge-panel p-3 text-sm transition hover:bg-forge-line/40">
-              Lesson · {humanize(lesson.category)} · {preview(lesson.lessonText)}
+              Lesson · {humanize(lesson.category)} · {preview(stripFormatting(lesson.lessonText))}
             </Link>
           ))}
           {dayReviews.length ? (

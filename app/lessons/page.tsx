@@ -4,10 +4,12 @@ import { Pencil, Pin, Trash2 } from "lucide-react";
 import { addManualLessonAction, deleteLessonAction, toggleLessonActiveAction, toggleLessonPinAction, updateLessonAction } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
+import { FormattedText } from "@/components/FormattedText";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { coreLessonCategories, humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
 import { db } from "@/lib/data";
+import { stripFormatting } from "@/lib/richtext";
 import type { Lesson } from "@/lib/types";
 
 const lessonViews = [
@@ -93,7 +95,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
             <details key={lesson.id} className={`panel ${lesson.isActive ? "" : "opacity-60"}`}>
               <summary className="grid cursor-pointer gap-3 sm:grid-cols-[1fr_180px] sm:items-center">
                 <div className="min-w-0">
-                  <p className="truncate font-medium">{lesson.lessonText}</p>
+                  <p className="truncate font-medium">{stripFormatting(lesson.lessonText)}</p>
                   <p className="mt-1 text-sm text-forge-muted">
                     {humanize(lesson.category)} · {humanize(lesson.sourceType)}
                   </p>
@@ -105,7 +107,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
               </summary>
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-base font-medium">{lesson.lessonText}</p>
+                  <FormattedText text={lesson.lessonText} className="text-base font-medium" />
                   <p className="mt-2 text-sm text-forge-muted">
                     {humanize(lesson.category)} · {humanize(lesson.sourceType)} · {format(lesson.createdAt, "dd MMM yyyy")}
                   </p>

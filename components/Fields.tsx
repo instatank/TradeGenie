@@ -1,3 +1,7 @@
+"use client";
+
+import { useId, useRef } from "react";
+import { RichTextToolbar, useRichTextShortcuts } from "@/components/RichTextToolbar";
 import { humanize } from "@/lib/constants";
 
 export function SelectField({
@@ -76,18 +80,25 @@ export function TextAreaField({
   placeholder?: string;
   rows?: number;
 }) {
+  const id = useId();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleKeyDown = useRichTextShortcuts(textareaRef);
   return (
-    <label className="field">
-      <span className="label">{label}</span>
+    <div className="field">
+      <label htmlFor={id} className="label">{label}</label>
+      <RichTextToolbar textareaRef={textareaRef} />
       <textarea
+        id={id}
+        ref={textareaRef}
         name={name}
         required={required}
         defaultValue={defaultValue ?? ""}
         placeholder={placeholder}
         rows={rows}
+        onKeyDown={handleKeyDown}
         className="textarea"
       />
-    </label>
+    </div>
   );
 }
 

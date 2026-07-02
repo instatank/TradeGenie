@@ -4,9 +4,11 @@ import { Pencil, Trash2 } from "lucide-react";
 import { deleteWeeklyReviewAction, generateWeeklyReviewAction, updateWeeklyReviewAction } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, TextAreaField, TextField } from "@/components/Fields";
+import { FormattedText } from "@/components/FormattedText";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange } from "@/lib/calendar";
 import { db } from "@/lib/data";
+import { stripFormatting } from "@/lib/richtext";
 import type { WeeklyReview } from "@/lib/types";
 
 const weeklyViews = [
@@ -108,7 +110,7 @@ export default async function WeeklyReviewPage({ searchParams }: { searchParams?
                 </form>
               </div>
             </div>
-            <p className="text-sm leading-6">{review.summaryText}</p>
+            <FormattedText text={review.summaryText} className="text-sm leading-6" />
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <MiniMetric label="Trades" value={review.totalTrades} />
               <MiniMetric label="Net P&L" value={formatMaybe(review.totalPnl)} />
@@ -118,7 +120,7 @@ export default async function WeeklyReviewPage({ searchParams }: { searchParams?
               <MiniMetric label="Expectancy" value={formatMaybe(review.expectancy)} />
               <MiniMetric label="Rule adherence" value={review.ruleAdherenceRate == null ? "NA" : `${(review.ruleAdherenceRate * 100).toFixed(0)}%`} />
               <MiniMetric label="Common mistake" value={review.mostCommonMistake ?? "NA"} />
-              <MiniMetric label="Action item" value={review.actionItem ?? "NA"} />
+              <MiniMetric label="Action item" value={review.actionItem ? stripFormatting(review.actionItem) : "NA"} />
             </div>
           </article>
         ))}

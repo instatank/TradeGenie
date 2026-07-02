@@ -12,6 +12,7 @@ import {
 import { AssetNoteComposer } from "@/components/AssetNoteComposer";
 import { CurrentViewForm } from "@/components/CurrentViewForm";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
+import { FormattedText } from "@/components/FormattedText";
 import { assetTimeframes, humanize } from "@/lib/constants";
 import { getAssetWorkspace } from "@/lib/data";
 
@@ -76,7 +77,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     ) : null}
                   </div>
                 </div>
-                <p className="mt-2 whitespace-pre-wrap text-base">{note.text}</p>
+                <FormattedText text={note.text} className="mt-2 text-base" />
                 <details className="mt-3 rounded-lg border border-forge-line p-3">
                   <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
                     <Pencil className="h-4 w-4 text-forge-blue" aria-hidden="true" />

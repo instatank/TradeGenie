@@ -13,6 +13,7 @@ import {
   getTradePnl,
   mistakeFrequency,
 } from "@/lib/metrics";
+import { stripFormatting } from "@/lib/richtext";
 
 export default async function DashboardPage() {
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -76,7 +77,7 @@ export default async function DashboardPage() {
                 {resurfacedLessons.map((lesson) => (
                   <li key={lesson.id} className="flex items-start gap-2">
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-forge-blue" />
-                    <span>{lesson.lessonText}</span>
+                    <span>{stripFormatting(lesson.lessonText)}</span>
                   </li>
                 ))}
               </ul>

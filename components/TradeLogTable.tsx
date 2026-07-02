@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { deleteTradeAction } from "@/app/actions";
+import { FormattedText } from "@/components/FormattedText";
 import { humanize } from "@/lib/constants";
 
 export type TradeLogRow = {
@@ -176,7 +177,7 @@ function DetailBlock({ label, value }: { label: string; value: string | null }) 
   return (
     <div className="rounded-lg border border-forge-line p-3">
       <div className="text-xs font-medium uppercase tracking-wide text-forge-muted">{label}</div>
-      <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{value ?? "NA"}</p>
+      {value ? <FormattedText text={value} className="mt-1 text-sm leading-6" /> : <p className="mt-1 text-sm leading-6">NA</p>}
     </div>
   );
 }

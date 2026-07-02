@@ -1,5 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { createSetupAction, deleteSetupAction, toggleSetupActiveAction, updateSetupAction } from "@/app/actions";
+import { FormattedText } from "@/components/FormattedText";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { humanize, setupDirectionBiases } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
@@ -109,7 +110,7 @@ function Block({ label, body }: { label: string; body: string }) {
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-forge-muted">{label}</div>
-      <p className="mt-1 whitespace-pre-wrap">{body}</p>
+      <FormattedText text={body} className="mt-1" />
     </div>
   );
 }
