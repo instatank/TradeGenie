@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { addDays, format, isSameDay, startOfDay, startOfWeek } from "date-fns";
+import { addDays, format, isSameDay, startOfDay, startOfWeek, subDays } from "date-fns";
 import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic, Sunrise, Sunset } from "lucide-react";
+import { DivergingColumns, EquityCurve, HBarList } from "@/components/Charts";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { conditionLabel, humanize } from "@/lib/constants";
@@ -12,6 +13,7 @@ import {
   conditionPerformance,
   expectancyBreakdown,
   getTradePnl,
+  mistakeFrequency,
   setupPerformance,
 } from "@/lib/metrics";
 
@@ -79,6 +81,39 @@ export default async function TodayPage() {
     .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
     .slice(0, 4);
 
+  // Snapshot data: last 30 days, falling back to all-time while history is thin.
+  const thirtyDaysAgo = subDays(today, 29);
+  const closedWithPnl = trades
+    .filter((trade) => trade.status === "CLOSED" && getTradePnl(trade) != null)
+    .sort((a, b) => a.tradeDateTime.getTime() - b.tradeDateTime.getTime());
+  let curveTrades = closedWithPnl.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo);
+  let curveRange = "last 30 days";
+  if (curveTrades.length < 2) {
+    curveTrades = closedWithPnl;
+    curveRange = "all time";
+  }
+  const dailyTotals = new Map<string, number>();
+  for (const trade of curveTrades) {
+    const key = format(trade.tradeDateTime, "d MMM");
+    dailyTotals.set(key, (dailyTotals.get(key) ?? 0) + (getTradePnl(trade) ?? 0));
+  }
+  let running = 0;
+  const equityPoints = [...dailyTotals.entries()].map(([label, pnl]) => {
+    running += pnl;
+    return { label, value: Number(running.toFixed(2)) };
+  });
+  const withR = closedWithPnl.filter((trade) => trade.rMultiple != null);
+  const useR = withR.length >= 3;
+  const recentOutcomes = (useR ? withR : closedWithPnl).slice(-12).map((trade) => ({
+    label: trade.instrument,
+    value: useR ? (trade.rMultiple ?? 0) : (getTradePnl(trade) ?? 0),
+    tooltip: `${trade.instrument} ${humanize(trade.direction).toLowerCase()} · ${format(trade.tradeDateTime, "d MMM")} · ${
+      useR ? `${(trade.rMultiple ?? 0).toFixed(2)}R` : `P&L ${(getTradePnl(trade) ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+    }`,
+  }));
+  let snapshotMistakes = mistakeFrequency(trades.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo)).slice(0, 5);
+  if (!snapshotMistakes.length) snapshotMistakes = mistakeFrequency(trades).slice(0, 5);
+
   const insight = analyticsLeaks(trades, setupPerformance(trades, setupNames), conditionPerformance(trades, conditionLabel))[0];
   const tip = tipOfTheDay(now);
   const recentSymbols = [...new Set(trades
@@ -88,19 +123,19 @@ export default async function TodayPage() {
 
   return (
     <main className="page-shell">
-      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">{format(now, "EEEE, d MMMM")}</h1>
-          <p className="mt-1 text-sm text-forge-muted">Show up, follow the plan, write it down. That&apos;s the whole job today.</p>
+      <div className="mb-5 rounded-2xl border border-forge-line bg-gradient-to-r from-emerald-50 via-white to-sky-50 p-5 shadow-soft">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">{format(now, "EEEE, d MMMM")}</h1>
+            <p className="mt-1 text-sm text-forge-muted">Show up, follow the plan, write it down. That&apos;s the whole job today.</p>
+          </div>
+          <div className={`flex items-center gap-2 self-start rounded-full border px-3 py-1.5 text-sm font-medium shadow-soft sm:self-auto ${streak > 0 ? "border-forge-gold/50 bg-amber-50" : "border-forge-line bg-white"}`}>
+            <Flame className={`h-4 w-4 ${streak > 0 ? "text-forge-gold" : "text-forge-muted"}`} aria-hidden="true" />
+            {streak > 0 ? `${streak}-day journaling streak` : "Start your streak today"}
+          </div>
         </div>
-        <div className="flex items-center gap-2 self-start rounded-full border border-forge-line bg-white px-3 py-1.5 text-sm font-medium shadow-soft sm:self-auto">
-          <Flame className={`h-4 w-4 ${streak > 0 ? "text-forge-gold" : "text-forge-muted"}`} aria-hidden="true" />
-          {streak > 0 ? `${streak}-day journaling streak` : "Start your streak today"}
-        </div>
+        {milestone ? <p className="mt-3 text-sm text-forge-ink">🏅 {milestone}</p> : null}
       </div>
-      {milestone ? (
-        <p className="mb-5 rounded-lg border border-forge-gold/40 bg-amber-50 px-3 py-2 text-sm text-forge-ink">🏅 {milestone}</p>
-      ) : null}
 
       {/* The daily ritual: three steps, in order, with live done-states. */}
       <section className="mb-5 grid gap-3 sm:grid-cols-3">
@@ -183,6 +218,29 @@ export default async function TodayPage() {
               Deeper numbers live in <Link href="/analytics" className="text-forge-blue hover:underline">Analytics</Link> and the full{" "}
               <Link href="/calendar" className="text-forge-blue hover:underline">Calendar</Link> whenever you want them.
             </p>
+          </div>
+
+          <div className="panel">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <h2 className="font-semibold">Snapshot</h2>
+              <span className="text-xs text-forge-muted">the shape of your trading, at a glance</span>
+            </div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-forge-muted">Equity curve · {curveRange}</p>
+            <EquityCurve points={equityPoints} title={`Cumulative P&L, ${curveRange}`} />
+            <div className="mt-4 grid gap-5 sm:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-forge-muted">
+                  Recent closed trades{useR ? " · in R" : " · P&L"}
+                </p>
+                <DivergingColumns items={recentOutcomes} unit={useR ? "R" : ""} ariaLabel="Outcome of recent closed trades" />
+                <p className="mt-1 text-[11px] text-forge-muted">One bar per trade — hover for the story. {useR ? "R = profit measured in units of what you risked." : "Add entry + stop prices and this switches to R."}</p>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-muted">Most-tagged mistakes</p>
+                <HBarList items={snapshotMistakes} />
+                <p className="mt-2 text-[11px] text-forge-muted">The top bar is your highest-leverage habit to break.</p>
+              </div>
+            </div>
           </div>
 
           {needsReview.length || openTrades.length ? (

@@ -12,8 +12,12 @@
 
 body {
   margin: 0;
-  background: #eef2f4;
+  /* A quiet wash of the brand green/blue at the top, settling into the page gray. */
+  background:
+    linear-gradient(160deg, rgba(13, 143, 114, 0.07), rgba(31, 111, 235, 0.05) 38%, rgba(238, 242, 244, 0) 340px),
+    #eef2f4;
   color: #1b1f23;
+  min-height: 100vh;
 }
 
 textarea,
@@ -29,7 +33,7 @@ button {
   }
 
   .panel {
-    @apply rounded-lg border border-forge-line bg-white p-4 shadow-soft;
+    @apply rounded-xl border border-forge-line bg-white p-4 shadow-soft;
   }
 
   .field {
@@ -61,7 +65,7 @@ button {
   }
 
   .metric {
-    @apply rounded-lg border border-forge-line bg-white p-4 shadow-soft;
+    @apply rounded-xl border border-forge-line bg-white p-4 shadow-soft;
   }
 
   .muted {

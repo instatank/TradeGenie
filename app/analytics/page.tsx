@@ -1,5 +1,7 @@
+import { format } from "date-fns";
+import { DivergingColumns, EquityCurve, HBarList } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
-import { conditionLabel, sessionLabels } from "@/lib/constants";
+import { conditionLabel, humanize, sessionLabels } from "@/lib/constants";
 import { getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
 import {
   analyticsLeaks,
@@ -8,6 +10,8 @@ import {
   conditionPerformance,
   expectancyBreakdown,
   fundingSummary,
+  getTradePnl,
+  mistakeFrequency,
   sessionPerformance,
   setupPerformance,
   type BucketStats,
@@ -17,6 +21,31 @@ import {
 export default async function AnalyticsPage() {
   const [trades, setupNameById] = await Promise.all([getTradesWithMistakes(), getSetupNameMap()]);
   const closed = trades.filter((trade) => trade.status === "CLOSED");
+
+  // All-time visual picture: equity curve by day, recent outcomes, mistake bars.
+  const closedWithPnl = closed
+    .filter((trade) => getTradePnl(trade) != null)
+    .sort((a, b) => a.tradeDateTime.getTime() - b.tradeDateTime.getTime());
+  const dailyTotals = new Map<string, number>();
+  for (const trade of closedWithPnl) {
+    const key = format(trade.tradeDateTime, "d MMM yy");
+    dailyTotals.set(key, (dailyTotals.get(key) ?? 0) + (getTradePnl(trade) ?? 0));
+  }
+  let running = 0;
+  const equityPoints = [...dailyTotals.entries()].map(([label, pnl]) => {
+    running += pnl;
+    return { label, value: Number(running.toFixed(2)) };
+  });
+  const withR = closedWithPnl.filter((trade) => trade.rMultiple != null);
+  const useR = withR.length >= 3;
+  const recentOutcomes = (useR ? withR : closedWithPnl).slice(-20).map((trade) => ({
+    label: trade.instrument,
+    value: useR ? (trade.rMultiple ?? 0) : (getTradePnl(trade) ?? 0),
+    tooltip: `${trade.instrument} ${humanize(trade.direction).toLowerCase()} · ${format(trade.tradeDateTime, "d MMM")} · ${
+      useR ? `${(trade.rMultiple ?? 0).toFixed(2)}R` : `P&L ${(getTradePnl(trade) ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+    }`,
+  }));
+  const topMistakes = mistakeFrequency(trades).slice(0, 6);
 
   const setups = setupPerformance(trades, setupNameById);
   const sessions = sessionPerformance(trades, sessionLabels);
@@ -41,6 +70,25 @@ export default async function AnalyticsPage() {
               {leaks.map((leak) => (
                 <LeakCard key={leak.title} leak={leak} />
               ))}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <h2 className="font-semibold">The picture</h2>
+              <span className="text-xs text-forge-muted">all time</span>
+            </div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-forge-muted">Equity curve</p>
+            <EquityCurve points={equityPoints} title="Cumulative P&L, all time" width={1080} />
+            <div className="mt-4 grid gap-5 lg:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-forge-muted">Last {recentOutcomes.length} closed trades{useR ? " · in R" : " · P&L"}</p>
+                <DivergingColumns items={recentOutcomes} unit={useR ? "R" : ""} ariaLabel="Outcome of recent closed trades" />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-muted">Most-tagged mistakes</p>
+                <HBarList items={topMistakes} />
+              </div>
             </div>
           </section>
 

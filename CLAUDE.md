@@ -132,6 +132,19 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     evening (today's trades listed, 3 Yes/No taps, two one-liners, discipline 1–10).
     `saveMorningCheckinAction` / `saveEveningReviewAction` merge into the day's journal
     without wiping each other's fields; long-form fields sit under "More (optional)".
+- **Visual snapshot + design polish** (owner is a visual thinker; wants gauges, not grids):
+  - `components/Charts.tsx` — server-rendered SVG chart kit, zero client JS: equity curve
+    (area wash + endpoint label), per-trade diverging R/P&L columns (green/red), mistake
+    frequency bars. Palette (forge green/red/blue on white) validated for CVD separation
+    and contrast. Native `<title>` tooltips.
+  - Today gets a **"Snapshot"** panel (equity curve last 30 days with all-time fallback,
+    recent closed trades in R, most-tagged mistakes); `/analytics` gets **"The picture"**
+    (same kit, all time, wider viewBox via the `width` prop so text keeps its size).
+  - Design: sticky glass header (backdrop-blur), active-page nav highlight
+    (`components/NavLinks.tsx`, client), gradient hero on Today, soft body background
+    wash, `rounded-xl` panels.
+  - Removed the orphaned recharts `DashboardCharts` component and the `recharts` dep
+    (nothing imported it after the Today rewrite).
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged

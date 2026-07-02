@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { BookOpenCheck, Search } from "lucide-react";
 import { ActionFeedback } from "@/components/ActionFeedback";
 import { MoreNav } from "@/components/MoreNav";
+import { NavLinks } from "@/components/NavLinks";
 import { moreNavItems, primaryNavItems } from "@/lib/constants";
 import "./globals.css";
 
@@ -19,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Suspense fallback={null}>
           <ActionFeedback />
         </Suspense>
-        <header className="border-b border-forge-line bg-white">
+        <header className="sticky top-0 z-40 border-b border-forge-line bg-white/85 backdrop-blur">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <Link href="/" className="flex items-center gap-2">
@@ -40,15 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </form>
             </div>
             <nav className="flex flex-wrap items-center gap-1 pb-1">
-              {primaryNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink"
-                >
-                  {item.label}
-                </Link>
-              ))}
+              <NavLinks items={primaryNavItems} />
               <MoreNav items={moreNavItems} />
             </nav>
           </div>
