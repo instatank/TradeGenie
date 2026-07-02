@@ -1,113 +1,309 @@
 import Link from "next/link";
-import { format, startOfWeek } from "date-fns";
-import { ArrowRight, Mic, NotebookPen, Plus, Sunset } from "lucide-react";
-import { DashboardCharts } from "@/components/DashboardCharts";
-import { PageTitle } from "@/components/Fields";
-import { db, getResurfacedLessons, getTradesWithMistakes } from "@/lib/data";
+import { addDays, format, isSameDay, startOfDay, startOfWeek } from "date-fns";
+import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic, Sunrise, Sunset } from "lucide-react";
+import { QuickTradeForm } from "@/components/QuickTradeForm";
+import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
+import { conditionLabel, humanize } from "@/lib/constants";
+import { db, getResurfacedLessons, getSetupNameMap, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import {
-  averageProcessScore,
+  analyticsLeaks,
+  calculateRuleAdherenceRate,
   calculateTotalR,
-  calculateWinRate,
-  emotionalStateFrequency,
-  fundingSummary,
+  conditionPerformance,
+  expectancyBreakdown,
   getTradePnl,
-  mistakeFrequency,
+  setupPerformance,
 } from "@/lib/metrics";
 
-export default async function DashboardPage() {
-  const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-  const [trades, journals, resurfacedLessons] = await Promise.all([
+// Today: the one screen of the daily habit. Morning check-in → log trades as
+// they happen → evening review. Everything else in the app supports this loop.
+export default async function TodayPage() {
+  const now = new Date();
+  const today = startOfDay(now);
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
-    getResurfacedLessons(3),
+    db.list("transcripts"),
+    db.list("assetNotes"),
+    getResurfacedLessons(1),
+    getSetupNameMap(),
+    getTodayJournal(now),
   ]);
 
-  const weeklyTrades = trades.filter((trade) => trade.tradeDateTime >= weekStart);
-  const closedTrades = trades.filter((trade) => trade.status === "CLOSED");
-  const netPnl = closedTrades.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0);
-  const totalR = calculateTotalR(closedTrades);
-  const winRate = calculateWinRate(closedTrades);
-  const mistakeData = mistakeFrequency(trades);
-  const emotionData = emotionalStateFrequency(trades);
-  const processScore = averageProcessScore(closedTrades);
-  const funding = fundingSummary(trades);
-  const scoredJournals = journals.filter((journal) => journal.disciplineScore != null).sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 20);
-  const disciplineAverage = scoredJournals.length
-    ? scoredJournals.reduce((sum, journal) => sum + (journal.disciplineScore ?? 0), 0) / scoredJournals.length
-    : null;
+  // Streak counts showing up in any form — never profitability.
+  const streak = journalStreak([
+    ...journals.map((journal) => journal.date),
+    ...trades.map((trade) => trade.createdAt),
+    ...transcripts.map((transcript) => transcript.createdAt),
+    ...assetNotes.map((note) => note.createdAt),
+  ]);
+  const milestone = streakMilestone(streak);
 
-  const pnlData = closedTrades.map((trade) => ({
-    date: format(trade.tradeDateTime, "MMM d"),
-    pnl: Number((getTradePnl(trade) ?? 0).toFixed(2)),
-  }));
+  const tradesToday = trades.filter((trade) => isSameDay(trade.tradeDateTime, today));
+  const morning = morningDone(todayJournal);
+  const evening = eveningDone(todayJournal);
+
+  // This week, Monday-first. On-plan % leads: process is the beginner's real KPI.
+  const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+  const weekTrades = trades.filter((trade) => trade.tradeDateTime >= weekStart);
+  const weekClosed = weekTrades.filter((trade) => trade.status === "CLOSED");
+  const onPlan = calculateRuleAdherenceRate(weekClosed);
+  const weekPnl = weekClosed.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0);
+  const weekStats = expectancyBreakdown(weekTrades);
+  const weekR = calculateTotalR(weekClosed);
+  const journaledDays = new Set(journals.map((journal) => format(startOfDay(journal.date), "yyyy-MM-dd")));
+
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const day = addDays(weekStart, index);
+    const dayTrades = trades.filter((trade) => trade.status === "CLOSED" && isSameDay(trade.tradeDateTime, day));
+    const pnl = dayTrades.length ? dayTrades.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0) : null;
+    return {
+      key: format(day, "yyyy-MM-dd"),
+      label: format(day, "EEEEE"),
+      dayOfMonth: format(day, "d"),
+      isToday: isSameDay(day, today),
+      isFuture: day > today,
+      journaled: journaledDays.has(format(day, "yyyy-MM-dd")),
+      pnl,
+      tradeCount: dayTrades.length,
+    };
+  });
+
+  // Trades waiting on a one-minute review (closed but not reflected on), plus open positions.
+  const needsReview = trades
+    .filter((trade) => trade.status === "CLOSED" && ((trade.followedPlan ?? "NA") === "NA" || !trade.lesson))
+    .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
+    .slice(0, 4);
+  const openTrades = trades
+    .filter((trade) => trade.status === "OPEN")
+    .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
+    .slice(0, 4);
+
+  const insight = analyticsLeaks(trades, setupPerformance(trades, setupNames), conditionPerformance(trades, conditionLabel))[0];
+  const tip = tipOfTheDay(now);
+  const recentSymbols = [...new Set(trades
+    .slice()
+    .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
+    .map((trade) => trade.instrument))].slice(0, 5);
 
   return (
     <main className="page-shell">
-      <PageTitle title="Dashboard" subtitle="A quick read on trading behavior, not a command center." />
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">{format(now, "EEEE, d MMMM")}</h1>
+          <p className="mt-1 text-sm text-forge-muted">Show up, follow the plan, write it down. That&apos;s the whole job today.</p>
+        </div>
+        <div className="flex items-center gap-2 self-start rounded-full border border-forge-line bg-white px-3 py-1.5 text-sm font-medium shadow-soft sm:self-auto">
+          <Flame className={`h-4 w-4 ${streak > 0 ? "text-forge-gold" : "text-forge-muted"}`} aria-hidden="true" />
+          {streak > 0 ? `${streak}-day journaling streak` : "Start your streak today"}
+        </div>
+      </div>
+      {milestone ? (
+        <p className="mb-5 rounded-lg border border-forge-gold/40 bg-amber-50 px-3 py-2 text-sm text-forge-ink">🏅 {milestone}</p>
+      ) : null}
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="Process score" value={processScore == null ? "NA" : `${processScore.toFixed(0)}/100`} tone={processScore == null ? undefined : processScore >= 60 ? "good" : "bad"} />
-        <Metric label="Net P&L" value={formatMoney(netPnl)} tone={netPnl >= 0 ? "good" : "bad"} />
-        <Metric label="Total R" value={totalR == null ? "NA" : totalR.toFixed(2)} />
-        <Metric label="Win rate" value={winRate == null ? "NA" : `${(winRate * 100).toFixed(0)}%`} />
-        <Metric label="Trades this week" value={weeklyTrades.length} />
-        <Metric label="Funding drag" value={funding.dragPct == null ? "NA" : `${(funding.dragPct * 100).toFixed(0)}%`} tone={funding.dragPct == null ? undefined : funding.dragPct > 0.15 ? "bad" : "good"} />
-        <Metric label="Discipline average" value={disciplineAverage == null ? "NA" : disciplineAverage.toFixed(1)} />
-        <Metric label="Most common mistake" value={mistakeData[0]?.label ?? "None yet"} />
+      {/* The daily ritual: three steps, in order, with live done-states. */}
+      <section className="mb-5 grid gap-3 sm:grid-cols-3">
+        <RitualStep
+          done={morning}
+          icon={<Sunrise className="h-4 w-4" aria-hidden="true" />}
+          title="Morning check-in"
+          detail={morning ? summarizeMorning(todayJournal?.currentState, todayJournal?.maxTradesForDay, todayJournal?.maxLossForDay) : "Mood + guardrails. Under a minute."}
+          href="/daily"
+          cta={morning ? "Edit" : "Check in"}
+        />
+        <RitualStep
+          done={tradesToday.length > 0}
+          neutral={tradesToday.length === 0}
+          icon={<Circle className="h-4 w-4" aria-hidden="true" />}
+          title="Log as you go"
+          detail={
+            tradesToday.length
+              ? `${tradesToday.length} trade${tradesToday.length === 1 ? "" : "s"} logged today.`
+              : "Nothing yet — and a planned no-trade day counts as a win."
+          }
+          href="#quick-log"
+          cta="Quick log"
+        />
+        <RitualStep
+          done={evening}
+          icon={<Sunset className="h-4 w-4" aria-hidden="true" />}
+          title="Evening review"
+          detail={evening ? "Done for today. See you tomorrow." : "Three taps and two lines. 2–4 minutes."}
+          href="/daily#evening"
+          cta={evening ? "Edit" : "Review the day"}
+        />
       </section>
-      <p className="mt-2 text-xs text-forge-muted">Process score = did you follow your rules, independent of P&amp;L. For your first months this matters more than money. Full breakdowns in <Link href="/analytics" className="text-forge-blue hover:underline">Analytics</Link>.</p>
 
-      <section className="mt-5 grid gap-4 lg:grid-cols-[1fr_320px]">
-        <DashboardCharts pnlData={pnlData} mistakeData={mistakeData} emotionData={emotionData} />
-        <div className="h-fit space-y-4">
-          <div className="panel">
-            <h2 className="mb-3 font-semibold">Today&apos;s actions</h2>
-            <div className="grid gap-2">
-              <Action href="/daily" label="Start daily check-in" icon={<NotebookPen className="h-4 w-4" />} />
-              <Action href="/inbox" label="Add voice transcript" icon={<Mic className="h-4 w-4" />} />
-              <Action href="/trades/new" label="Add quick trade note" icon={<Plus className="h-4 w-4" />} />
-              <Action href="/daily#eod" label="Add EOD review" icon={<Sunset className="h-4 w-4" />} />
+      <section className="grid gap-4 lg:grid-cols-[1fr_340px]">
+        <div className="space-y-4">
+          <div id="quick-log" className="panel">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="font-semibold">Log a trade</h2>
+              <span className="text-xs text-forge-muted">~30 seconds · symbol + direction is enough</span>
             </div>
+            <QuickTradeForm recentSymbols={recentSymbols} redirectTo="/" />
           </div>
-          {resurfacedLessons.length ? (
+
+          <div className="panel">
+            <h2 className="mb-3 font-semibold">This week</h2>
+            <div className="grid grid-cols-7 gap-1.5">
+              {weekDays.map((day) => (
+                <Link
+                  key={day.key}
+                  href={`/daily?date=${day.key}`}
+                  className={`rounded-lg border p-2 text-center transition hover:border-forge-muted ${
+                    day.isToday ? "border-forge-blue ring-1 ring-forge-blue/30" : "border-forge-line"
+                  } ${day.pnl == null ? "bg-white" : day.pnl >= 0 ? "bg-emerald-50" : "bg-red-50"} ${day.isFuture ? "opacity-40" : ""}`}
+                >
+                  <div className="text-[11px] font-medium uppercase text-forge-muted">{day.label}</div>
+                  <div className="text-sm font-semibold">{day.dayOfMonth}</div>
+                  <div className={`mt-0.5 truncate text-[11px] font-medium ${day.pnl == null ? "text-forge-muted" : day.pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
+                    {day.pnl == null ? (day.journaled ? "·" : " ") : formatMoney(day.pnl)}
+                  </div>
+                </Link>
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Stat
+                label="On-plan trades"
+                value={onPlan == null ? "—" : `${(onPlan * 100).toFixed(0)}%`}
+                sub="Your real score. P&L follows this."
+                tone={onPlan == null ? undefined : onPlan >= 0.7 ? "good" : "bad"}
+              />
+              <Stat label="Net P&L" value={weekClosed.length ? formatMoney(weekPnl) : "—"} tone={!weekClosed.length ? undefined : weekPnl >= 0 ? "good" : "bad"} />
+              <Stat
+                label="Win rate"
+                value={weekStats.winRate == null ? "—" : `${(weekStats.winRate * 100).toFixed(0)}%`}
+                sub={weekStats.winRate == null ? undefined : `avg win ${formatMoney(weekStats.avgWin)} · avg loss ${formatMoney(weekStats.avgLoss)}`}
+              />
+              <Stat label="Total R" value={weekR == null ? "—" : weekR.toFixed(1)} sub={`${weekClosed.length} closed trade${weekClosed.length === 1 ? "" : "s"}`} />
+            </div>
+            <p className="mt-3 text-xs text-forge-muted">
+              Deeper numbers live in <Link href="/analytics" className="text-forge-blue hover:underline">Analytics</Link> and the full{" "}
+              <Link href="/calendar" className="text-forge-blue hover:underline">Calendar</Link> whenever you want them.
+            </p>
+          </div>
+
+          {needsReview.length || openTrades.length ? (
             <div className="panel">
-              <h2 className="mb-3 font-semibold">Active lessons</h2>
-              <ul className="space-y-2 text-sm">
-                {resurfacedLessons.map((lesson) => (
-                  <li key={lesson.id} className="flex items-start gap-2">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-forge-blue" />
-                    <span>{lesson.lessonText}</span>
-                  </li>
+              <h2 className="mb-3 font-semibold">Waiting on you</h2>
+              <div className="space-y-2">
+                {needsReview.map((trade) => (
+                  <TradeRow key={trade.id} id={trade.id} title={`${trade.instrument} · ${humanize(trade.direction)}`} note="Closed — needs your 1-minute review" cta="Review" />
                 ))}
-              </ul>
+                {openTrades.map((trade) => (
+                  <TradeRow key={trade.id} id={trade.id} title={`${trade.instrument} · ${humanize(trade.direction)}`} note={`Open since ${format(trade.tradeDateTime, "d MMM HH:mm")}`} cta="Close & review" />
+                ))}
+              </div>
             </div>
           ) : null}
+        </div>
+
+        <div className="h-fit space-y-4">
+          <div className="panel border-l-4 border-forge-blue">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <GraduationCap className="h-4 w-4 text-forge-blue" aria-hidden="true" />
+              Coach&apos;s corner
+            </div>
+            <p className="text-sm font-medium">{tip.title}</p>
+            <p className="mt-1 text-sm text-forge-muted">{tip.body}</p>
+            {insight ? (
+              <div className={`mt-3 rounded-lg p-3 text-sm ${insight.severity === "high" ? "bg-red-50" : insight.severity === "medium" ? "bg-amber-50" : "bg-emerald-50"}`}>
+                <p className="font-medium">{insight.title}</p>
+                <p className="mt-0.5 text-forge-muted">{insight.detail}</p>
+              </div>
+            ) : null}
+          </div>
+
+          {lessons.length ? (
+            <div className="panel">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <Lightbulb className="h-4 w-4 text-forge-gold" aria-hidden="true" />
+                Your lesson on repeat
+              </div>
+              <p className="text-sm">{lessons[0].lessonText}</p>
+              <Link href="/lessons" className="mt-2 inline-block text-xs text-forge-blue hover:underline">All lessons →</Link>
+            </div>
+          ) : null}
+
+          <Link href="/inbox" className="panel block transition hover:border-forge-blue">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Mic className="h-4 w-4 text-forge-green" aria-hidden="true" />
+              Prefer talking?
+            </div>
+            <p className="mt-1 text-sm text-forge-muted">
+              Paste a voice-note transcript in Capture — I&apos;ll pull out the trade, numbers, and lessons for you to confirm.
+            </p>
+          </Link>
         </div>
       </section>
     </main>
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: string | number; tone?: "good" | "bad" }) {
+function RitualStep({
+  done,
+  neutral = false,
+  icon,
+  title,
+  detail,
+  href,
+  cta,
+}: {
+  done: boolean;
+  neutral?: boolean;
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  href: string;
+  cta: string;
+}) {
   return (
-    <div className="metric">
-      <div className="text-xs font-medium uppercase tracking-wide text-forge-muted">{label}</div>
-      <div className={`mt-2 line-clamp-2 text-xl font-semibold ${tone === "good" ? "text-forge-green" : tone === "bad" ? "text-forge-red" : ""}`}>
-        {value}
+    <div className={`panel flex flex-col gap-2 ${done ? "border-forge-green/40" : ""}`}>
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        {done ? <CheckCircle2 className="h-4 w-4 text-forge-green" aria-hidden="true" /> : icon}
+        {title}
       </div>
+      <p className="flex-1 text-sm text-forge-muted">{detail}</p>
+      <Link href={href} className={`inline-flex items-center gap-1 text-sm font-medium ${done || neutral ? "text-forge-muted hover:text-forge-ink" : "text-forge-blue hover:underline"}`}>
+        {cta} <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+      </Link>
     </div>
   );
 }
 
-function Action({ href, label, icon }: { href: string; label: string; icon: React.ReactNode }) {
+function TradeRow({ id, title, note, cta }: { id: string; title: string; note: string; cta: string }) {
   return (
-    <Link href={href} className="button-secondary justify-between">
-      <span className="flex items-center gap-2">{icon}{label}</span>
-      <ArrowRight className="h-4 w-4" />
+    <Link href={`/trades/${id}`} className="flex items-center justify-between gap-3 rounded-lg border border-forge-line p-3 transition hover:border-forge-blue">
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium">{title}</span>
+        <span className="block text-xs text-forge-muted">{note}</span>
+      </span>
+      <span className="shrink-0 text-sm font-medium text-forge-blue">{cta} →</span>
     </Link>
   );
 }
 
+function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "good" | "bad" }) {
+  return (
+    <div className="rounded-lg bg-forge-panel p-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-forge-muted">{label}</div>
+      <div className={`mt-1 text-lg font-semibold ${tone === "good" ? "text-forge-green" : tone === "bad" ? "text-forge-red" : ""}`}>{value}</div>
+      {sub ? <div className="mt-0.5 text-[11px] leading-snug text-forge-muted">{sub}</div> : null}
+    </div>
+  );
+}
+
+function summarizeMorning(state?: string | null, maxTrades?: number | null, maxLoss?: string | null) {
+  const parts = [
+    state ? `Feeling ${humanize(state).toLowerCase()}` : null,
+    maxTrades != null ? `max ${maxTrades} trades` : null,
+    maxLoss ? `max loss ${maxLoss}` : null,
+  ].filter(Boolean);
+  return parts.length ? `${parts.join(" · ")}.` : "Checked in.";
+}
+
 function formatMoney(value: number) {
-  return value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }

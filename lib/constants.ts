@@ -41,6 +41,11 @@ export const assetTimeframes = ["HTF", "MTF", "LTF", "GENERAL"] as const;
 // Old stored values (SHARP, DISTRACTED, BORED, REVENGE, UNKNOWN) still display via humanize().
 export const mindStateOptions = ["CALM", "TIRED", "ANXIOUS", "TILTED", "FOMO", "OVERCONFIDENT"] as const;
 
+// humanize() would render FOMO as "Fomo" — keep the acronym.
+export function mindStateLabel(state: string) {
+  return state === "FOMO" ? "FOMO" : humanize(state);
+}
+
 // Trimmed lesson categories for new entries. Old values (EXIT_DISCIPLINE, MARKET_CONDITION,
 // SETUP_SPECIFIC) stored on existing lessons still display correctly via humanize().
 export const coreLessonCategories = ["ENTRY_DISCIPLINE", "RISK_MANAGEMENT", "PSYCHOLOGY", "PROCESS", "OTHER"] as const;

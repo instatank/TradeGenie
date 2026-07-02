@@ -1,7 +1,8 @@
 import Image from "next/image";
 import { format } from "date-fns";
-import { Trash2 } from "lucide-react";
-import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, updateTradeAction } from "@/app/actions";
+import { ClipboardCheck, Trash2 } from "lucide-react";
+import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, reviewTradeAction, updateTradeAction } from "@/app/actions";
+import { BigChoice, ChipCheckboxGroup, ChipRadioGroup } from "@/components/Chips";
 import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import {
   conditionTagOptions,
@@ -36,11 +37,14 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
     .sort((a, b) => b.executionDateTime.getTime() - a.executionDateTime.getTime())
     .slice(0, 25);
   const selectedMistakes = new Set(trade.mistakeTags.map((link) => link.mistakeTagId));
+  const primaryTags = sortedMistakeTags.filter((tag) => primaryMistakeTagNames.has(tag.name));
+  const reviewable = trade.status === "OPEN" || trade.status === "CLOSED";
+  const reviewed = trade.status === "CLOSED" && trade.followedPlan != null && trade.followedPlan !== "NA";
 
   return (
     <main className="page-shell max-w-5xl">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <PageTitle title={`${trade.instrument} trade`} subtitle="Edit the journal record, then turn the lesson into something reusable." />
+        <PageTitle title={`${trade.instrument} trade`} subtitle="Review it in a minute up top; every detail stays one click below." />
         <form action={deleteTradeAction}>
           <input type="hidden" name="id" value={trade.id} />
           <input type="hidden" name="redirectTo" value="/trades" />
@@ -74,9 +78,98 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         </div>
       </section>
 
+      {/* The one-minute review ritual: outcome, plan-followed, grade, mistakes, lesson. */}
+      {reviewable ? (
+        <details className={`panel mb-5 ${reviewed ? "" : "border-l-4 border-forge-blue"}`} open={!reviewed}>
+          <summary className="flex cursor-pointer items-center gap-2 font-semibold">
+            <ClipboardCheck className="h-4 w-4 text-forge-blue" aria-hidden="true" />
+            {reviewed ? "Review — done (tap to edit)" : trade.status === "OPEN" ? "Close & review this trade" : "Review this trade — one minute"}
+          </summary>
+          <form action={reviewTradeAction} className="mt-4 space-y-4">
+            <input type="hidden" name="id" value={trade.id} />
+            <input type="hidden" name="shownMistakeTagIds" value={primaryTags.map((tag) => tag.id).join(",")} />
+
+            {trade.status === "OPEN" ? (
+              <ChipRadioGroup
+                label="Where does this trade stand?"
+                name="outcome"
+                options={[
+                  { value: "CLOSED", label: "It's closed — reviewing it" },
+                  { value: "OPEN", label: "Still open — just checking in" },
+                ]}
+                defaultValue="CLOSED"
+              />
+            ) : (
+              <input type="hidden" name="outcome" value="CLOSED" />
+            )}
+
+            <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
+              <label className="field">
+                <span className="text-xs font-medium text-forge-muted">Exit price</span>
+                <input name="exitPrice" type="number" step="any" defaultValue={trade.exitPrice ?? ""} className="input" />
+              </label>
+              <label className="field">
+                <span className="text-xs font-medium text-forge-muted">Realized P&L</span>
+                <input name="realizedPnl" type="number" step="any" defaultValue={trade.realizedPnl ?? ""} className="input" />
+              </label>
+            </div>
+
+            <ChipRadioGroup
+              label="Did you follow your plan?"
+              name="followedPlan"
+              options={[
+                { value: "YES", label: "Yes" },
+                { value: "PARTIAL", label: "Partly" },
+                { value: "NO", label: "No" },
+              ]}
+              defaultValue={trade.followedPlan && trade.followedPlan !== "NA" ? trade.followedPlan : undefined}
+              toneByValue={{ YES: "green", PARTIAL: "gold", NO: "red" }}
+              hint="Judge the plan, not the P&L. A rule-following loss is a good trade."
+            />
+
+            <BigChoice
+              label="Grade the execution"
+              name="entryGrade"
+              options={[
+                { value: "A", label: "A", hint: "followed my rules" },
+                { value: "B", label: "B", hint: "minor slip" },
+                { value: "C", label: "C", hint: "broke my rules" },
+              ]}
+              defaultValue={trade.entryGrade !== "NA" ? trade.entryGrade : undefined}
+              toneByValue={{ A: "green", B: "gold", C: "red" }}
+            />
+
+            <ChipCheckboxGroup
+              label="Any of these happen? (tap all that apply)"
+              name="mistakeTagId"
+              options={primaryTags.map((tag) => ({ value: tag.id, label: tag.label, hint: tag.description ?? undefined }))}
+              selected={[...selectedMistakes]}
+            />
+
+            <label className="field">
+              <span className="label">The one lesson from this trade</span>
+              <input name="lesson" defaultValue={trade.lesson ?? ""} placeholder="e.g. wait for the candle to close before entering" className="input" />
+              <span className="text-xs text-forge-muted">Saved to your lessons list automatically, so it resurfaces before future trades.</span>
+            </label>
+
+            <details className="rounded-lg border border-forge-line p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-forge-muted">What happened at the exit? (optional)</summary>
+              <textarea name="exitReason" rows={3} defaultValue={trade.exitReason ?? ""} className="textarea mt-3 min-h-20 w-full" />
+            </details>
+
+            <button className="button" type="submit">Save review</button>
+          </form>
+        </details>
+      ) : (
+        <p className="panel muted mb-5">
+          This is {trade.status === "IDEA" ? "still an idea" : "a cancelled trade"} — change its status in the full editor below if it became a real trade.
+        </p>
+      )}
+
+      <h2 className="mb-2 text-sm font-semibold text-forge-muted">Everything else — open only what you need</h2>
       <form action={updateTradeAction} className="space-y-5">
         <input type="hidden" name="id" value={trade.id} />
-        <details className="panel space-y-4" open>
+        <details className="panel space-y-4">
           <summary className="cursor-pointer font-semibold">Core idea</summary>
           <div className="grid gap-4 sm:grid-cols-3">
             <TextField label="Trade date/time" name="tradeDateTime" type="datetime-local" defaultValue={format(trade.tradeDateTime, "yyyy-MM-dd'T'HH:mm")} />
@@ -97,7 +190,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </div>
         </details>
 
-        <details className="panel space-y-4" open>
+        <details className="panel space-y-4">
           <summary className="cursor-pointer font-semibold">Subjective entry note</summary>
           <TextAreaField label="Entry thesis" name="entryThesis" defaultValue={trade.entryThesis} rows={4} />
           <TextAreaField label="Pre-mortem — what was most likely to make this fail?" name="premortem" defaultValue={trade.premortem} rows={2} />
@@ -146,8 +239,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </p>
         </details>
 
-        <details className="panel space-y-4" open={trade.status === "CLOSED" || Boolean(trade.exitReason || trade.lesson)}>
-          <summary className="cursor-pointer font-semibold">Exit review</summary>
+        <details className="panel space-y-4">
+          <summary className="cursor-pointer font-semibold">Exit review (full)</summary>
           <div className="grid gap-4 sm:grid-cols-2">
             <TextAreaField label="Exit reason" name="exitReason" defaultValue={trade.exitReason} rows={3} />
             <SelectField label="Followed plan" name="followedPlan" options={followedPlanOptions} includeBlank defaultValue={trade.followedPlan} />
@@ -156,8 +249,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </div>
         </details>
 
-        <details className="panel space-y-4" open={trade.mistakeTags.length > 0}>
-          <summary className="cursor-pointer font-semibold">Mistakes</summary>
+        <details className="panel space-y-4">
+          <summary className="cursor-pointer font-semibold">Mistakes (full list)</summary>
           <MistakeTagGrid tags={sortedMistakeTags.filter((t) => primaryMistakeTagNames.has(t.name))} selected={selectedMistakes} />
           {sortedMistakeTags.some((t) => !primaryMistakeTagNames.has(t.name)) && (
             <details className="rounded-lg border border-forge-line p-3">
@@ -210,8 +303,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         </div>
       </section>
 
-      <section className="panel mt-5 space-y-3">
-        <h2 className="font-semibold">Raw executions</h2>
+      <details className="panel mt-5 space-y-3" open={trade.rawExecutions.length > 0}>
+        <summary className="cursor-pointer font-semibold">Raw executions</summary>
         <LinkedExecutions executions={trade.rawExecutions} />
         <h3 className="pt-2 text-sm font-semibold">Link an imported execution</h3>
         <div className="grid gap-2">
@@ -227,7 +320,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           ))}
           {!availableExecutions.length ? <p className="muted">No unlinked imported executions available.</p> : null}
         </div>
-      </section>
+      </details>
     </main>
   );
 }

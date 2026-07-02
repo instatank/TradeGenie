@@ -1,0 +1,98 @@
+import { quickLogTradeAction } from "@/app/actions";
+import { BigChoice, ChipRadioGroup } from "@/components/Chips";
+import { mindStateLabel, mindStateOptions } from "@/lib/constants";
+
+// The 30-second trade log. Symbol + direction + status is a complete entry;
+// everything else is optional and stays out of the way. Zero client JS —
+// chips are styled radio inputs, so this renders and posts as a plain form.
+export function QuickTradeForm({
+  recentSymbols,
+  redirectTo,
+  submitLabel = "Log it",
+}: {
+  recentSymbols: string[];
+  redirectTo: string;
+  submitLabel?: string;
+}) {
+  return (
+    <form action={quickLogTradeAction} className="space-y-4">
+      <input type="hidden" name="redirectTo" value={redirectTo} />
+
+      <div className="field">
+        <span className="label">Symbol</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {recentSymbols.slice(0, 5).map((symbol) => (
+            <label key={symbol} className="inline-flex">
+              <input type="radio" name="instrumentChip" value={symbol} className="peer sr-only" />
+              <span className="cursor-pointer select-none rounded-full border border-forge-line bg-white px-3 py-1.5 text-sm font-medium transition hover:border-forge-muted peer-checked:border-forge-ink peer-checked:bg-forge-ink peer-checked:text-white">
+                {symbol}
+              </span>
+            </label>
+          ))}
+          <input
+            name="instrument"
+            placeholder={recentSymbols.length ? "or type another…" : "BTC, ETH, SOL…"}
+            autoCapitalize="characters"
+            className="input w-36 uppercase placeholder:normal-case"
+          />
+        </div>
+      </div>
+
+      <BigChoice
+        name="direction"
+        options={[
+          { value: "LONG", label: "Long", hint: "betting it goes up" },
+          { value: "SHORT", label: "Short", hint: "betting it goes down" },
+        ]}
+        toneByValue={{ LONG: "green", SHORT: "red" }}
+      />
+
+      <ChipRadioGroup
+        name="status"
+        options={[
+          { value: "OPEN", label: "I'm in it now" },
+          { value: "CLOSED", label: "Already closed" },
+          { value: "IDEA", label: "Just an idea" },
+        ]}
+        defaultValue="OPEN"
+      />
+
+      <label className="field">
+        <span className="label">
+          Why this trade? <span className="font-normal text-forge-muted">(one line is plenty — optional)</span>
+        </span>
+        <textarea name="entryThesis" rows={2} placeholder="What did you see? e.g. bounced off support, funding reset…" className="textarea min-h-16" />
+      </label>
+
+      <details className="rounded-lg border border-forge-line p-3">
+        <summary className="cursor-pointer text-sm font-semibold text-forge-muted">
+          Numbers &amp; mood <span className="font-normal">(optional — entry + stop lets me work out your R for you)</span>
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MiniNumber label="Entry" name="entryPrice" />
+          <MiniNumber label="Stop" name="stopPrice" />
+          <MiniNumber label="Exit" name="exitPrice" />
+          <MiniNumber label="P&L" name="realizedPnl" />
+        </div>
+        <div className="mt-3">
+          <ChipRadioGroup
+            label="How do you feel right now?"
+            name="emotionalState"
+            options={mindStateOptions.map((state) => ({ value: state, label: mindStateLabel(state) }))}
+          />
+        </div>
+      </details>
+
+      <button className="button w-full sm:w-auto" type="submit">{submitLabel}</button>
+    </form>
+  );
+}
+
+function MiniNumber({ label, name }: { label: string; name: string }) {
+  return (
+    <label className="field">
+      <span className="text-xs font-medium text-forge-muted">{label}</span>
+      <input name={name} type="number" step="any" className="input" />
+    </label>
+  );
+}

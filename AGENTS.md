@@ -46,13 +46,13 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 
 ## Product Areas
 
-- `/`: dashboard
+- `/`: Today — daily-ritual dashboard (check-in / quick log / evening review states, streak, week strip, coach's corner)
 - `/calendar`: day/week/month activity view
 - `/inbox`: voice/transcript inbox — one-screen capture (paste → auto-structure → editable review card → confirm)
-- `/daily`: daily check-in and EOD review
+- `/daily`: two-ritual page — morning check-in (chips + guardrails) and evening review (prompted micro-form)
 - `/trades`: compact trade log with filters, saved views, calendar range, sorting, pagination
-- `/trades/new`: low-friction quick trade note
-- `/trades/[id]`: trade detail/edit workspace
+- `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
+- `/trades/[id]`: review-first trade page — one-minute close & review panel on top, full editor collapsed below
 - `/lessons`: lesson bank
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews

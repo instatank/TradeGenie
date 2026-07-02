@@ -10,7 +10,7 @@ import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWee
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
-import { saveSettings, type AppSettings } from "@/lib/settings-store";
+import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
 import { structureTranscript } from "@/lib/transcript-processor";
 import {
@@ -399,6 +399,209 @@ export async function createTradeAction(formData: FormData) {
   await saveScreenshot(formData.get("screenshot"), trade.id);
   revalidatePath("/trades");
   redirect(withFeedback(`/trades/${trade.id}`, "Trade note saved."));
+}
+
+// The simplified daily-loop quick log: symbol + direction + status, everything
+// else optional. Never requires free text; numbers are captured only if typed.
+export async function quickLogTradeAction(formData: FormData) {
+  const redirectTo = toText(formData.get("redirectTo")) ?? "/";
+  // Typed symbol wins; otherwise the one-tap recent-symbol chip.
+  const instrument = (String(formData.get("instrument") ?? "").trim() || String(formData.get("instrumentChip") ?? "").trim()).toUpperCase();
+  if (!instrument) {
+    redirect(withFeedback(redirectTo, "Type a symbol (like BTC) to log the trade.", "error"));
+  }
+  const settings = await getSettings();
+  const direction = enumValue(Direction, formData.get("direction"), Direction.UNKNOWN);
+  const status = enumValue(TradeStatus, formData.get("status"), TradeStatus.OPEN);
+  const entryPrice = toNumber(formData.get("entryPrice"));
+  const stopPrice = toNumber(formData.get("stopPrice"));
+  const exitPrice = toNumber(formData.get("exitPrice"));
+  const realizedPnl = toNumber(formData.get("realizedPnl"));
+  const now = new Date();
+  const trade = await db.create("trades", {
+    createdAt: now,
+    updatedAt: now,
+    tradeDateTime: now,
+    marketType: enumValue(MarketType, settings.defaultMarketType, MarketType.CRYPTO_PERP),
+    instrument,
+    direction,
+    status,
+    setupName: null,
+    setupId: null,
+    entryThesis: toText(formData.get("entryThesis")),
+    premortem: null,
+    conditions: [],
+    invalidation: null,
+    concern: null,
+    emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
+    riskPosture: null,
+    confidenceScore: null,
+    entryGrade: EntryGrade.NA,
+    exitReason: null,
+    followedPlan: null,
+    lesson: null,
+    notes: null,
+    entryPrice,
+    stopPrice,
+    targetPrice: null,
+    exitPrice,
+    maePrice: null,
+    mfePrice: null,
+    quantity: null,
+    totalOrderValue: null,
+    leverage: null,
+    realizedPnl,
+    fees: null,
+    funding: null,
+    netPnl: calculateNetPnl(realizedPnl, null, null),
+    rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
+  });
+  revalidatePath("/trades");
+  revalidatePath("/");
+  const label = `${instrument}${direction === "UNKNOWN" ? "" : ` ${direction.toLowerCase()}`}`;
+  if (status === TradeStatus.CLOSED) {
+    redirect(withFeedback(`/trades/${trade.id}`, `${label} logged. Take one minute to review it below.`));
+  }
+  redirect(withFeedback(redirectTo, `${label} logged. Review it when you close it.`));
+}
+
+// One-screen "close & review" ritual on the trade page: outcome numbers,
+// followed-plan, execution grade, mistake chips, one lesson. Only the mistake
+// tags that were shown as chips are replaced, so tags picked from the full
+// list elsewhere are never silently dropped.
+export async function reviewTradeAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const trade = await db.get("trades", id);
+  if (!trade) return;
+  const exitPrice = toNumber(formData.get("exitPrice")) ?? trade.exitPrice;
+  const realizedPnl = toNumber(formData.get("realizedPnl")) ?? trade.realizedPnl;
+  const stillOpen = formData.get("outcome") === "OPEN";
+  const lesson = toText(formData.get("lesson"));
+  await db.update("trades", id, {
+    status: stillOpen ? TradeStatus.OPEN : TradeStatus.CLOSED,
+    exitPrice: stillOpen ? trade.exitPrice : exitPrice,
+    realizedPnl: stillOpen ? trade.realizedPnl : realizedPnl,
+    netPnl: stillOpen ? trade.netPnl : calculateNetPnl(realizedPnl, trade.fees, trade.funding),
+    rMultiple: stillOpen
+      ? trade.rMultiple
+      : calculateRMultiple({ entryPrice: trade.entryPrice, stopPrice: trade.stopPrice, exitPrice, direction: trade.direction }) ?? trade.rMultiple,
+    exitReason: toText(formData.get("exitReason")) ?? trade.exitReason,
+    followedPlan: optionalEnum(FollowedPlan, formData.get("followedPlan")) ?? trade.followedPlan,
+    entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), trade.entryGrade),
+    lesson: lesson ?? trade.lesson,
+    updatedAt: new Date(),
+  });
+
+  const shownTagIds = String(formData.get("shownMistakeTagIds") ?? "").split(",").filter(Boolean);
+  if (shownTagIds.length) {
+    const shown = new Set(shownTagIds);
+    const picked = formData.getAll("mistakeTagId").map(String).filter((tagId) => shown.has(tagId));
+    await db.deleteWhere("tradeMistakes", (link) => link.tradeId === id && shown.has(link.mistakeTagId));
+    for (const mistakeTagId of picked) {
+      await db.create("tradeMistakes", { tradeId: id, mistakeTagId });
+    }
+  }
+
+  // Turn the reflection into a reusable lesson with zero extra clicks.
+  if (lesson) {
+    const lessons = await db.list("lessons");
+    const duplicate = lessons.some((entry) => entry.linkedTradeId === id && entry.lessonText.trim() === lesson.trim());
+    if (!duplicate) {
+      await createLesson({
+        lessonText: lesson,
+        category: LessonCategory.PROCESS,
+        sourceType: LessonSourceType.TRADE,
+        linkedTradeId: id,
+        linkedTranscriptId: null,
+      });
+    }
+  }
+
+  revalidatePath(`/trades/${id}`);
+  revalidatePath("/trades");
+  revalidatePath("/");
+  revalidatePath("/lessons");
+  redirect(withFeedback(`/trades/${id}`, stillOpen ? "Review saved — trade stays open." : "Trade reviewed and closed. Good work showing up."));
+}
+
+// Morning and evening save only their own fields (merged over the existing
+// journal), so finishing the evening never wipes the morning and vice versa.
+export async function saveMorningCheckinAction(formData: FormData) {
+  const date = startOfDay(dateFromForm(formData.get("date")));
+  const existing = await getTodayJournal(date);
+  const payload = {
+    tradingMode: enumValue(TradingMode, formData.get("tradingMode"), existing?.tradingMode ?? TradingMode.PAPER),
+    currentState: optionalEnum(CurrentState, formData.get("currentState")) ?? existing?.currentState ?? null,
+    maxLossForDay: toText(formData.get("maxLossForDay")),
+    maxTradesForDay: toNumber(formData.get("maxTradesForDay")),
+    learningFocus: toText(formData.get("learningFocus")),
+    marketsWatched: formData.has("marketsWatched") ? toText(formData.get("marketsWatched")) : existing?.marketsWatched ?? null,
+    reasonNotToTrade: formData.has("reasonNotToTrade") ? toText(formData.get("reasonNotToTrade")) : existing?.reasonNotToTrade ?? null,
+    updatedAt: new Date(),
+  };
+  if (existing) {
+    await db.update("dailyJournals", existing.id, payload);
+  } else {
+    await db.create("dailyJournals", {
+      id: newId(),
+      date,
+      createdAt: new Date(),
+      tradedToday: null,
+      followedMaxLoss: null,
+      followedMaxTrades: null,
+      bestDecision: null,
+      worstDecision: null,
+      mainEmotion: null,
+      mainMistake: null,
+      oneThingDoneWell: null,
+      oneThingToAvoidTomorrow: null,
+      disciplineScore: null,
+      eodNotes: null,
+      ...payload,
+    });
+  }
+  revalidatePath("/daily");
+  revalidatePath("/");
+  redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Checked in. Have a disciplined day."));
+}
+
+export async function saveEveningReviewAction(formData: FormData) {
+  const date = startOfDay(dateFromForm(formData.get("date")));
+  const existing = await getTodayJournal(date);
+  const payload = {
+    tradedToday: boolFromForm(formData.get("tradedToday")),
+    followedMaxLoss: boolFromForm(formData.get("followedMaxLoss")),
+    followedMaxTrades: boolFromForm(formData.get("followedMaxTrades")),
+    oneThingDoneWell: toText(formData.get("oneThingDoneWell")),
+    oneThingToAvoidTomorrow: toText(formData.get("oneThingToAvoidTomorrow")),
+    disciplineScore: toNumber(formData.get("disciplineScore")),
+    bestDecision: formData.has("bestDecision") ? toText(formData.get("bestDecision")) : existing?.bestDecision ?? null,
+    worstDecision: formData.has("worstDecision") ? toText(formData.get("worstDecision")) : existing?.worstDecision ?? null,
+    mainEmotion: formData.has("mainEmotion") ? toText(formData.get("mainEmotion")) : existing?.mainEmotion ?? null,
+    mainMistake: formData.has("mainMistake") ? toText(formData.get("mainMistake")) : existing?.mainMistake ?? null,
+    eodNotes: formData.has("eodNotes") ? toText(formData.get("eodNotes")) : existing?.eodNotes ?? null,
+    updatedAt: new Date(),
+  };
+  if (existing) {
+    await db.update("dailyJournals", existing.id, payload);
+  } else {
+    await db.create("dailyJournals", {
+      id: newId(),
+      date,
+      createdAt: new Date(),
+      tradingMode: TradingMode.PAPER,
+      marketsWatched: null,
+      maxLossForDay: null,
+      maxTradesForDay: null,
+      currentState: null,
+      learningFocus: null,
+      reasonNotToTrade: null,
+      ...payload,
+    });
+  }
+  revalidatePath("/daily");
+  revalidatePath("/");
+  redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Day reviewed. That's the habit that compounds."));
 }
 
 export async function updateTradeAction(formData: FormData) {

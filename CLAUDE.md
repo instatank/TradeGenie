@@ -111,6 +111,27 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - Rewrote + re-routed the extraction prompts (see above).
 - Swapped the transcript backend from OpenAI to the Anthropic SDK with structured outputs
   (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`); prompts carried over unchanged.
+- **Daily-loop UX overhaul** (owner: the assets page is the model — make the daily loop that
+  simple). Informed by research on TradeZella/Edgewonk/Stonk Journal patterns:
+  - **Tap-first inputs**: `components/Chips.tsx` — radio/checkbox chips, big Long/Short
+    buttons, Yes/No pairs, 1–10 scale. Zero client JS; plain server-rendered forms.
+  - **Today (`/`)** is a guided ritual: morning check-in → log as you go → evening review
+    with live done-states (`lib/coach.ts`); journaling **streak** (rewards showing up,
+    never P&L; milestones at 7/30/100); Mon–Sun P&L week strip; week stats with
+    **on-plan % first** and win rate always next to avg win/loss; "Waiting on you"
+    (open + unreviewed trades); coach's corner = mentor tip of the day + top
+    `analyticsLeaks` insight + resurfaced lesson.
+  - **Quick log** (`components/QuickTradeForm.tsx`, on Today + `/trades/new`): recent-symbol
+    chips, Long/Short, status, optional one-line why, numbers/mood behind one fold. Only
+    the symbol is required (`quickLogTradeAction`).
+  - **Trade page is review-first**: "Close & review" panel (exit numbers → followed-plan →
+    A/B/C grade → 9 primary mistake chips → one lesson, auto-saved to the lesson bank) via
+    `reviewTradeAction`; the full editor stays below, collapsed. Only the mistake tags
+    shown as chips are replaced on save, so "More tags" picked elsewhere survive.
+  - **`/daily` is two rituals**: morning (mind-state chips, mode, 3 guardrail inputs) and
+    evening (today's trades listed, 3 Yes/No taps, two one-liners, discipline 1–10).
+    `saveMorningCheckinAction` / `saveEveningReviewAction` merge into the day's journal
+    without wiping each other's fields; long-form fields sit under "More (optional)".
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
