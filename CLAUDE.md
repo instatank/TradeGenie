@@ -145,6 +145,23 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     wash, `rounded-xl` panels.
   - Removed the orphaned recharts `DashboardCharts` component and the `recharts` dep
     (nothing imported it after the Today rewrite).
+- **Trades + Capture rework** (same treatment as the daily loop):
+  - `/trades` is a **day-grouped journal**, not a spreadsheet: one section per day with the
+    day's P&L in the header; one tappable row per trade (time, symbol, Long/Short chip,
+    status chip, thesis one-liner, mistake badge, P&L + R or a "Review →" nudge). Summary
+    line (count · net P&L · win rate · total R) reflects the active filters. Quick filter
+    row = symbol + from/to; everything else under "More filters & sorting". View tabs
+    trimmed to All / Open / Needs review / Closed (mistakes + this-week still work via
+    params). Calendar deep-links (`?period=&date=`) still filter; active range shows as a
+    dismissible chip. Replaced the client `TradeLogTable` (deleted) with server-rendered
+    rows — trade delete now lives only on the trade page.
+  - `/inbox` (Capture) leads with a **hero paste box** (one textarea + Save & review;
+    time/source/type folded under "Details (optional)"); queue tabs trimmed to
+    To review / Confirmed / Archived / All with a "N waiting for review" badge. Note cards
+    are **confirm-first**: type chip + summary + status/confidence up front, the editable
+    review draft opens first, raw note and all secondary actions (links, re-structure,
+    lessons-only, archive, delete, raw JSON) sit behind folds. No sorting panel (newest
+    first, always).
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged

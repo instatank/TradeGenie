@@ -42,15 +42,14 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/data.ts`: higher-level data fetch helpers.
 - `lib/metrics.ts`: P&L, R, win rate, expectancy, weekly stats, frequency helpers.
 - `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
-- `components/TradeLogTable.tsx`: compact Trades table; single-click expands row, double-click opens detail page.
 
 ## Product Areas
 
 - `/`: Today — daily-ritual dashboard (check-in / quick log / evening review states, streak, week strip, coach's corner)
 - `/calendar`: day/week/month activity view
-- `/inbox`: voice/transcript inbox — one-screen capture (paste → auto-structure → editable review card → confirm)
+- `/inbox`: Capture — hero paste box + review queue; confirm-first note cards, all other actions behind a "More" fold
 - `/daily`: two-ritual page — morning check-in (chips + guardrails) and evening review (prompted micro-form)
-- `/trades`: compact trade log with filters, saved views, calendar range, sorting, pagination
+- `/trades`: day-grouped journal rows (day P&L headers, direction/status chips, mistake badges); quick symbol/date filter row, advanced filters folded
 - `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
 - `/trades/[id]`: review-first trade page — one-minute close & review panel on top, full editor collapsed below
 - `/lessons`: lesson bank
