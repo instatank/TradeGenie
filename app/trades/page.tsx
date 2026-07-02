@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { format, startOfWeek } from "date-fns";
-import { CalendarDays, Plus, X } from "lucide-react";
+import { ArrowUpRight, CalendarDays, ChevronRight, Plus, X } from "lucide-react";
 import { PageTitle, SelectField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
@@ -164,39 +164,143 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
 
 type TradeRowData = Awaited<ReturnType<typeof getTradesWithMistakes>>[number];
 
+// Row = objective data only; tap it for an in-place preview (numbers + notes),
+// and the full trade page is one more click from there.
 function TradeRow({ trade }: { trade: TradeRowData }) {
   const pnl = getTradePnl(trade);
   const needsReview = trade.status === "CLOSED" && ((trade.followedPlan ?? "NA") === "NA" || !trade.lesson);
   return (
-    <Link href={`/trades/${trade.id}`} className="flex items-center gap-3 px-4 py-3 transition hover:bg-forge-panel/60">
-      <span className="w-11 shrink-0 text-xs tabular-nums text-forge-muted">{format(trade.tradeDateTime, "HH:mm")}</span>
-      <span className="w-16 shrink-0 font-semibold">{trade.instrument}</span>
-      <DirectionBadge direction={trade.direction} />
-      <StatusBadge status={trade.status} />
-      <span className="hidden min-w-0 flex-1 truncate text-sm text-forge-muted sm:block">
-        {trade.entryThesis ?? trade.setupName ?? ""}
-      </span>
-      {trade.mistakeTags.length ? (
-        <span className="hidden shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red sm:inline" title={trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")}>
-          {trade.mistakeTags.length} mistake{trade.mistakeTags.length === 1 ? "" : "s"}
+    <details className="group">
+      <summary className="flex cursor-pointer items-center gap-3 px-4 py-3 transition hover:bg-forge-panel/60">
+        <ChevronRight className="h-4 w-4 shrink-0 text-forge-muted transition group-open:rotate-90" aria-hidden="true" />
+        <span className="w-11 shrink-0 text-xs tabular-nums text-forge-muted">{format(trade.tradeDateTime, "HH:mm")}</span>
+        <span className="w-16 shrink-0 font-semibold">{trade.instrument}</span>
+        <DirectionBadge direction={trade.direction} />
+        <StatusBadge status={trade.status} />
+        <span className="hidden min-w-0 flex-1 truncate text-sm tabular-nums text-forge-muted md:block">
+          {trade.entryPrice != null ? (
+            <>
+              {formatPrice(trade.entryPrice)}
+              {trade.exitPrice != null ? <> → {formatPrice(trade.exitPrice)}</> : trade.stopPrice != null ? <> · stop {formatPrice(trade.stopPrice)}</> : null}
+              {trade.leverage != null ? <> · {formatLoose(trade.leverage)}x</> : null}
+            </>
+          ) : (
+            <span className="text-xs">{trade.setupName ?? ""}</span>
+          )}
         </span>
-      ) : null}
-      <span className="ml-auto shrink-0 text-right">
-        {needsReview ? (
-          <span className="text-sm font-medium text-forge-blue">Review →</span>
-        ) : pnl != null ? (
-          <>
-            <span className={`block text-sm font-semibold tabular-nums ${pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-              {pnl >= 0 ? "+" : ""}{formatMoney(pnl)}
-            </span>
-            {trade.rMultiple != null ? <span className="block text-xs tabular-nums text-forge-muted">{trade.rMultiple >= 0 ? "+" : ""}{trade.rMultiple.toFixed(1)}R</span> : null}
-          </>
-        ) : (
-          <span className="text-xs text-forge-muted">{trade.status === "OPEN" ? "open" : ""}</span>
-        )}
-      </span>
-    </Link>
+        <PlanBadge plan={trade.followedPlan} />
+        {trade.entryGrade && trade.entryGrade !== "NA" ? <GradeBadge grade={trade.entryGrade} /> : null}
+        {trade.mistakeTags.length ? (
+          <span className="hidden shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red sm:inline" title={trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")}>
+            {trade.mistakeTags.length}✕
+          </span>
+        ) : null}
+        <span className="ml-auto shrink-0 text-right">
+          {needsReview ? (
+            <span className="text-sm font-medium text-forge-blue">Review →</span>
+          ) : pnl != null ? (
+            <>
+              <span className={`block text-sm font-semibold tabular-nums ${pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
+                {pnl >= 0 ? "+" : ""}{formatMoney(pnl)}
+              </span>
+              {trade.rMultiple != null ? <span className="block text-xs tabular-nums text-forge-muted">{trade.rMultiple >= 0 ? "+" : ""}{trade.rMultiple.toFixed(1)}R</span> : null}
+            </>
+          ) : (
+            <span className="text-xs text-forge-muted">{trade.status === "OPEN" ? "open" : ""}</span>
+          )}
+        </span>
+        <Link
+          href={`/trades/${trade.id}`}
+          className="shrink-0 rounded-md p-1.5 text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink"
+          title={`Open ${trade.instrument} trade`}
+          aria-label={`Open ${trade.instrument} trade page`}
+        >
+          <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+        </Link>
+      </summary>
+      <TradePreview trade={trade} pnl={pnl} needsReview={needsReview} />
+    </details>
   );
+}
+
+// The in-place preview: key numbers on one side, the trade's own words on the
+// other. Editing and everything else lives on the full trade page.
+function TradePreview({ trade, pnl, needsReview }: { trade: TradeRowData; pnl: number | null; needsReview: boolean }) {
+  const notes = [
+    ["Thesis", trade.entryThesis],
+    ["Invalidation", trade.invalidation],
+    ["Exit reason", trade.exitReason],
+    ["Lesson", trade.lesson],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+  const facts: [string, string, ("good" | "bad")?][] = [
+    ["Entry", formatPrice(trade.entryPrice)],
+    ["Stop", formatPrice(trade.stopPrice)],
+    ["Target", formatPrice(trade.targetPrice)],
+    ["Exit", formatPrice(trade.exitPrice)],
+    ["Size", formatLoose(trade.quantity)],
+    ["Leverage", trade.leverage != null ? `${formatLoose(trade.leverage)}x` : "—"],
+    ["P&L", pnl != null ? `${pnl >= 0 ? "+" : ""}${formatMoney(pnl)}` : "—", pnl == null ? undefined : pnl >= 0 ? "good" : "bad"],
+    ["R", trade.rMultiple != null ? `${trade.rMultiple >= 0 ? "+" : ""}${trade.rMultiple.toFixed(2)}` : "—", trade.rMultiple == null ? undefined : trade.rMultiple >= 0 ? "good" : "bad"],
+  ];
+  return (
+    <div className="border-t border-forge-line bg-forge-panel/40 px-4 py-4">
+      <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
+        <div>
+          <div className="grid grid-cols-4 gap-x-3 gap-y-2 rounded-lg border border-forge-line bg-white p-3">
+            {facts.map(([label, value, tone]) => (
+              <span key={label}>
+                <span className="block text-[10px] font-medium uppercase tracking-wide text-forge-muted">{label}</span>
+                <span className={`block text-sm font-medium tabular-nums ${tone === "good" ? "text-forge-green" : tone === "bad" ? "text-forge-red" : value === "—" ? "text-forge-muted" : ""}`}>
+                  {value}
+                </span>
+              </span>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link href={`/trades/${trade.id}`} className="button-secondary min-h-9 px-3 text-sm">
+              {needsReview ? "Review this trade" : "Open full trade"} <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </div>
+        </div>
+        <div className="min-w-0 space-y-2">
+          {notes.map(([label, text]) => (
+            <p key={label} className="text-sm">
+              <span className="font-semibold">{label}:</span> <span className="text-forge-muted">{text}</span>
+            </p>
+          ))}
+          {!notes.length ? <p className="text-sm text-forge-muted">No notes on this trade yet — open it to add the story.</p> : null}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {trade.setupName ? <InfoChip label={`Setup: ${trade.setupName}`} /> : null}
+            {trade.emotionalState && trade.emotionalState !== "UNKNOWN" ? <InfoChip label={`Mind: ${humanize(trade.emotionalState)}`} /> : null}
+            {trade.mistakeTags.map((link) => (
+              <span key={link.id} className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red">{link.mistakeTag.label}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoChip({ label }: { label: string }) {
+  return <span className="rounded-full bg-forge-panel px-2 py-0.5 text-xs text-forge-muted">{label}</span>;
+}
+
+function PlanBadge({ plan }: { plan: string | null }) {
+  if (!plan || plan === "NA") return null;
+  const config: Record<string, { label: string; className: string }> = {
+    YES: { label: "plan ✓", className: "bg-emerald-50 text-forge-green" },
+    PARTIAL: { label: "plan ~", className: "bg-amber-50 text-amber-700" },
+    NO: { label: "plan ✗", className: "bg-red-50 text-forge-red" },
+  };
+  const entry = config[plan];
+  if (!entry) return null;
+  return <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline ${entry.className}`}>{entry.label}</span>;
+}
+
+function GradeBadge({ grade }: { grade: string }) {
+  const className = grade === "A" ? "bg-emerald-50 text-forge-green" : grade === "B" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-forge-red";
+  return <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold sm:inline ${className}`}>{grade}</span>;
 }
 
 function DirectionBadge({ direction }: { direction: string }) {
@@ -284,4 +388,12 @@ function compareTrades(a: TradeRowData, b: TradeRowData, sort: string) {
 
 function formatMoney(value: number) {
   return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
+
+function formatPrice(value: number | null | undefined) {
+  return value == null ? "—" : value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+function formatLoose(value: number | null | undefined) {
+  return value == null ? "—" : String(value);
 }

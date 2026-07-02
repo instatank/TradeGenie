@@ -147,8 +147,11 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     (nothing imported it after the Today rewrite).
 - **Trades + Capture rework** (same treatment as the daily loop):
   - `/trades` is a **day-grouped journal**, not a spreadsheet: one section per day with the
-    day's P&L in the header; one tappable row per trade (time, symbol, Long/Short chip,
-    status chip, thesis one-liner, mistake badge, P&L + R or a "Review →" nudge). Summary
+    day's P&L in the header; one row per trade showing **objective data only** (time,
+    symbol, Long/Short chip, status chip, entry→exit/stop/leverage, plan ✓/~/✗ badge,
+    A/B/C grade badge, mistake count, P&L + R or a "Review →" nudge). Tapping a row
+    expands an **in-place preview** (numbers grid + thesis/invalidation/exit/lesson +
+    mistake chips); the arrow icon or "Open full trade" goes to the full page. Summary
     line (count · net P&L · win rate · total R) reflects the active filters. Quick filter
     row = symbol + from/to; everything else under "More filters & sorting". View tabs
     trimmed to All / Open / Needs review / Closed (mistakes + this-week still work via
