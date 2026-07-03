@@ -17,6 +17,17 @@ Update it when architecture, lean defaults, the working contract, or open items 
 
 Don't duplicate the stack/file/route lists here; they live in `AGENTS.md`.
 
+## Shared playbook (cross-project — read at session start)
+
+The single source of truth for global working rules, transferable lessons, and the
+ship/verify SOPs is **`playbook/`** in `instatank/time-tracker` (`PLAYBOOK.md` first —
+read `/home/user/time-tracker/playbook/PLAYBOOK.md` if that repo is cloned, else fetch via
+GitHub `get_file_contents`). Before ending a session that shipped commits, run the
+**`/wrap`** skill (a Stop hook nudges once if forgotten) — it reconciles this file's
+"Decisions log" + "Open items" against reality, appends friction cards to `LEARNINGS.md`,
+and asks the founder the learning questions from `playbook/LEARNING_METHOD.md`. Use the
+**`/ship`** skill for pushes (typecheck + lint + build gate; never push red).
+
 ## Who this is for (one line)
 One non-technical discretionary crypto-perp trader. A personal daily-habit journal — not a
 product. No multi-user, auth, payments, broker sync, signals, or financial advice, ever.
