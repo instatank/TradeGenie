@@ -42,7 +42,7 @@ Without Firebase env vars, data is stored locally in:
 data/tradeforge-store.json
 ```
 
-That file is ignored by git.
+That file is ignored by git. (The `tradeforge` name is a deliberate legacy identifier from before the app was renamed to TradeGenie — kept so existing local data isn't orphaned.)
 
 ## Firebase Setup
 

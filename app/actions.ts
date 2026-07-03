@@ -36,7 +36,7 @@ import {
 type StructuredJson = Record<string, unknown>;
 
 function withFeedback(target: string, message: string, type = "success") {
-  const url = new URL(target, "http://tradeforge.local");
+  const url = new URL(target, "http://tradegenie.local");
   url.searchParams.set("feedback", message);
   url.searchParams.set("feedbackType", type);
   return `${url.pathname}${url.search}${url.hash}`;

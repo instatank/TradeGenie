@@ -20,7 +20,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 ## Data And Persistence
 
 - Storage abstraction lives in `lib/store.ts`.
-- Current local fallback file: `data/tradeforge-store.json`.
+- Current local fallback file: `data/tradeforge-store.json`. The `tradeforge` filename is a deliberate legacy identifier from before the TradeForge → TradeGenie rename — do not rename it; it is the address of existing local-dev data.
 - Firebase activates only when credentials are configured.
 - Required Firebase env vars for Vercel/local Firestore:
   - `FIREBASE_PROJECT_ID`

@@ -54,6 +54,8 @@ const emptyStore: StoreShape = {
   assetNotes: [],
 };
 
+// "tradeforge" is a deliberate legacy identifier (pre-rename app name) — this filename is a
+// load-bearing address for existing local-dev data; renaming it would orphan that data.
 const localStorePath = path.join(process.cwd(), "data", "tradeforge-store.json");
 
 // Storage status, single source of truth.
