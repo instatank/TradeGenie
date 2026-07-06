@@ -52,6 +52,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/trades`: day-grouped journal rows (day P&L headers, direction/status chips, mistake badges); quick symbol/date filter row, advanced filters folded
 - `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
 - `/trades/[id]`: review-first trade page — one-minute close & review panel on top, full editor collapsed below
+- `/assets`, `/assets/[id]`: per-asset tracker — living thesis/levels page + running note thread (composer has an optional AI "Structure" tidy pass)
 - `/lessons`: lesson bank
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews

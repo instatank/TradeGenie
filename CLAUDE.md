@@ -81,7 +81,8 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   netPnl + R-multiple). Strict "only if actually stated, never invent" rule in the prompts.
 
 ## Navigation (lean header)
-- Primary nav = the daily loop only: **Today · Capture · Trades · Review** (`primaryNavItems`).
+- Primary nav = the daily loop + the asset tracker: **Today · Capture · Trades · Assets ·
+  Review** (`primaryNavItems`).
   Everything else (Calendar, Playbook, Analytics, Lessons, Import, Weekly Review, Settings) is
   under a **"More"** `<details>` dropdown (`moreNavItems`). Nothing removed.
 
@@ -107,10 +108,19 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - **Friction overhaul** (see "Capture flow" + "Navigation" above): collapsed the
   save→structure→confirm→re-fill pipeline into one editable review card with auto-structure on
   save; taught extraction to capture spoken prices/size/P&L; trimmed the 11-item nav to a
-  4-item daily loop + "More" dropdown.
+  lean daily-loop header + "More" dropdown (Assets joined the primary nav later).
 - Rewrote + re-routed the extraction prompts (see above).
 - Swapped the transcript backend from OpenAI to the Anthropic SDK with structured outputs
   (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`); prompts carried over unchanged.
+- **Per-asset tracker** (`/assets`, `/assets/[id]`): one living page per instrument —
+  current thesis + key levels edited in place, with a running note thread underneath. The
+  note composer offers an optional **"Structure" tidy pass**
+  (`structureAssetNoteDraftAction`): AI cleans up a raw thought-dump and shows the result
+  for in-place review; nothing is saved by the tidy step itself. Assets sits in the
+  primary nav.
+- Calendar shows the recent week by default; older days fold behind a disclosure. "More"
+  nav dropdown closes on outside click / Escape and no longer gets clipped by the nav's
+  `overflow-x-auto`.
 - **Daily-loop UX overhaul** (owner: the assets page is the model — make the daily loop that
   simple). Informed by research on TradeZella/Edgewonk/Stonk Journal patterns:
   - **Tap-first inputs**: `components/Chips.tsx` — radio/checkbox chips, big Long/Short
