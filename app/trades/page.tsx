@@ -3,6 +3,7 @@ import { format, startOfWeek } from "date-fns";
 import { ArrowUpRight, CalendarDays, ChevronRight, Plus, X } from "lucide-react";
 import { PageTitle, SelectField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
+import { TagPills } from "@/components/TagPills";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, marketTypes, tradeStatuses } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
@@ -275,6 +276,7 @@ function TradePreview({ trade, pnl, needsReview }: { trade: TradeRowData; pnl: n
             {trade.mistakeTags.map((link) => (
               <span key={link.id} className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red">{link.mistakeTag.label}</span>
             ))}
+            <TagPills tags={trade.tags} />
           </div>
         </div>
       </div>

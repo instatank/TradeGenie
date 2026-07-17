@@ -12,6 +12,8 @@ import {
   updateTranscriptAction,
 } from "@/app/actions";
 import { BoolSelect, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { TagPills, TagsField } from "@/components/TagPills";
+import { formatTagsForInput } from "@/lib/tags";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { directions, followedPlanOptions, humanize, mindStateOptions, riskPostures, transcriptTypes } from "@/lib/constants";
@@ -74,11 +76,14 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
           <span className="text-xs text-forge-muted">Auto-structures on save → review the draft below → confirm.</span>
         </div>
         <details>
-          <summary className="cursor-pointer text-sm font-medium text-forge-muted hover:text-forge-ink">Details (optional) — time, source, note type</summary>
+          <summary className="cursor-pointer text-sm font-medium text-forge-muted hover:text-forge-ink">Details (optional) — time, source, note type, tags</summary>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <TextField label="Note time" name="transcriptDateTime" type="datetime-local" defaultValue={format(new Date(), "yyyy-MM-dd'T'HH:mm")} />
             <TextField label="Dictation source" name="sourceTool" defaultValue={settings.defaultSourceTool} />
             <SelectField label="Note type" name="transcriptType" options={transcriptTypes} defaultValue="UNKNOWN" />
+          </div>
+          <div className="mt-3">
+            <TagsField />
           </div>
           <p className="mt-2 text-xs text-forge-muted">Leave the type on Unknown — it gets detected from what you wrote.</p>
         </details>
@@ -108,7 +113,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
           const needsTradeLink = detectedType === "TRADE_EXIT_REVIEW" && !transcript.linkedTradeId;
           const isActionable = transcript.processingStatus === "UNPROCESSED" || transcript.processingStatus === "STRUCTURED";
           return (
-            <details key={transcript.id} className={`panel group ${isActionable ? "border-l-4 border-forge-blue/60" : ""}`}>
+            <details key={transcript.id} id={`note-${transcript.id}`} className={`panel group scroll-mt-24 ${isActionable ? "border-l-4 border-forge-blue/60" : ""}`}>
               <summary className="flex cursor-pointer items-center gap-3">
                 <ChevronRight className="h-4 w-4 shrink-0 text-forge-muted transition group-open:rotate-90" aria-hidden="true" />
                 <TypeBadge type={detectedType} />
@@ -124,6 +129,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
               </summary>
 
               <div className="mt-4 space-y-4 border-t border-forge-line pt-4">
+                <TagPills tags={transcript.tags} />
                 {transcript.structuredJson ? (
                   <section className="rounded-xl border border-forge-blue/40 bg-sky-50/40 p-4">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
@@ -176,6 +182,9 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                       <TextField label="Note time" name="transcriptDateTime" type="datetime-local" defaultValue={format(transcript.transcriptDateTime, "yyyy-MM-dd'T'HH:mm")} />
                       <TextField label="Source" name="sourceTool" defaultValue={transcript.sourceTool} />
                       <SelectField label="Note type" name="transcriptType" options={transcriptTypes} defaultValue={transcript.transcriptType} />
+                      <div className="sm:col-span-3">
+                        <TagsField defaultValue={formatTagsForInput(transcript.tags)} />
+                      </div>
                       <p className="text-xs text-forge-muted sm:col-span-2">Saving edits re-queues the note for structuring.</p>
                       <div className="flex items-end justify-end">
                         <button className="button-secondary" type="submit">Save edits</button>

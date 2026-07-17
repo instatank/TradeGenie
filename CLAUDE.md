@@ -80,6 +80,35 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   P&L flow through extraction → editable card → trade (`createTradeFromStructured` derives
   netPnl + R-multiple). Strict "only if actually stated, never invent" rule in the prompts.
 
+## Tagging & search (one tokenizer, one index)
+- **`lib/tags.ts` is THE tag tokenizer.** Every path that turns text into tags — inline
+  `#hashtags`, the optional Tags inputs, search-query parsing — calls `normalizeTag()`.
+  DayOS's worst tag bug was two tokenizers quietly diverging; never add a second one.
+  Tag charset: lowercase `a-z0-9_-`, 2–40 chars; `#` must start a word (`64#200` is not a tag).
+- **Tags are stored** as `tags?: string[]` on trades, transcripts, lessons, daily journals,
+  assets, asset notes, and setups — derived at save time (`deriveTags`) from inline
+  `#hashtags` across the record's text fields plus the optional Tags input. Zero friction:
+  typing `#fomo` in any thesis/note/lesson is enough. No migration; undefined = [].
+- **Save rules**: full editors *recompute* tags (their Tags input is prefilled, so deleting
+  there + removing the hashtag from text removes a tag). Quick/partial saves (review panel,
+  morning/evening check-ins) only *grow* tags (`mergeTags`) so they never wipe tags added
+  elsewhere. Confirming a voice note carries the note's tags onto the created
+  trade/journal/lessons.
+- **`lib/search.ts` is the unified index**: every collection (trades incl. mistake/condition
+  labels, captured notes, lessons, assets + threads, daily journals, setups, weekly reviews,
+  imported executions) flattened to labeled fields per doc. Per-request linear scan — DayOS
+  measured ~15ms over 5k entries; don't build a stored index at personal scale.
+- **Query grammar** (DayOS-proven, improved): `#tag` tokens are exact-membership (`#win`
+  never matches #winner — pills and search always agree), plain words are case-insensitive
+  order-independent AND-substrings, and the two mix freely (`#fomo btc stop`).
+- **/search UX**: header search box on every page → grouped results with type-filter tabs,
+  anchored `<mark>` snippets labeled with the matching field, tappable tag pills everywhere
+  (inbox cards, trade header + list preview, lessons, asset notes, daily header) that run an
+  exact-tag search; active `#tag` tokens show as dismissible chips. The **empty search page
+  is the tag index**: every tag with usage counts, plus a plain-English syntax explainer.
+  Result links deep-link to real records (`/inbox?view=all#note-<id>`, `/lessons?view=all#lesson-<id>`,
+  `/assets/<id>#note-<id>` — cards carry matching `id=` anchors + `scroll-mt-24`).
+
 ## Navigation (lean header)
 - Primary nav = the daily loop + the asset tracker: **Today · Capture · Trades · Assets ·
   Review** (`primaryNavItems`).
@@ -175,6 +204,15 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     review draft opens first, raw note and all secondary actions (links, re-structure,
     lessons-only, archive, delete, raw JSON) sit behind folds. No sorting panel (newest
     first, always).
+
+- **Tagging + indexing + search system** (see "Tagging & search" above): one tokenizer
+  (`lib/tags.ts`), stored `tags[]` derived on every save path in `app/actions.ts`, unified
+  cross-collection search index + mixed `#tag`/word query engine (`lib/search.ts`), rebuilt
+  `/search` (type tabs, highlighted anchored snippets, dismissible tag chips, tag-index
+  empty state), tappable `TagPills` across inbox/trades/lessons/assets/daily, optional
+  `TagsField` on full editors only (quick flows stay tap-only — friction budgets intact).
+  Deliberately NOT done: AI-proposed tags (the tag vocabulary stays the trader's own;
+  extraction already maps mistakes to structured tags), and no stored/inverted index.
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged

@@ -41,6 +41,9 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/store.ts`: persistence adapter.
 - `lib/data.ts`: higher-level data fetch helpers.
 - `lib/metrics.ts`: P&L, R, win rate, expectancy, weekly stats, frequency helpers.
+- `lib/tags.ts`: THE tag tokenizer — normalize/extract/derive for free-form `#tags`; every tag path goes through it.
+- `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
+- `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
 - `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
 
 ## Product Areas
@@ -57,7 +60,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews
 - `/settings`: AI settings and prompt templates
-- `/search`: global search
+- `/search`: global search — one box over every collection (words = AND substring, `#tags` = exact), type filter tabs, highlighted anchored snippets; empty state doubles as the browsable tag index
 
 ## UX Principles
 

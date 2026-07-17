@@ -12,6 +12,7 @@ import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
+import { deriveTags, mergeTags } from "@/lib/tags";
 import { structureTranscript } from "@/lib/transcript-processor";
 import {
   AiConfidence,
@@ -122,6 +123,7 @@ export async function saveTranscriptAction(formData: FormData) {
     linkedDailyJournalId: null,
     structuredJson: null,
     aiConfidence: null,
+    tags: deriveTags([rawText], toText(formData.get("tags"))),
   });
 
   // Auto-structure on save so the note lands as a reviewable draft in a single
@@ -173,7 +175,7 @@ export async function confirmTranscriptAction(formData: FormData) {
   let linkedDailyJournalId = transcript.linkedDailyJournalId;
 
   if (type === "TRADE_ENTRY_NOTE" || (structured.instrument && !linkedTradeId && type !== "EOD_REVIEW")) {
-    const trade = await createTradeFromStructured(transcript.transcriptDateTime, structured);
+    const trade = await createTradeFromStructured(transcript.transcriptDateTime, structured, transcript.tags);
     linkedTradeId = trade.id;
     await linkSuggestedMistakes(trade.id, structured.suggestedMistakeTags);
   }
@@ -201,6 +203,13 @@ export async function confirmTranscriptAction(formData: FormData) {
   if (type === "EOD_REVIEW" || type === "DAILY_CHECKIN") {
     const day = startOfDay(transcript.transcriptDateTime);
     const existing = await getTodayJournal(day);
+    const journalTexts = [
+      nullableString(structured.bestDecision),
+      nullableString(structured.worstDecision),
+      nullableString(structured.mainMistake),
+      nullableString(structured.oneThingDoneWell),
+      nullableString(structured.oneThingToAvoidTomorrow),
+    ];
     const payload = {
       tradedToday: nullableBool(structured.tradedToday),
       followedMaxLoss: nullableBool(structured.followedMaxLoss),
@@ -212,6 +221,8 @@ export async function confirmTranscriptAction(formData: FormData) {
       oneThingDoneWell: nullableString(structured.oneThingDoneWell),
       oneThingToAvoidTomorrow: nullableString(structured.oneThingToAvoidTomorrow),
       disciplineScore: nullableNumber(structured.disciplineScore),
+      // Partial save: tags only grow (spoken #hashtags + the note's own tags).
+      tags: mergeTags(existing?.tags, [...(transcript.tags ?? []), ...deriveTags(journalTexts)]),
       updatedAt: new Date(),
     };
     const daily = existing
@@ -233,7 +244,7 @@ export async function confirmTranscriptAction(formData: FormData) {
     linkedDailyJournalId = daily.id;
   }
 
-  await createLessonsFromStructured(structured, id, linkedTradeId ?? undefined);
+  await createLessonsFromStructured(structured, id, linkedTradeId ?? undefined, transcript.tags);
   await db.update("transcripts", id, {
     linkedTradeId,
     linkedDailyJournalId,
@@ -266,10 +277,12 @@ export async function archiveTranscriptAction(formData: FormData) {
 
 export async function updateTranscriptAction(formData: FormData) {
   const id = String(formData.get("id"));
+  const rawText = toText(formData.get("rawText")) ?? "";
   await db.update("transcripts", id, {
     transcriptDateTime: dateFromForm(formData.get("transcriptDateTime")),
     sourceTool: toText(formData.get("sourceTool")),
-    rawText: toText(formData.get("rawText")) ?? "",
+    rawText,
+    tags: deriveTags([rawText], toText(formData.get("tags"))),
     transcriptType: enumValue(TranscriptType, formData.get("transcriptType"), TranscriptType.UNKNOWN),
     processingStatus: ProcessingStatus.UNPROCESSED,
     cleanedSummary: null,
@@ -311,7 +324,7 @@ export async function extractLessonsAction(formData: FormData) {
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
   const structured = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : await structureTranscript(transcript.rawText, transcript.transcriptType);
-  await createLessonsFromStructured(structured, id, transcript.linkedTradeId ?? undefined);
+  await createLessonsFromStructured(structured, id, transcript.linkedTradeId ?? undefined, transcript.tags);
   revalidatePath("/lessons");
   revalidatePath("/inbox");
   await redirectBackWithFeedback("Lessons saved from voice note.", "/inbox");
@@ -342,10 +355,17 @@ export async function saveDailyJournalAction(formData: FormData) {
     eodNotes: toText(formData.get("eodNotes")),
     updatedAt: new Date(),
   };
+  // The full form submits every text field, so tags are recomputed cleanly —
+  // deleting a #hashtag here is how you remove a tag from the day.
+  const tags = deriveTags([
+    payload.marketsWatched, payload.learningFocus, payload.reasonNotToTrade,
+    payload.bestDecision, payload.worstDecision, payload.mainMistake,
+    payload.oneThingDoneWell, payload.oneThingToAvoidTomorrow, payload.eodNotes,
+  ]);
   if (existing) {
-    await db.update("dailyJournals", existing.id, payload);
+    await db.update("dailyJournals", existing.id, { ...payload, tags });
   } else {
-    await db.create("dailyJournals", { id: newId(), createdAt: new Date(), ...payload });
+    await db.create("dailyJournals", { id: newId(), createdAt: new Date(), ...payload, tags });
   }
   revalidatePath("/daily");
   revalidatePath("/");
@@ -371,6 +391,12 @@ export async function deleteDailyJournalAction(formData: FormData) {
 export async function createTradeAction(formData: FormData) {
   const numeric = objectiveNumbers(formData);
   const now = new Date();
+  const texts = {
+    entryThesis: toText(formData.get("entryThesis")),
+    premortem: toText(formData.get("premortem")),
+    invalidation: toText(formData.get("invalidation")),
+    concern: toText(formData.get("concern")),
+  };
   const trade = await db.create("trades", {
     createdAt: now,
     updatedAt: now,
@@ -379,13 +405,11 @@ export async function createTradeAction(formData: FormData) {
     instrument: String(formData.get("instrument") ?? "").trim().toUpperCase(),
     direction: enumValue(Direction, formData.get("direction"), Direction.UNKNOWN),
     status: enumValue(TradeStatus, formData.get("status"), TradeStatus.IDEA),
-    entryThesis: toText(formData.get("entryThesis")),
+    ...texts,
+    tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
     setupName: toText(formData.get("setupName")),
     setupId: toText(formData.get("setupId")),
-    premortem: toText(formData.get("premortem")),
     conditions: cleanConditions(formData.getAll("conditions")),
-    invalidation: toText(formData.get("invalidation")),
-    concern: toText(formData.get("concern")),
     emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
     riskPosture: optionalEnum(RiskPosture, formData.get("riskPosture")),
     confidenceScore: toNumber(formData.get("confidenceScore")),
@@ -429,6 +453,7 @@ export async function quickLogTradeAction(formData: FormData) {
     setupName: null,
     setupId: null,
     entryThesis: toText(formData.get("entryThesis")),
+    tags: deriveTags([toText(formData.get("entryThesis"))]),
     premortem: null,
     conditions: [],
     invalidation: null,
@@ -477,7 +502,10 @@ export async function reviewTradeAction(formData: FormData) {
   const realizedPnl = toNumber(formData.get("realizedPnl")) ?? trade.realizedPnl;
   const stillOpen = formData.get("outcome") === "OPEN";
   const lesson = toText(formData.get("lesson"));
+  const exitReasonText = toText(formData.get("exitReason"));
   await db.update("trades", id, {
+    // Partial save (no Tags input here): tags only grow, never wiped.
+    tags: mergeTags(trade.tags, deriveTags([lesson, exitReasonText])),
     status: stillOpen ? TradeStatus.OPEN : TradeStatus.CLOSED,
     exitPrice: stillOpen ? trade.exitPrice : exitPrice,
     realizedPnl: stillOpen ? trade.realizedPnl : realizedPnl,
@@ -485,7 +513,7 @@ export async function reviewTradeAction(formData: FormData) {
     rMultiple: stillOpen
       ? trade.rMultiple
       : calculateRMultiple({ entryPrice: trade.entryPrice, stopPrice: trade.stopPrice, exitPrice, direction: trade.direction }) ?? trade.rMultiple,
-    exitReason: toText(formData.get("exitReason")) ?? trade.exitReason,
+    exitReason: exitReasonText ?? trade.exitReason,
     followedPlan: optionalEnum(FollowedPlan, formData.get("followedPlan")) ?? trade.followedPlan,
     entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), trade.entryGrade),
     lesson: lesson ?? trade.lesson,
@@ -539,8 +567,12 @@ export async function saveMorningCheckinAction(formData: FormData) {
     reasonNotToTrade: formData.has("reasonNotToTrade") ? toText(formData.get("reasonNotToTrade")) : existing?.reasonNotToTrade ?? null,
     updatedAt: new Date(),
   };
+  const morningTags = mergeTags(
+    existing?.tags,
+    deriveTags([payload.maxLossForDay, payload.learningFocus, payload.marketsWatched, payload.reasonNotToTrade]),
+  );
   if (existing) {
-    await db.update("dailyJournals", existing.id, payload);
+    await db.update("dailyJournals", existing.id, { ...payload, tags: morningTags });
   } else {
     await db.create("dailyJournals", {
       id: newId(),
@@ -558,6 +590,7 @@ export async function saveMorningCheckinAction(formData: FormData) {
       disciplineScore: null,
       eodNotes: null,
       ...payload,
+      tags: morningTags,
     });
   }
   revalidatePath("/daily");
@@ -582,8 +615,15 @@ export async function saveEveningReviewAction(formData: FormData) {
     eodNotes: formData.has("eodNotes") ? toText(formData.get("eodNotes")) : existing?.eodNotes ?? null,
     updatedAt: new Date(),
   };
+  const eveningTags = mergeTags(
+    existing?.tags,
+    deriveTags([
+      payload.oneThingDoneWell, payload.oneThingToAvoidTomorrow, payload.bestDecision,
+      payload.worstDecision, payload.mainMistake, payload.eodNotes,
+    ]),
+  );
   if (existing) {
-    await db.update("dailyJournals", existing.id, payload);
+    await db.update("dailyJournals", existing.id, { ...payload, tags: eveningTags });
   } else {
     await db.create("dailyJournals", {
       id: newId(),
@@ -597,6 +637,7 @@ export async function saveEveningReviewAction(formData: FormData) {
       learningFocus: null,
       reasonNotToTrade: null,
       ...payload,
+      tags: eveningTags,
     });
   }
   revalidatePath("/daily");
@@ -607,6 +648,15 @@ export async function saveEveningReviewAction(formData: FormData) {
 export async function updateTradeAction(formData: FormData) {
   const id = String(formData.get("id"));
   const numeric = objectiveNumbers(formData);
+  const texts = {
+    entryThesis: toText(formData.get("entryThesis")),
+    premortem: toText(formData.get("premortem")),
+    invalidation: toText(formData.get("invalidation")),
+    concern: toText(formData.get("concern")),
+    exitReason: toText(formData.get("exitReason")),
+    lesson: toText(formData.get("lesson")),
+    notes: toText(formData.get("notes")),
+  };
   await db.update("trades", id, {
     tradeDateTime: dateFromForm(formData.get("tradeDateTime")),
     marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
@@ -615,19 +665,16 @@ export async function updateTradeAction(formData: FormData) {
     status: enumValue(TradeStatus, formData.get("status"), TradeStatus.IDEA),
     setupName: toText(formData.get("setupName")),
     setupId: toText(formData.get("setupId")),
-    premortem: toText(formData.get("premortem")),
     conditions: cleanConditions(formData.getAll("conditions")),
-    entryThesis: toText(formData.get("entryThesis")),
-    invalidation: toText(formData.get("invalidation")),
-    concern: toText(formData.get("concern")),
+    ...texts,
+    // Full editor: recompute from everything (its Tags input is prefilled with
+    // the current tags), so this is the one place a tag can be removed.
+    tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
     emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
     riskPosture: optionalEnum(RiskPosture, formData.get("riskPosture")),
     confidenceScore: toNumber(formData.get("confidenceScore")),
     entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), EntryGrade.NA),
-    exitReason: toText(formData.get("exitReason")),
     followedPlan: optionalEnum(FollowedPlan, formData.get("followedPlan")),
-    lesson: toText(formData.get("lesson")),
-    notes: toText(formData.get("notes")),
     updatedAt: new Date(),
     ...numeric,
   });
@@ -681,7 +728,7 @@ export async function createLessonFromTradeAction(formData: FormData) {
     sourceType: LessonSourceType.TRADE,
     linkedTradeId: tradeId,
     linkedTranscriptId: null,
-  });
+  }, toText(formData.get("tags")));
   revalidatePath(`/trades/${tradeId}`);
   revalidatePath("/lessons");
   redirect(withFeedback(`/trades/${tradeId}`, "Lesson added from trade."));
@@ -696,7 +743,7 @@ export async function addManualLessonAction(formData: FormData) {
     sourceType: LessonSourceType.MANUAL,
     linkedTradeId: null,
     linkedTranscriptId: null,
-  });
+  }, toText(formData.get("tags")));
   revalidatePath("/lessons");
   await redirectBackWithFeedback("Lesson added.", "/lessons");
 }
@@ -716,6 +763,7 @@ export async function updateLessonAction(formData: FormData) {
   await db.update("lessons", id, {
     lessonText,
     category: enumValue(LessonCategory, formData.get("category"), LessonCategory.PROCESS),
+    tags: deriveTags([lessonText], toText(formData.get("tags"))),
     updatedAt: new Date(),
   });
   revalidatePath("/lessons");
@@ -923,11 +971,15 @@ export async function createAssetAction(formData: FormData) {
 
 export async function updateAssetAction(formData: FormData) {
   const id = String(formData.get("id"));
-  await db.update("assets", id, {
+  const texts = {
     htfBias: toText(formData.get("htfBias")),
     ltfBias: toText(formData.get("ltfBias")),
     levels: toText(formData.get("levels")),
     gamePlan: toText(formData.get("gamePlan")),
+  };
+  await db.update("assets", id, {
+    ...texts,
+    tags: deriveTags(Object.values(texts)),
     marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
     updatedAt: new Date(),
   });
@@ -963,6 +1015,7 @@ export async function addAssetNoteAction(formData: FormData) {
     assetId,
     timeframe: optionalEnum(AssetTimeframe, formData.get("timeframe")),
     text,
+    tags: deriveTags([text]),
   });
   // Touch the asset so it bubbles to the top of the index on new activity.
   await db.update("assets", assetId, { updatedAt: now });
@@ -978,6 +1031,7 @@ export async function updateAssetNoteAction(formData: FormData) {
   if (!text) return;
   await db.update("assetNotes", id, {
     text,
+    tags: deriveTags([text]),
     timeframe: optionalEnum(AssetTimeframe, formData.get("timeframe")),
     updatedAt: new Date(),
   });
@@ -997,15 +1051,19 @@ export async function createSetupAction(formData: FormData) {
   const name = toText(formData.get("name"));
   if (!name) return;
   const now = new Date();
+  const texts = {
+    rules: toText(formData.get("rules")),
+    checklist: toText(formData.get("checklist")),
+    notes: toText(formData.get("notes")),
+  };
   await db.create("setups", {
     createdAt: now,
     updatedAt: now,
     name,
     directionBias: enumValue(SetupDirectionBias, formData.get("directionBias"), SetupDirectionBias.BOTH),
-    rules: toText(formData.get("rules")),
-    checklist: toText(formData.get("checklist")),
+    ...texts,
+    tags: deriveTags(Object.values(texts)),
     idealRiskReward: toNumber(formData.get("idealRiskReward")),
-    notes: toText(formData.get("notes")),
     isActive: true,
   });
   revalidatePath("/playbook");
@@ -1017,13 +1075,17 @@ export async function updateSetupAction(formData: FormData) {
   const id = String(formData.get("id"));
   const name = toText(formData.get("name"));
   if (!name) return;
+  const texts = {
+    rules: toText(formData.get("rules")),
+    checklist: toText(formData.get("checklist")),
+    notes: toText(formData.get("notes")),
+  };
   await db.update("setups", id, {
     name,
     directionBias: enumValue(SetupDirectionBias, formData.get("directionBias"), SetupDirectionBias.BOTH),
-    rules: toText(formData.get("rules")),
-    checklist: toText(formData.get("checklist")),
+    ...texts,
+    tags: deriveTags(Object.values(texts)),
     idealRiskReward: toNumber(formData.get("idealRiskReward")),
-    notes: toText(formData.get("notes")),
     updatedAt: new Date(),
   });
   revalidatePath("/playbook");
@@ -1062,7 +1124,7 @@ export async function toggleLessonPinAction(formData: FormData) {
   await redirectBackWithFeedback(isPinned ? "Lesson unpinned." : "Lesson pinned.", "/lessons");
 }
 
-async function createTradeFromStructured(tradeDateTime: Date, structured: StructuredJson) {
+async function createTradeFromStructured(tradeDateTime: Date, structured: StructuredJson, sourceTags?: string[]) {
   // Carry the spoken numbers through to the trade so the trader doesn't have to
   // re-type prices/size on the trade page. Derived fields are computed here.
   const direction = enumFromText(Direction, structured.direction, Direction.UNKNOWN);
@@ -1084,6 +1146,13 @@ async function createTradeFromStructured(tradeDateTime: Date, structured: Struct
     entryThesis: nullableString(structured.entryThesis),
     invalidation: nullableString(structured.invalidation),
     concern: nullableString(structured.concern),
+    // #hashtags in the original voice note follow the note into the trade.
+    tags: mergeTags(sourceTags, deriveTags([
+      nullableString(structured.entryThesis),
+      nullableString(structured.invalidation),
+      nullableString(structured.concern),
+      nullableString(structured.exitReason),
+    ])),
     emotionalState: enumFromText(EmotionalState, structured.emotionalState, EmotionalState.UNKNOWN),
     riskPosture: enumFromText(RiskPosture, structured.riskPosture, RiskPosture.UNKNOWN),
     confidenceScore: nullableNumber(structured.confidenceScore),
@@ -1147,28 +1216,37 @@ async function linkSuggestedMistakes(tradeId: string, tags: unknown) {
   }
 }
 
-async function createLessonsFromStructured(structured: StructuredJson, transcriptId: string, tradeId?: string) {
+async function createLessonsFromStructured(structured: StructuredJson, transcriptId: string, tradeId?: string, inheritedTags?: string[]) {
   const rawLessons = Array.isArray(structured.lessons) ? structured.lessons : structured.lesson ? [structured.lesson] : [];
   for (const raw of rawLessons) {
     const rawRecord = asRecord(raw);
     const lessonText = typeof raw === "string" ? raw : stringFromUnknown(rawRecord?.lessonText);
     if (!lessonText) continue;
-    await createLesson({
-      lessonText,
-      category: enumFromText(LessonCategory, rawRecord?.category, LessonCategory.PROCESS),
-      sourceType: LessonSourceType.TRANSCRIPT,
-      linkedTranscriptId: transcriptId,
-      linkedTradeId: tradeId ?? null,
-    });
+    await createLesson(
+      {
+        lessonText,
+        category: enumFromText(LessonCategory, rawRecord?.category, LessonCategory.PROCESS),
+        sourceType: LessonSourceType.TRANSCRIPT,
+        linkedTranscriptId: transcriptId,
+        linkedTradeId: tradeId ?? null,
+      },
+      null,
+      inheritedTags,
+    );
   }
 }
 
-async function createLesson(input: Omit<Lesson, "id" | "createdAt" | "updatedAt" | "isActive">) {
+async function createLesson(
+  input: Omit<Lesson, "id" | "createdAt" | "updatedAt" | "isActive">,
+  tagInput?: string | null,
+  inheritedTags?: string[],
+) {
   await db.create("lessons", {
     createdAt: new Date(),
     updatedAt: new Date(),
     isActive: true,
     ...input,
+    tags: mergeTags(inheritedTags, deriveTags([input.lessonText], tagInput)),
   });
 }
 

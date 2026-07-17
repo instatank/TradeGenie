@@ -18,6 +18,9 @@ For the working contract and a log of what changed, see `CLAUDE.md`.
   live mistake-tag list, prompt-template version gate.
 - **Anthropic transcript backend** — swapped from OpenAI to the Anthropic SDK with structured
   outputs (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`, default `claude-sonnet-4-6`).
+- **Tagging + indexing + search** — free-form `#tags` on everything (one tokenizer,
+  `lib/tags.ts`), unified cross-collection search with exact-`#tag` + AND-word queries,
+  highlighted snippets, tappable tag pills, tag index on the empty `/search` page.
 
 ## In progress / next up
 1. **Vercel production branch** permanent fix (currently pinned via manual "Promote"; configured

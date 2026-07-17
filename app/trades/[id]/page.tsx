@@ -4,6 +4,8 @@ import { ClipboardCheck, Trash2 } from "lucide-react";
 import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, reviewTradeAction, updateTradeAction } from "@/app/actions";
 import { BigChoice, ChipCheckboxGroup, ChipRadioGroup } from "@/components/Chips";
 import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { TagPills, TagsField } from "@/components/TagPills";
+import { formatTagsForInput } from "@/lib/tags";
 import {
   conditionTagOptions,
   directions,
@@ -62,6 +64,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <p className="mt-1 text-sm text-forge-muted">
               {format(trade.tradeDateTime, "dd MMM yyyy HH:mm")} · {humanize(trade.marketType)} · {trade.setupName ?? "No setup"}
             </p>
+            <TagPills tags={trade.tags} className="mt-2" />
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-medium text-forge-muted">
             {trade.mistakeTags.length ? <span className="rounded-md bg-forge-panel px-2 py-1">{trade.mistakeTags.length} mistake tag{trade.mistakeTags.length === 1 ? "" : "s"}</span> : null}
@@ -188,6 +191,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             </label>
             <TextField label="Setup name (freeform)" name="setupName" defaultValue={trade.setupName} />
           </div>
+          <TagsField defaultValue={formatTagsForInput(trade.tags)} />
         </details>
 
         <details className="panel space-y-4">

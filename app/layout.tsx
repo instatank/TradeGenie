@@ -35,7 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <input
                   name="q"
                   type="search"
-                  placeholder="Search trades, notes, lessons..."
+                  placeholder="Search everything... words or #tags"
                   className="input w-full pl-9"
                 />
               </form>

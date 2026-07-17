@@ -11,6 +11,7 @@ import {
 } from "@/app/actions";
 import { AssetNoteComposer } from "@/components/AssetNoteComposer";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { TagPills } from "@/components/TagPills";
 import { assetTimeframes, humanize, marketTypes } from "@/lib/constants";
 import { getAssetWorkspace } from "@/lib/data";
 
@@ -86,7 +87,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
           <div className="space-y-3">
             {asset.notes.map((note) => (
-              <article key={note.id} className="panel">
+              <article key={note.id} id={`note-${note.id}`} className="panel scroll-mt-24">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-sm text-forge-muted">
                     <span>{format(note.createdAt, "EEE dd MMM yyyy · HH:mm")}</span>
@@ -98,6 +99,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                   </div>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap text-base">{note.text}</p>
+                <TagPills tags={note.tags} className="mt-2" />
                 <details className="mt-3 rounded-lg border border-forge-line p-3">
                   <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
                     <Pencil className="h-4 w-4 text-forge-blue" aria-hidden="true" />

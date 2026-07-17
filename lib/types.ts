@@ -51,6 +51,10 @@ export type AssetTimeframe = ValueOf<typeof AssetTimeframe>;
 
 type ValueOf<T> = T[keyof T];
 
+// Free-form tags (lowercase, normalized by lib/tags.ts) live directly on each
+// record as `tags?: string[]` — derived at save time from inline #hashtags in
+// the record's text plus the optional Tags input. Optional so old records need
+// no migration; treat undefined as [].
 export type Transcript = {
   id: string;
   createdAt: Date;
@@ -65,6 +69,7 @@ export type Transcript = {
   linkedDailyJournalId: string | null;
   structuredJson: string | null;
   aiConfidence: AiConfidence | null;
+  tags?: string[];
 };
 
 export type DailyJournal = {
@@ -90,6 +95,7 @@ export type DailyJournal = {
   oneThingToAvoidTomorrow: string | null;
   disciplineScore: number | null;
   eodNotes: string | null;
+  tags?: string[];
 };
 
 export type Trade = {
@@ -130,6 +136,7 @@ export type Trade = {
   funding: number | null;
   netPnl: number | null;
   rMultiple: number | null;
+  tags?: string[];
 };
 
 export type Setup = {
@@ -143,6 +150,7 @@ export type Setup = {
   idealRiskReward: number | null;
   notes: string | null;
   isActive: boolean;
+  tags?: string[];
 };
 
 export type MistakeTag = { id: string; name: string; label: string; description: string | null };
@@ -161,6 +169,7 @@ export type Lesson = {
   linkedTranscriptId: string | null;
   isActive: boolean;
   isPinned?: boolean;
+  tags?: string[];
 };
 
 // A tracked asset is a living page per symbol (e.g. BTC, HYPE). The header fields
@@ -177,6 +186,7 @@ export type Asset = {
   levels: string | null;
   gamePlan: string | null;
   isArchived: boolean;
+  tags?: string[];
 };
 
 // One dated entry in an asset's running thread — a free-form thought dump.
@@ -187,6 +197,7 @@ export type AssetNote = {
   assetId: string;
   timeframe: AssetTimeframe | null;
   text: string;
+  tags?: string[];
 };
 
 export type RawExecution = {

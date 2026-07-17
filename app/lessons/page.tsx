@@ -4,6 +4,8 @@ import { Pencil, Pin, Trash2 } from "lucide-react";
 import { addManualLessonAction, deleteLessonAction, toggleLessonActiveAction, toggleLessonPinAction, updateLessonAction } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
+import { TagPills, TagsField } from "@/components/TagPills";
+import { formatTagsForInput } from "@/lib/tags";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { coreLessonCategories, humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
@@ -51,6 +53,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
             <h2 className="font-semibold">Add manual lesson</h2>
             <TextAreaField label="Lesson" name="lessonText" required rows={4} />
             <SelectField label="Category" name="category" options={coreLessonCategories} defaultValue="PROCESS" />
+            <TagsField />
             <button className="button" type="submit">Add lesson</button>
           </form>
 
@@ -90,7 +93,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
 
         <div className="space-y-3">
           {pagedLessons.map((lesson) => (
-            <details key={lesson.id} className={`panel ${lesson.isActive ? "" : "opacity-60"}`}>
+            <details key={lesson.id} id={`lesson-${lesson.id}`} className={`panel scroll-mt-24 ${lesson.isActive ? "" : "opacity-60"}`}>
               <summary className="grid cursor-pointer gap-3 sm:grid-cols-[1fr_180px] sm:items-center">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{lesson.lessonText}</p>
@@ -109,9 +112,10 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                   <p className="mt-2 text-sm text-forge-muted">
                     {humanize(lesson.category)} · {humanize(lesson.sourceType)} · {format(lesson.createdAt, "dd MMM yyyy")}
                   </p>
+                  <TagPills tags={lesson.tags} className="mt-2" />
                   <div className="mt-2 flex flex-wrap gap-2 text-sm">
                     {lesson.linkedTrade ? <Link className="text-forge-blue hover:underline" href={`/trades/${lesson.linkedTrade.id}`}>Trade: {lesson.linkedTrade.instrument}</Link> : null}
-                    {lesson.linkedTranscript ? <Link className="text-forge-blue hover:underline" href="/inbox">Transcript source</Link> : null}
+                    {lesson.linkedTranscript ? <Link className="text-forge-blue hover:underline" href={`/inbox?view=all#note-${lesson.linkedTranscript.id}`}>Transcript source</Link> : null}
                   </div>
                 </div>
                 <div className="flex justify-end gap-1">
@@ -140,10 +144,13 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                   <Pencil className="h-4 w-4 text-forge-blue" aria-hidden="true" />
                   Edit lesson
                 </summary>
-                <form action={updateLessonAction} className="mt-4 grid gap-3 sm:grid-cols-[1fr_220px_auto] sm:items-end">
+                <form action={updateLessonAction} className="mt-4 space-y-3">
                   <input type="hidden" name="id" value={lesson.id} />
                   <TextAreaField label="Lesson" name="lessonText" defaultValue={lesson.lessonText} rows={3} />
-                  <SelectField label="Category" name="category" options={lessonCategories} defaultValue={lesson.category} />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <SelectField label="Category" name="category" options={lessonCategories} defaultValue={lesson.category} />
+                    <TagsField defaultValue={formatTagsForInput(lesson.tags)} />
+                  </div>
                   <button className="button-secondary" type="submit">Save</button>
                 </form>
               </details>

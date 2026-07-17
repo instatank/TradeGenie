@@ -4,6 +4,7 @@ import { Sunrise, Sunset, Trash2 } from "lucide-react";
 import { deleteDailyJournalAction, saveEveningReviewAction, saveMorningCheckinAction } from "@/app/actions";
 import { ChipRadioGroup, ScaleChips, YesNoChips } from "@/components/Chips";
 import { PageTitle } from "@/components/Fields";
+import { TagPills } from "@/components/TagPills";
 import { humanize, mindStateLabel, mindStateOptions } from "@/lib/constants";
 import { db, getTodayJournal } from "@/lib/data";
 import { getTradePnl } from "@/lib/metrics";
@@ -29,7 +30,10 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
   return (
     <main className="page-shell max-w-3xl">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <PageTitle title={format(selectedDate, "EEEE, d MMMM")} subtitle="Check in before the session, review after it. Small and honest beats long and perfect." />
+        <div>
+          <PageTitle title={format(selectedDate, "EEEE, d MMMM")} subtitle="Check in before the session, review after it. Small and honest beats long and perfect." />
+          <TagPills tags={journal?.tags} className="-mt-3 mb-2" />
+        </div>
         <form className="flex items-center gap-2">
           <input type="date" name="date" defaultValue={dateParam} className="input" />
           <button className="button-secondary" type="submit">Go</button>
