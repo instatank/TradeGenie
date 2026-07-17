@@ -98,6 +98,8 @@ When Firebase env vars are present, seed writes to Firestore. Otherwise it write
 - Quick trade note
 - Trade detail with exit review, mistakes, lessons, screenshots, and raw execution linking
 - Lesson bank
+- Free-form `#tags` on everything (typed inline in any note/thesis/lesson) with tappable tag pills
+- Global search over every collection — words match anywhere (AND), `#tags` match exactly; the empty search page is the tag index
 - CSV import with manual mapping
 - Weekly review generation
 
