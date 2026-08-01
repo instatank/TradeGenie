@@ -67,18 +67,41 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - Required env: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
   (+ `FIREBASE_STORAGE_BUCKET`). Production is confirmed durable (Firestore service account).
 
-## Capture flow (one screen — the daily loop)
+## Capture flow (one screen — one note, many entries)
 - `/inbox` is **paste → review → confirm**, all on one screen. Saving a note
   (`saveTranscriptAction`) **auto-structures it immediately** (no separate "Structure" click).
-- The review card is **editable in place** (`ReviewFields` in `app/inbox/page.tsx`), type-aware
-  for trade / daily / general notes. `confirmTranscriptAction` merges the on-screen edits
-  (`readReviewOverrides`) over the AI draft before writing the record.
-- Confirm writes the final record and **stays on `/inbox`** (no forced second confirmation on
-  the trade page); the confirmed note still links to the saved trade. Default inbox view is
-  **"To review"** (unprocessed + structured).
-- Spoken **numbers are captured**: entry/stop/target/exit price, quantity, leverage, realized
-  P&L flow through extraction → editable card → trade (`createTradeFromStructured` derives
-  netPnl + R-multiple). Strict "only if actually stated, never invent" rule in the prompts.
+- **One note becomes MANY entries.** Real dictation contains several things at once — a trade,
+  a thought about an asset, a mood note, a lesson. Extraction returns an **array of typed
+  entries** and the review draft is a **list of per-entry cards** (`EntryCard` in
+  `app/inbox/page.tsx`): kind chip, where confirming sends it, its own editable fields, and a
+  **Remove** button for when the model over-splits. (The remove buttons submit sibling forms
+  via the HTML `form=` attribute — forms can't nest.)
+- `confirmTranscriptAction` writes **every remaining entry in one action**. On-screen edits
+  override the AI draft **per entry** (`applyEntryOverrides`, field names prefixed `e{i}_`),
+  and every edit is re-run through `normalizeEntry` so a hand-typed value can't smuggle a bad
+  enum into a record. Confirm **stays on `/inbox`** so you keep working the queue.
+- **Entry kinds** (`lib/extraction.ts`) and where each one lands:
+  `TRADE_ENTRY` → a trade · `TRADE_EXIT` → **updates an existing trade, never creates one** ·
+  `ASSET_NOTE` → that asset's thread (creating the asset if new) · `JOURNAL` → the day's
+  journal · `LESSON` → the lesson bank · `WEEKLY_REFLECTION` → a weekly review ·
+  `FREE_NOTE` → a plain searchable thought.
+- **`FREE_NOTE` is first class.** A thought that fits nothing else is kept as-is rather than
+  forced into another kind or dropped. Stored in the `freeNotes` collection and indexed by
+  `lib/search.ts` (results link back to the note they came from).
+- **Exits can never duplicate a trade.** A `TRADE_EXIT` must carry a `linkTradeId`; if the
+  model can't resolve one confidently it returns null and the card shows an **open-trade
+  picker**. Confirm refuses to write *anything* until it's picked — validation runs before the
+  first write so a note never lands half-saved. (The old code fell through to the create
+  branch and wrote a second, closed trade while the real position stayed open forever.)
+- **OPEN vs IDEA**: an entry note where the trader says they entered creates the trade as
+  `OPEN`; `IDEA` is for "I'm watching this".
+- Spoken **numbers are captured**: entry/stop/target price, quantity, leverage, exit price and
+  realized P&L flow through extraction → editable card → trade. Strict "only if actually
+  stated, never invent" rule, in the code-built system prompt.
+- **Eval harness**: `npm run eval:capture` runs `tests/fixtures/capture/*.txt` through the real
+  pipeline against a throwaway seeded world and prints a per-fixture diff (kinds produced,
+  fields extracted, links resolved). Add a fixture + `.expected.json` sidecar before changing
+  prompts. Needs `ANTHROPIC_API_KEY`; without one it scores the offline fallback and says so.
 
 ## Tagging & search (one tokenizer, one index)
 - **`lib/tags.ts` is THE tag tokenizer.** Every path that turns text into tags — inline
@@ -86,7 +109,7 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   DayOS's worst tag bug was two tokenizers quietly diverging; never add a second one.
   Tag charset: lowercase `a-z0-9_-`, 2–40 chars; `#` must start a word (`64#200` is not a tag).
 - **Tags are stored** as `tags?: string[]` on trades, transcripts, lessons, daily journals,
-  assets, asset notes, and setups — derived at save time (`deriveTags`) from inline
+  assets, asset notes, free notes, and setups — derived at save time (`deriveTags`) from inline
   `#hashtags` across the record's text fields plus the optional Tags input. Zero friction:
   typing `#fomo` in any thesis/note/lesson is enough. No migration; undefined = [].
 - **Save rules**: full editors *recompute* tags (their Tags input is prefilled, so deleting
@@ -96,7 +119,7 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   trade/journal/lessons.
 - **`lib/search.ts` is the unified index**: every collection (trades incl. mistake/condition
   labels, captured notes, lessons, assets + threads, daily journals, setups, weekly reviews,
-  imported executions) flattened to labeled fields per doc. Per-request linear scan — DayOS
+  free notes, imported executions) flattened to labeled fields per doc. Per-request linear scan — DayOS
   measured ~15ms over 5k entries; don't build a stored index at personal scale.
 - **Query grammar** (DayOS-proven, improved): `#tag` tokens are exact-membership (`#win`
   never matches #winner — pills and search always agree), plain words are case-insensitive
@@ -115,16 +138,36 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   Everything else (Calendar, Playbook, Analytics, Lessons, Import, Weekly Review, Settings) is
   under a **"More"** `<details>` dropdown (`moreNavItems`). Nothing removed.
 
-## Transcript → AI structuring
-- `lib/prompts.ts`: per-type templates (field spec + enum values + null rule + JSON example).
-  Correctness-critical instruction (rules, emotion mapping, **live mistake-tag list from the
-  store**) lives in the code-built system prompt so stale saved templates can't break it.
-- `lib/transcript-processor.ts`: routes each note to ONE prompt by declared type; UNKNOWN uses
-  a classify-first general prompt. Calls **Claude** via the official `@anthropic-ai/sdk` with
-  **structured outputs** (raw JSON Schema → schema-valid JSON), thinking disabled. Model is
-  `ANTHROPIC_MODEL` (default `claude-sonnet-4-6`). Falls back to a regex mock when no key.
-- Prompt-template **version gate** (`PROMPT_TEMPLATES_VERSION`): new defaults override
-  previously-saved thin prompts; a trader's own edits survive (saving stamps the version).
+## Transcript → AI structuring (segmented, one call)
+- **`lib/extraction.ts` owns the vocabulary**: entry kinds, their per-kind fields, the raw JSON
+  Schema for structured outputs, and `normalizeExtraction`/`normalizeEntry`. The schema is an
+  **`anyOf` discriminated on a `const` kind**, so each entry carries only its own fields
+  instead of the union of all of them — that's what keeps output near ~500 tokens even when a
+  note splits four ways. Normalizing runs on *both* sides (model response **and** every read of
+  a saved draft), so hand-edited JSON can never crash a page or a save.
+- **`lib/extraction-context.ts` gives the model the trader's actual data** (~300 tokens, in the
+  user message on every call): open trades, tracked asset symbols, ~10 recent instruments,
+  active setup names — plus the live mistake-tag list already in the system prompt. This is
+  what resolves "sol" to the existing SOL asset and "the bitcoin short" to a specific open
+  trade, and what stops invented setup names. Open trades use **short handles (`T1`, `T2`)**,
+  not UUIDs — a UUID each would eat the whole budget; `resolveTradeHandle()` turns them back
+  into real ids immediately after extraction, so nothing downstream ever sees a handle.
+- `lib/prompts.ts`: **one** editable template (`capture`) describing the entry vocabulary.
+  Everything correctness-critical — segmentation rules, "never invent", enum discipline,
+  OPEN-vs-IDEA, exit linking, emotion mapping, the **live mistake-tag list from the store** —
+  lives in the code-built system prompt so a stale saved template can't break it.
+- `lib/transcript-processor.ts`: **ONE** Anthropic call per note (no classify-then-extract
+  pass — that doubles latency and cost for no accuracy gain at this scale). Official
+  `@anthropic-ai/sdk`, **structured outputs**, model `ANTHROPIC_MODEL` (default
+  **`claude-sonnet-5`**) with **adaptive thinking at `low` effort** — adaptive is the on-mode
+  on Sonnet 5 (`budget_tokens` is rejected), and low effort keeps the call inside the <20s
+  paste/save budget while still letting it think on a genuinely tangled note.
+  **No prompt caching on purpose**: at ~1.2k tokens the write premium costs more than it saves.
+- **No-API-key fallback** returns a single `FREE_NOTE` at LOW confidence. It deliberately does
+  not attempt segmentation or classification — the old regex heuristics produced
+  confident-looking nonsense that was worse than "here's your text, sort it out".
+- Prompt-template **version gate** (`PROMPT_TEMPLATES_VERSION`, now 4): new defaults override
+  previously-saved prompts; a trader's own edits survive (saving stamps the version).
 - AI output is always shown for review on `/inbox` before it writes to any record.
 
 ## Decisions log (this engagement)
@@ -214,14 +257,30 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   Deliberately NOT done: AI-proposed tags (the tag vocabulary stays the trader's own;
   extraction already maps mistakes to structured tags), and no stored/inverted index.
 
+- **Segmented capture pipeline** (see "Capture flow" + "Transcript → AI structuring" above):
+  replaced the single flat 36-field extraction with one call returning an array of typed
+  entries; added the trader-context block; fixed the exit-creates-a-duplicate-trade bug; new
+  routes from capture to the asset thread, to weekly reviews and to a `freeNotes` collection;
+  per-entry review cards with a Remove button; `npm run eval:capture` + 15 fixtures.
+  Trimmed with it: the **"Note type" dropdown is gone** from the capture form and the raw-note
+  editor — it routed the old per-type prompts and now decides nothing. `Transcript.transcriptType`
+  is still stored, but **derived** from the entries a note produced, purely as a label for the
+  inbox/calendar/search chips. `lib/prompts.ts` went from five per-type templates to one.
+  Deliberately NOT done: a classify-then-extract two-pass (double latency and cost for no
+  accuracy gain at this scale), and prompt caching (prompt is too small to pay for itself).
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
   single working branch and the production branch, so every pushed commit auto-deploys. (The
   old two-agent `claude/*` branches are fully contained in `main` and can be deleted anytime.)
-- **Weekly review limitation**: the extraction schema strips weekly-only fields
-  (`summaryText`, `whatImproved`, …), so weekly voice notes mainly yield lessons on the inbox
-  path. Richer weekly synthesis lives in the separate weekly-review generator.
+- **Weekly review limitation — RESOLVED**: `WEEKLY_REFLECTION` is now an entry kind carrying
+  `summaryText` / `whatImproved` / `whatDeteriorated` / `keyLesson`. Confirming one writes a real
+  weekly review — the trader's words for the narrative, the trade log for the numbers. The
+  separate weekly-review generator still exists for a numbers-only synthesis.
+- **Eval harness needs a key**: `npm run eval:capture` can only measure the real pipeline when
+  `ANTHROPIC_API_KEY` is set. Run it before/after any prompt or schema change to the capture
+  path and keep the pass rate in the commit message.
 
 ## Commands
 ```bash
@@ -230,4 +289,5 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
+npm run eval:capture   # score capture extraction against tests/fixtures/capture
 ```

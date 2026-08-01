@@ -44,13 +44,16 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/tags.ts`: THE tag tokenizer — normalize/extract/derive for free-form `#tags`; every tag path goes through it.
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
-- `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
+- `lib/transcript-processor.ts`: one Claude call per captured note (official SDK, structured outputs) returning an array of typed entries; single-FREE_NOTE fallback when no key.
+- `lib/extraction.ts`: the entry vocabulary — kinds, per-kind fields, the JSON Schema, and the tolerant normalizer used on both the model response and every read of a saved draft.
+- `lib/extraction-context.ts`: the ~300-token trader-context block (open trades, tracked assets, recent instruments, active setups) + open-trade handle resolution.
+- `scripts/eval-capture.ts` / `tests/fixtures/capture/`: `npm run eval:capture` scores the capture pipeline against 15 realistic messy notes.
 
 ## Product Areas
 
 - `/`: Today — daily-ritual dashboard (check-in / quick log / evening review states, streak, week strip, coach's corner)
 - `/calendar`: day/week/month activity view
-- `/inbox`: Capture — hero paste box + review queue; confirm-first note cards, all other actions behind a "More" fold
+- `/inbox`: Capture — hero paste box + review queue; one note splits into typed entries, one editable/removable card each, all other actions behind a "More" fold
 - `/daily`: two-ritual page — morning check-in (chips + guardrails) and evening review (prompted micro-form)
 - `/trades`: day-grouped journal rows (day P&L headers, direction/status chips, mistake badges); quick symbol/date filter row, advanced filters folded
 - `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
@@ -59,7 +62,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/lessons`: lesson bank
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews
-- `/settings`: AI settings and prompt templates
+- `/settings`: AI settings and the single capture prompt template
 - `/search`: global search — one box over every collection (words = AND substring, `#tags` = exact), type filter tabs, highlighted anchored snippets; empty state doubles as the browsable tag index
 
 ## UX Principles
@@ -84,7 +87,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - double-click row: open trade detail/edit page
   - pencil icon: open detail/edit page
   - bin icon: delete
-- Inbox auto-structures a note on save and shows one editable, type-aware review card; confirming writes the record (with spoken numbers) and stays on the inbox. Default view is "To review".
+- Inbox splits a note into typed entries on save and shows one editable card per entry (each removable before confirming); confirming writes every remaining entry — with spoken numbers — and stays on the inbox. An exit entry only ever updates an existing trade. Default view is "To review".
 - Top nav is lean: primary = Today / Capture / Trades / Review; everything else sits under a "More" dropdown.
 - Lessons and Import use compact default rows with full details/actions hidden behind expandable controls.
 - Trade detail starts with a compact summary and organizes editing fields into collapsible sections.
@@ -100,6 +103,7 @@ npm run lint
 npm run typecheck
 npm run build
 npm run seed
+npm run eval:capture   # capture extraction eval (needs ANTHROPIC_API_KEY to be meaningful)
 ```
 
 Before saying work is done, run at least:
