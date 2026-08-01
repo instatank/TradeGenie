@@ -19,6 +19,7 @@ export type SearchKind =
   | "journal"
   | "setup"
   | "weekly"
+  | "freeNote"
   | "execution";
 
 export type SearchField = { label: string; text: string };
@@ -49,6 +50,7 @@ export const searchKindLabels: Record<SearchKind, string> = {
   journal: "Daily journals",
   setup: "Playbook setups",
   weekly: "Weekly reviews",
+  freeNote: "Thoughts",
   execution: "Imported executions",
 };
 
@@ -61,11 +63,12 @@ export const searchKindOrder: SearchKind[] = [
   "journal",
   "setup",
   "weekly",
+  "freeNote",
   "execution",
 ];
 
 export async function buildSearchIndex(): Promise<SearchDoc[]> {
-  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, weeklyReviews, executions] =
+  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, weeklyReviews, freeNotes, executions] =
     await Promise.all([
       getTradesWithMistakes(),
       db.list("transcripts"),
@@ -75,6 +78,7 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
       db.list("dailyJournals"),
       db.list("setups"),
       db.list("weeklyReviews"),
+      db.list("freeNotes"),
       db.list("rawExecutions"),
     ]);
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
@@ -227,6 +231,21 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
         ["Action item", review.actionItem],
         ["Most common mistake", review.mostCommonMistake],
       ]),
+    });
+  }
+
+  // Thoughts that belong to no other collection. They have no page of their own,
+  // so a result links back to the captured note it was confirmed from.
+  for (const note of freeNotes) {
+    docs.push({
+      kind: "freeNote",
+      id: note.id,
+      href: note.linkedTranscriptId ? `/inbox?view=all#note-${note.linkedTranscriptId}` : "/inbox?view=all",
+      title: note.text.length > 90 ? `${note.text.slice(0, 90)}…` : note.text,
+      subtitle: format(note.createdAt, "dd MMM yyyy"),
+      date: note.createdAt,
+      tags: note.tags ?? [],
+      fields: fields([["Thought", note.text]]),
     });
   }
 

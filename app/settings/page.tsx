@@ -6,7 +6,9 @@ import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
 import { storageStatus } from "@/lib/store";
 
-const promptKeys: PromptTemplateKey[] = ["tradeEntry", "tradeExit", "eodReview", "lessonExtraction", "weeklyReview"];
+// One template now — the capture pipeline makes a single call that returns every
+// entry, so there is no per-note-type routing left to configure.
+const promptKeys: PromptTemplateKey[] = ["capture"];
 
 export default async function SettingsPage() {
   const settings = await getSettings();
@@ -52,14 +54,19 @@ export default async function SettingsPage() {
         </section>
 
         <section className="panel space-y-4">
-          <h2 className="font-semibold">Transcript prompt templates</h2>
+          <h2 className="font-semibold">Capture prompt template</h2>
+          <p className="text-sm text-forge-muted">
+            This describes the entry types a captured note can split into. The correctness rules — never invent a
+            number, enum discipline, how exits link to open trades, your live mistake-tag list — live in code and
+            can&apos;t be broken from here.
+          </p>
           {promptKeys.map((key) => (
             <TextAreaField
               key={key}
               label={promptLabels[key]}
               name={key}
               defaultValue={settings.promptTemplates[key]}
-              rows={5}
+              rows={12}
             />
           ))}
         </section>

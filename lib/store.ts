@@ -8,6 +8,7 @@ import type {
   Asset,
   AssetNote,
   DailyJournal,
+  FreeNote,
   ImportBatch,
   Lesson,
   MistakeTag,
@@ -36,6 +37,7 @@ export type StoreShape = {
   weeklyReviews: WeeklyReview[];
   assets: Asset[];
   assetNotes: AssetNote[];
+  freeNotes: FreeNote[];
 };
 
 const emptyStore: StoreShape = {
@@ -52,9 +54,14 @@ const emptyStore: StoreShape = {
   weeklyReviews: [],
   assets: [],
   assetNotes: [],
+  freeNotes: [],
 };
 
-const localStorePath = path.join(process.cwd(), "data", "tradeforge-store.json");
+// Dev-only JSON store. TRADEGENIE_LOCAL_STORE lets a script (the capture eval
+// harness) point at a throwaway file instead of the developer's own data.
+const localStorePath = process.env.TRADEGENIE_LOCAL_STORE
+  ? path.resolve(process.env.TRADEGENIE_LOCAL_STORE)
+  : path.join(process.cwd(), "data", "tradeforge-store.json");
 
 // Storage status, single source of truth.
 // - "firestore": all required Firebase Admin credentials are present and valid-shaped.

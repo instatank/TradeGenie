@@ -189,6 +189,18 @@ export type Asset = {
   tags?: string[];
 };
 
+// A thought that belongs to no other collection. Captured notes segment into
+// typed entries; anything that is genuinely "just a thought" lands here rather
+// than being forced into a lesson or a journal field, or silently dropped.
+export type FreeNote = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  text: string;
+  linkedTranscriptId: string | null;
+  tags?: string[];
+};
+
 // One dated entry in an asset's running thread — a free-form thought dump.
 export type AssetNote = {
   id: string;
