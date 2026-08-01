@@ -2,21 +2,11 @@ import { NextResponse } from "next/server";
 import { format } from "date-fns";
 import { db } from "@/lib/data";
 import { getSettings } from "@/lib/settings-store";
-import { storageStatus, type CollectionName } from "@/lib/store";
+import { collectionNames, storageStatus } from "@/lib/store";
 
-const COLLECTIONS: CollectionName[] = [
-  "transcripts",
-  "dailyJournals",
-  "trades",
-  "setups",
-  "mistakeTags",
-  "tradeMistakes",
-  "lessons",
-  "rawExecutions",
-  "importBatches",
-  "screenshots",
-  "weeklyReviews",
-];
+// Every collection in the store shape, always. A hardcoded list here had already
+// gone stale — assets and asset notes were missing from every backup.
+const COLLECTIONS = collectionNames;
 
 export const dynamic = "force-dynamic";
 

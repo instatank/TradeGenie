@@ -63,7 +63,9 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   `firestore` (durable) | `local` (dev only, ephemeral on Vercel) | `invalid` (partial config).
 - `usesFirebase()` **throws** on a partial Firebase config rather than silently falling back.
 - Settings persist to Firestore (`appSettings/singleton`) when Firebase is on — not local disk.
-- `/settings` shows a colored storage banner; `/api/export` dumps everything as one JSON backup.
+- `/settings` shows a colored storage banner; `/api/export` dumps everything as one JSON backup —
+  it iterates `collectionNames` (derived from `StoreShape`), so a new collection can never be
+  left out of a backup again. The old hardcoded list had already dropped assets + asset notes.
 - Required env: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
   (+ `FIREBASE_STORAGE_BUCKET`). Production is confirmed durable (Firestore service account).
 

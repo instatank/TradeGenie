@@ -57,6 +57,11 @@ const emptyStore: StoreShape = {
   freeNotes: [],
 };
 
+// Derived from the store shape itself so a new collection can never be left out
+// of a backup. /api/export iterates this — it used to hardcode a list, which had
+// already drifted (assets and assetNotes were missing from every backup).
+export const collectionNames = Object.keys(emptyStore) as CollectionName[];
+
 // Dev-only JSON store. TRADEGENIE_LOCAL_STORE lets a script (the capture eval
 // harness) point at a throwaway file instead of the developer's own data.
 const localStorePath = process.env.TRADEGENIE_LOCAL_STORE
