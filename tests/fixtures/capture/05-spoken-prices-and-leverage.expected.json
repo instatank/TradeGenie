@@ -1,0 +1,15 @@
+{
+  "name": "Spoken prices, leverage and size are captured",
+  "why": "Numbers must flow through extraction into the trade without retyping, and never be invented.",
+  "minEntries": 1,
+  "kinds": ["TRADE_ENTRY"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "ETH" },
+    { "kind": "TRADE_ENTRY", "field": "direction", "equals": "LONG" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": 3420 },
+    { "kind": "TRADE_ENTRY", "field": "stopPrice", "equals": 3345 },
+    { "kind": "TRADE_ENTRY", "field": "targetPrice", "equals": 3600 },
+    { "kind": "TRADE_ENTRY", "field": "leverage", "equals": 10 },
+    { "kind": "TRADE_ENTRY", "field": "status", "equals": "OPEN" }
+  ]
+}

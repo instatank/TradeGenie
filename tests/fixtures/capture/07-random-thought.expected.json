@@ -1,0 +1,8 @@
+{
+  "name": "A genuinely loose thought stays a FREE_NOTE",
+  "why": "FREE_NOTE is a first-class kind. This must not be forced into a lesson or a journal entry, and must not be dropped.",
+  "minEntries": 1,
+  "kinds": ["FREE_NOTE"],
+  "fields": [{ "kind": "FREE_NOTE", "field": "text", "present": true }],
+  "forbidKinds": ["TRADE_ENTRY", "TRADE_EXIT", "ASSET_NOTE"]
+}

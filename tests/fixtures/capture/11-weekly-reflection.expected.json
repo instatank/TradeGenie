@@ -1,0 +1,12 @@
+{
+  "name": "Weekly note keeps its weekly-only fields",
+  "why": "Closes the 'weekly review limitation' open item: the old schema stripped summaryText / whatImproved / whatDeteriorated.",
+  "minEntries": 1,
+  "kinds": ["WEEKLY_REFLECTION"],
+  "fields": [
+    { "kind": "WEEKLY_REFLECTION", "field": "summaryText", "present": true },
+    { "kind": "WEEKLY_REFLECTION", "field": "whatImproved", "present": true },
+    { "kind": "WEEKLY_REFLECTION", "field": "whatDeteriorated", "present": true },
+    { "kind": "WEEKLY_REFLECTION", "field": "keyLesson", "present": true }
+  ]
+}

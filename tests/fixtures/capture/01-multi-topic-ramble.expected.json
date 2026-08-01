@@ -1,0 +1,17 @@
+{
+  "name": "Multi-topic ramble must split into 3+ entries",
+  "why": "One dictation carrying a trade, an asset musing, a mood note and a lesson. The old pipeline kept only the trade.",
+  "minEntries": 3,
+  "kinds": ["TRADE_ENTRY", "ASSET_NOTE", "JOURNAL", "LESSON"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "SOL" },
+    { "kind": "TRADE_ENTRY", "field": "direction", "equals": "LONG" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": 142.5 },
+    { "kind": "TRADE_ENTRY", "field": "stopPrice", "equals": 138 },
+    { "kind": "TRADE_ENTRY", "field": "targetPrice", "equals": 155 },
+    { "kind": "TRADE_ENTRY", "field": "status", "equals": "OPEN" },
+    { "kind": "ASSET_NOTE", "field": "assetSymbol", "equals": "ZEC" },
+    { "kind": "JOURNAL", "field": "mainEmotion", "equals": "CALM" },
+    { "kind": "LESSON", "field": "lessonText", "present": true }
+  ]
+}

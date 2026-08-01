@@ -1,0 +1,14 @@
+{
+  "name": "One note carrying an exit, a mistake, a mood and a lesson",
+  "why": "The exit must attach to the existing open SOL long, and the lesson must survive alongside it.",
+  "minEntries": 2,
+  "kinds": ["TRADE_EXIT", "LESSON"],
+  "fields": [
+    { "kind": "TRADE_EXIT", "field": "exitPrice", "equals": 137.8 },
+    { "kind": "TRADE_EXIT", "field": "emotionalState", "equals": "TILTED" },
+    { "kind": "LESSON", "field": "lessonText", "present": true }
+  ],
+  "links": [{ "kind": "TRADE_EXIT", "linkedTrade": "SOL LONG" }],
+  "anyMistakeTagIn": ["MOVED_STOP"],
+  "forbidKinds": ["TRADE_ENTRY"]
+}

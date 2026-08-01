@@ -1,0 +1,12 @@
+{
+  "name": "Two separate trades in one note become two entries",
+  "why": "The single-record pipeline silently discarded the second trade entirely.",
+  "minEntries": 2,
+  "kinds": ["TRADE_ENTRY", "TRADE_ENTRY"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "BTC", "match": "any" },
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "ETH", "match": "any" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": 63800, "match": "any" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": 3510, "match": "any" }
+  ]
+}

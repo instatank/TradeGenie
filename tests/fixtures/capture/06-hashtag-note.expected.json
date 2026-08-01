@@ -1,0 +1,12 @@
+{
+  "name": "Inline #hashtag survives and the mistake is tagged",
+  "why": "Tag derivation (lib/tags.ts) must run on every write path, and a described mistake maps to the live vocabulary.",
+  "minEntries": 1,
+  "kinds": ["TRADE_ENTRY"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "ZEC" },
+    { "kind": "TRADE_ENTRY", "field": "direction", "equals": "LONG" }
+  ],
+  "anyMistakeTagIn": ["FOMO_ENTRY", "ENTERED_LATE", "CHASED_BREAKOUT", "NO_PLAN", "NO_CLEAR_INVALIDATION"],
+  "tags": ["fomo"]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Pure mood dump feeds the daily journal",
+  "why": "No instrument, no trade. Should produce a JOURNAL entry, not a trade with instrument UNKNOWN.",
+  "minEntries": 1,
+  "kinds": ["JOURNAL"],
+  "fields": [
+    { "kind": "JOURNAL", "field": "tradedToday", "equals": false },
+    { "kind": "JOURNAL", "field": "mainEmotion", "equals": "TIRED" },
+    { "kind": "JOURNAL", "field": "disciplineScore", "equals": 8 },
+    { "kind": "JOURNAL", "field": "oneThingDoneWell", "present": true },
+    { "kind": "JOURNAL", "field": "oneThingToAvoidTomorrow", "present": true }
+  ],
+  "forbidKinds": ["TRADE_ENTRY", "TRADE_EXIT"]
+}
