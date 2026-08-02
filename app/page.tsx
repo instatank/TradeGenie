@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { addDays, format, isSameDay, startOfDay, startOfWeek, subDays } from "date-fns";
 import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic, Sunrise, Sunset } from "lucide-react";
-import { DivergingColumns, EquityCurve, HBarList } from "@/components/Charts";
+import { DisciplineLines, DivergingColumns, EquityCurve, HBarList, MoneyBars } from "@/components/Charts";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { conditionLabel, humanize } from "@/lib/constants";
@@ -11,8 +11,10 @@ import {
   calculateRuleAdherenceRate,
   calculateTotalR,
   conditionPerformance,
+  disciplineCurve,
   expectancyBreakdown,
   getTradePnl,
+  mistakeCostLedger,
   mistakeFrequency,
   setupPerformance,
 } from "@/lib/metrics";
@@ -113,6 +115,14 @@ export default async function TodayPage() {
   }));
   let snapshotMistakes = mistakeFrequency(trades.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo)).slice(0, 5);
   if (!snapshotMistakes.length) snapshotMistakes = mistakeFrequency(trades).slice(0, 5);
+
+  // Discipline overlay: only when a plan-breaking adjustment exists — otherwise
+  // the plain equity curve carries the panel without a redundant second line.
+  const discipline = disciplineCurve(curveTrades);
+  const showDiscipline = discipline.points.length >= 2 && discipline.skippedCount + discipline.cappedCount > 0;
+  // Mistakes as money (falls back to counts when trades carry no P&L yet).
+  let mistakeCosts = mistakeCostLedger(trades.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo)).slice(0, 5);
+  if (!mistakeCosts.length) mistakeCosts = mistakeCostLedger(trades).slice(0, 5);
 
   const insight = analyticsLeaks(trades, setupPerformance(trades, setupNames), conditionPerformance(trades, conditionLabel))[0];
   const tip = tipOfTheDay(now);
@@ -226,7 +236,20 @@ export default async function TodayPage() {
               <span className="text-xs text-forge-muted">the shape of your trading, at a glance</span>
             </div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-forge-muted">Equity curve · {curveRange}</p>
-            <EquityCurve points={equityPoints} title={`Cumulative P&L, ${curveRange}`} />
+            {showDiscipline ? (
+              <>
+                <DisciplineLines points={discipline.points} title={`Actual vs plan-following P&L, ${curveRange}`} />
+                {discipline.delta > 0 ? (
+                  <p className="mt-1 text-[11px] text-forge-muted">
+                    The dashed line is your history minus tagged impulse trades, with runaway losses cut at planned risk — following
+                    the plan was worth <span className="font-semibold text-forge-green">+{discipline.delta.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>.{" "}
+                    <Link href="/analytics" className="text-forge-blue hover:underline">Full story →</Link>
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <EquityCurve points={equityPoints} title={`Cumulative P&L, ${curveRange}`} />
+            )}
             <div className="mt-4 grid gap-5 sm:grid-cols-2">
               <div>
                 <p className="mb-1 text-xs font-medium uppercase tracking-wide text-forge-muted">
@@ -236,9 +259,26 @@ export default async function TodayPage() {
                 <p className="mt-1 text-[11px] text-forge-muted">One bar per trade — hover for the story. {useR ? "R = profit measured in units of what you risked." : "Add entry + stop prices and this switches to R."}</p>
               </div>
               <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-muted">Most-tagged mistakes</p>
-                <HBarList items={snapshotMistakes} />
-                <p className="mt-2 text-[11px] text-forge-muted">The top bar is your highest-leverage habit to break.</p>
+                {mistakeCosts.length ? (
+                  <>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-muted">What mistakes cost you</p>
+                    <MoneyBars
+                      ariaLabel="Net P&L of trades carrying each mistake tag"
+                      items={mistakeCosts.map((entry) => ({
+                        label: entry.label,
+                        value: entry.totalPnl,
+                        sub: `${entry.count} trade${entry.count === 1 ? "" : "s"}`,
+                      }))}
+                    />
+                    <p className="mt-2 text-[11px] text-forge-muted">Net P&L of trades carrying each tag — the top bar is the habit worth the most money.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-muted">Most-tagged mistakes</p>
+                    <HBarList items={snapshotMistakes} />
+                    <p className="mt-2 text-[11px] text-forge-muted">The top bar is your highest-leverage habit to break.</p>
+                  </>
+                )}
               </div>
             </div>
           </div>
