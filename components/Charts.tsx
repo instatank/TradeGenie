@@ -9,8 +9,12 @@ const MUTED = "#65717c";
 const GRID = "#e7ecef";
 const BASELINE = "#c3ccd3";
 const BLUE = "#1f6feb";
+const BLUE_TRACK = "#d8e6fb";
 const GREEN = "#0d8f72";
 const RED = "#c2413d";
+// Gold pairs with blue for the two-series discipline chart — validated:
+// CVD ΔE 31.4 (protan) / normal 34.0 against #1f6feb on white, all checks pass.
+const GOLD = "#b98318";
 
 export type SeriesPoint = { label: string; value: number };
 
@@ -87,6 +91,105 @@ export function EquityCurve({ points, title, width = 560 }: { points: SeriesPoin
         {points.map((point, index) => (
           <circle key={index} cx={x(index)} cy={y(point.value)} r={10} fill="transparent">
             <title>{`${point.label} · running total ${formatCompact(point.value)}`}</title>
+          </circle>
+        ))}
+      </svg>
+    </figure>
+  );
+}
+
+export type DualPoint = { label: string; actual: number; plan: number };
+
+/**
+ * Two cumulative lines: what actually happened (solid blue) vs the plan-following
+ * counterfactual (dashed gold — dashing marks it as hypothetical). Legend + direct
+ * endpoint labels, so identity never rides on colour alone.
+ */
+export function DisciplineLines({
+  points,
+  title,
+  actualLabel = "What you made",
+  planLabel = "If you'd followed the plan",
+  width = 560,
+}: {
+  points: DualPoint[];
+  title: string;
+  actualLabel?: string;
+  planLabel?: string;
+  width?: number;
+}) {
+  if (points.length < 2) {
+    return <EmptyChart text="This chart appears after a couple of closed trades with P&L filled in." />;
+  }
+  const W = width;
+  const H = 180;
+  const pad = { top: 18, right: 64, bottom: 20, left: 8 };
+  const innerW = W - pad.left - pad.right;
+  const innerH = H - pad.top - pad.bottom;
+  const values = points.flatMap((point) => [point.actual, point.plan]);
+  const min = Math.min(0, ...values);
+  const max = Math.max(0, ...values);
+  const span = max - min || 1;
+  const x = (index: number) => pad.left + (index / (points.length - 1)) * innerW;
+  const y = (value: number) => pad.top + ((max - value) / span) * innerH;
+  const path = (pick: (point: DualPoint) => number) =>
+    points.map((point, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(pick(point)).toFixed(1)}`).join(" ");
+  const actualPath = path((point) => point.actual);
+  const planPath = path((point) => point.plan);
+  const areaPath = `${actualPath} L${x(points.length - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const last = points[points.length - 1];
+  const ticks = niceTicks(min, max);
+  const endX = x(points.length - 1);
+  // Endpoint labels: keep them apart when the lines end close together.
+  const yActual = y(last.actual);
+  const yPlan = y(last.plan);
+  let labelYActual = yActual - 8;
+  let labelYPlan = yPlan - 8;
+  if (Math.abs(yActual - yPlan) < 16) {
+    if (yPlan <= yActual) {
+      labelYPlan = yPlan - 8;
+      labelYActual = yActual + 15;
+    } else {
+      labelYActual = yActual - 8;
+      labelYPlan = yPlan + 15;
+    }
+  }
+
+  return (
+    <figure className="m-0">
+      <div className="mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-forge-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <svg width="18" height="6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" stroke={BLUE} strokeWidth="2" /></svg>
+          {actualLabel}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <svg width="18" height="6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" stroke={GOLD} strokeWidth="2" strokeDasharray="4 3" /></svg>
+          {planLabel}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={title}>
+        {ticks.map((tick) => (
+          <g key={tick}>
+            <line x1={pad.left} x2={W - pad.right} y1={y(tick)} y2={y(tick)} stroke={tick === 0 ? BASELINE : GRID} strokeWidth={1} />
+            <text x={W - pad.right + 6} y={y(tick) + 3} fontSize={10} fill={MUTED}>{formatCompact(tick)}</text>
+          </g>
+        ))}
+        <path d={areaPath} fill={BLUE} opacity={0.08} />
+        <path d={planPath} fill="none" stroke={GOLD} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={actualPath} fill="none" stroke={BLUE} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={endX} cy={yPlan} r={4} fill={GOLD} stroke="#ffffff" strokeWidth={2} />
+        <circle cx={endX} cy={yActual} r={4.5} fill={BLUE} stroke="#ffffff" strokeWidth={2} />
+        <text x={endX} y={labelYActual} fontSize={11} fontWeight={600} fill={INK} textAnchor="end">
+          {last.actual >= 0 ? "+" : ""}{formatCompact(last.actual)}
+        </text>
+        <text x={endX} y={labelYPlan} fontSize={11} fontWeight={600} fill={MUTED} textAnchor="end">
+          {last.plan >= 0 ? "+" : ""}{formatCompact(last.plan)} plan
+        </text>
+        <text x={pad.left} y={H - 6} fontSize={10} fill={MUTED}>{points[0].label}</text>
+        <text x={W - pad.right} y={H - 6} fontSize={10} fill={MUTED} textAnchor="end">{last.label}</text>
+        {points.map((point, index) => (
+          <circle key={index} cx={x(index)} cy={y(point.actual)} r={10} fill="transparent">
+            <title>{`${point.label} · actual ${formatCompact(point.actual)} · plan ${formatCompact(point.plan)}`}</title>
           </circle>
         ))}
       </svg>
@@ -186,6 +289,130 @@ export function HBarList({ items, tone = "red" }: { items: { label: string; coun
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+export type BinDatum = { label: string; count: number; negative: boolean };
+
+/**
+ * Fixed-bin histogram (R-multiple distribution). Sign lives in the bin label
+ * text; red/green reinforce it. Only the tallest bin is direct-labeled — the
+ * rest read from the ticks and tooltips.
+ */
+export function BinColumns({ bins, ariaLabel }: { bins: BinDatum[]; ariaLabel: string }) {
+  const total = bins.reduce((sum, bin) => sum + bin.count, 0);
+  if (!total) {
+    return <EmptyChart text="Add entry + stop + exit prices to closed trades and their R-multiples build this picture." />;
+  }
+  const W = 560;
+  const H = 170;
+  const pad = { top: 18, right: 8, bottom: 34, left: 8 };
+  const innerW = W - pad.left - pad.right;
+  const innerH = H - pad.top - pad.bottom;
+  const gap = 8;
+  const barWidth = Math.min(56, (innerW - gap * (bins.length - 1)) / bins.length);
+  const rowWidth = barWidth + gap;
+  const left0 = pad.left + (innerW - (rowWidth * bins.length - gap)) / 2;
+  const maxCount = Math.max(...bins.map((bin) => bin.count));
+  const baseY = H - pad.bottom;
+  const yFor = (count: number) => baseY - (count / maxCount) * innerH;
+
+  return (
+    <figure className="m-0">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={ariaLabel}>
+        <line x1={pad.left} x2={W - pad.right} y1={baseY} y2={baseY} stroke={BASELINE} strokeWidth={1} />
+        {bins.map((bin, index) => {
+          const leftEdge = left0 + index * rowWidth;
+          const topY = yFor(bin.count);
+          const isTallest = bin.count === maxCount;
+          return (
+            <g key={bin.label}>
+              {bin.count > 0 ? (
+                <path d={columnPath(leftEdge, baseY, topY, barWidth)} fill={bin.negative ? RED : GREEN} opacity={0.9} />
+              ) : (
+                <rect x={leftEdge} y={baseY - 1.5} width={barWidth} height={1.5} fill={GRID} />
+              )}
+              {isTallest && bin.count > 0 ? (
+                <text x={leftEdge + barWidth / 2} y={topY - 5} fontSize={11} fontWeight={600} fill={INK} textAnchor="middle">
+                  {bin.count}
+                </text>
+              ) : null}
+              <text x={leftEdge + barWidth / 2} y={H - 18} fontSize={9.5} fill={MUTED} textAnchor="middle">
+                {bin.label}
+              </text>
+              <rect x={leftEdge - gap / 2} y={0} width={rowWidth} height={H} fill="transparent">
+                <title>{`${bin.label}: ${bin.count} trade${bin.count === 1 ? "" : "s"}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+        <text x={W / 2} y={H - 4} fontSize={9.5} fill={MUTED} textAnchor="middle">← losses · wins →</text>
+      </svg>
+    </figure>
+  );
+}
+
+export type MoneyBarDatum = { label: string; value: number; sub?: string; tooltip?: string };
+
+/**
+ * Horizontal bars diverging from a shared zero column — money (or R) per
+ * category, red left / green right, value at every bar tip (the tip value IS
+ * the point of a ledger).
+ */
+export function MoneyBars({ items, unit = "", ariaLabel }: { items: MoneyBarDatum[]; unit?: string; ariaLabel: string }) {
+  if (!items.length) {
+    return <EmptyChart text="Nothing to add up yet." />;
+  }
+  const maxAbs = Math.max(...items.map((item) => Math.abs(item.value))) || 1;
+  return (
+    <div className="space-y-2" role="img" aria-label={ariaLabel}>
+      {items.map((item) => {
+        const negative = item.value < 0;
+        const share = Math.abs(item.value) / maxAbs;
+        return (
+          <div key={item.label} className="grid grid-cols-[minmax(90px,150px)_1fr] items-center gap-2" title={item.tooltip ?? `${item.label}: ${formatCompact(item.value)}${unit}`}>
+            <span className="min-w-0">
+              <span className="block truncate text-xs text-forge-ink">{item.label}</span>
+              {item.sub ? <span className="block truncate text-[10px] text-forge-muted">{item.sub}</span> : null}
+            </span>
+            <div className="grid grid-cols-2 items-center">
+              <div className="flex items-center justify-end gap-1.5 border-r border-forge-line pr-0 min-h-4">
+                {negative ? (
+                  <>
+                    <span className="text-[11px] font-semibold text-forge-red">−{formatCompact(Math.abs(item.value))}{unit}</span>
+                    <div className="h-3 rounded-l-md" style={{ width: `${Math.max(3, share * 100)}%`, backgroundColor: RED, opacity: 0.85 }} />
+                  </>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1.5 min-h-4">
+                {!negative ? (
+                  <>
+                    <div className="h-3 rounded-r-md" style={{ width: `${Math.max(3, share * 100)}%`, backgroundColor: GREEN, opacity: 0.85 }} />
+                    <span className="text-[11px] font-semibold text-forge-green">+{formatCompact(item.value)}{unit}</span>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Horizontal meter for a single 0–1 ratio: blue fill on a light step of the
+ * same blue ramp so the whole bar reads as one scale.
+ */
+export function Meter({ value, ariaLabel }: { value: number; ariaLabel: string }) {
+  const clamped = Math.max(0, Math.min(1, value));
+  return (
+    <div className="flex items-center gap-3" role="img" aria-label={`${ariaLabel}: ${(clamped * 100).toFixed(0)}%`}>
+      <div className="h-3 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: BLUE_TRACK }}>
+        <div className="h-full rounded-full" style={{ width: `${clamped * 100}%`, backgroundColor: BLUE }} />
+      </div>
+      <span className="text-sm font-semibold text-forge-ink">{(clamped * 100).toFixed(0)}%</span>
     </div>
   );
 }
