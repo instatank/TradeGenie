@@ -423,6 +423,166 @@ export function analyticsLeaks(trades: MetricTrade[], setups: BucketStats[], con
   return insights.slice(0, 4);
 }
 
+// --- Counterfactual discipline curve: what if I had followed my own rules? ---
+// Conservative by construction: impulse trades are skipped (0, even winners lose
+// their profit), runaway losses are capped at -1R, and nothing hypothetical is
+// ever added — the "plan" line never invents upside the trader didn't earn.
+export type DisciplinePoint = { label: string; actual: number; plan: number };
+export type DisciplineSummary = {
+  points: DisciplinePoint[];
+  skippedCount: number;
+  cappedCount: number;
+  delta: number;
+  sample: number;
+};
+
+const impulseEntryTags = new Set([
+  "FOMO_ENTRY",
+  "REVENGE_TRADE",
+  "NO_PLAN",
+  "BOREDOM_TRADE",
+  "TRADED_NO_TRADE_CONDITION",
+]);
+
+const stopDisciplineTags = new Set(["MOVED_STOP", "HELD_LOSER_TOO_LONG"]);
+
+function hasTag(trade: MetricTrade, names: Set<string>) {
+  return (trade.mistakeTags ?? []).some((link) => names.has(link.mistakeTag.name));
+}
+
+export function disciplineCurve(trades: MetricTrade[]): DisciplineSummary {
+  const closed = trades
+    .filter((trade) => trade.status === "CLOSED" && getTradePnl(trade) != null)
+    .sort((a, b) => a.tradeDateTime.getTime() - b.tradeDateTime.getTime());
+
+  let actualTotal = 0;
+  let planTotal = 0;
+  let skippedCount = 0;
+  let cappedCount = 0;
+  const byDay = new Map<string, DisciplinePoint>();
+
+  for (const trade of closed) {
+    const pnl = getTradePnl(trade) ?? 0;
+    let planPnl = pnl;
+    if (hasTag(trade, impulseEntryTags)) {
+      planPnl = 0;
+      skippedCount += 1;
+    } else if (
+      (hasTag(trade, stopDisciplineTags) || trade.followedPlan === "NO") &&
+      trade.rMultiple != null &&
+      trade.rMultiple < -1 &&
+      pnl < 0
+    ) {
+      planPnl = -Math.abs(pnl / trade.rMultiple);
+      cappedCount += 1;
+    }
+    actualTotal += pnl;
+    planTotal += planPnl;
+    const label = format(trade.tradeDateTime, "d MMM yy");
+    byDay.set(label, {
+      label,
+      actual: Number(actualTotal.toFixed(2)),
+      plan: Number(planTotal.toFixed(2)),
+    });
+  }
+
+  return {
+    points: Array.from(byDay.values()),
+    skippedCount,
+    cappedCount,
+    delta: Number((planTotal - actualTotal).toFixed(2)),
+    sample: closed.length,
+  };
+}
+
+// --- Mistake-cost ledger: what each tagged mistake actually cost, in currency ---
+// A trade with several tags contributes its full P&L to each (disclosed in the UI copy).
+export type MistakeCost = { name: string; label: string; count: number; totalPnl: number };
+
+export function mistakeCostLedger(trades: MetricTrade[]): MistakeCost[] {
+  const closed = trades.filter((trade) => trade.status === "CLOSED" && getTradePnl(trade) != null);
+  const ledger = new Map<string, MistakeCost>();
+  for (const trade of closed) {
+    const pnl = getTradePnl(trade) ?? 0;
+    for (const link of trade.mistakeTags ?? []) {
+      const key = link.mistakeTag.name;
+      const current = ledger.get(key) ?? { name: key, label: link.mistakeTag.label, count: 0, totalPnl: 0 };
+      current.count += 1;
+      current.totalPnl += pnl;
+      ledger.set(key, current);
+    }
+  }
+  return Array.from(ledger.values()).sort((a, b) => a.totalPnl - b.totalPnl);
+}
+
+// --- R-multiple histogram: is risk actually capped at -1R in practice? ---
+export type RBin = { label: string; count: number; negative: boolean };
+
+export function rHistogram(trades: MetricTrade[]): { bins: RBin[]; sample: number; beyondPlannedLoss: number } {
+  const specs: { label: string; negative: boolean; test: (r: number) => boolean }[] = [
+    { label: "≤ −2R", negative: true, test: (r) => r <= -2 },
+    { label: "−2 to −1R", negative: true, test: (r) => r > -2 && r <= -1 },
+    { label: "−1 to 0R", negative: true, test: (r) => r > -1 && r < 0 },
+    { label: "0 to 1R", negative: false, test: (r) => r >= 0 && r < 1 },
+    { label: "1 to 2R", negative: false, test: (r) => r >= 1 && r < 2 },
+    { label: "2 to 3R", negative: false, test: (r) => r >= 2 && r < 3 },
+    { label: "> 3R", negative: false, test: (r) => r >= 3 },
+  ];
+  const rValues = trades
+    .filter((trade) => trade.status === "CLOSED")
+    .map((trade) => trade.rMultiple)
+    .filter((value): value is number => value != null);
+  const bins = specs.map((spec) => ({
+    label: spec.label,
+    count: rValues.filter(spec.test).length,
+    negative: spec.negative,
+  }));
+  return {
+    bins,
+    sample: rValues.length,
+    beyondPlannedLoss: rValues.filter((r) => r < -1).length,
+  };
+}
+
+// --- Tilt / revenge-window comparison: how do I trade right after a loss? ---
+// Grouping looks at the entry decision (any status, entry time only — there is no
+// exit timestamp), then stats are computed over each group's closed-with-P&L trades.
+export type TiltStats = { count: number; avgR: number | null; winRate: number | null; netPnl: number };
+
+function tiltStats(trades: MetricTrade[]): TiltStats {
+  const closed = trades.filter((trade) => trade.status === "CLOSED" && getTradePnl(trade) != null);
+  const rValues = closed.map((trade) => trade.rMultiple).filter((value): value is number => value != null);
+  const wins = closed.filter((trade) => (getTradePnl(trade) ?? 0) > 0).length;
+  return {
+    count: closed.length,
+    avgR: rValues.length ? rValues.reduce((sum, value) => sum + value, 0) / rValues.length : null,
+    winRate: closed.length ? wins / closed.length : null,
+    netPnl: closed.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0),
+  };
+}
+
+export function tiltAnalysis(
+  trades: MetricTrade[],
+  windowHours = 2,
+): { afterLoss: TiltStats; baseline: TiltStats; windowHours: number } {
+  const sorted = [...trades].sort((a, b) => a.tradeDateTime.getTime() - b.tradeDateTime.getTime());
+  const windowMs = windowHours * 60 * 60 * 1000;
+  const afterLoss: MetricTrade[] = [];
+  const rest: MetricTrade[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const prev = i > 0 ? sorted[i - 1] : null;
+    const prevPnl = prev ? getTradePnl(prev) : null;
+    const isAfterLoss =
+      prev != null &&
+      prev.status === "CLOSED" &&
+      prevPnl != null &&
+      prevPnl < 0 &&
+      sorted[i].tradeDateTime.getTime() - prev.tradeDateTime.getTime() <= windowMs;
+    (isAfterLoss ? afterLoss : rest).push(sorted[i]);
+  }
+  return { afterLoss: tiltStats(afterLoss), baseline: tiltStats(rest), windowHours };
+}
+
 export function expectancyBreakdown(trades: MetricTrade[]) {
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const pnlValues = closed.map(getTradePnl).filter((value): value is number => value != null);
