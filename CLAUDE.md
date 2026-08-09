@@ -87,8 +87,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   Tag charset: lowercase `a-z0-9_-`, 2–40 chars; `#` must start a word (`64#200` is not a tag).
 - **Tags are stored** as `tags?: string[]` on trades, transcripts, lessons, daily journals,
   assets, asset notes, and setups — derived at save time (`deriveTags`) from inline
-  `#hashtags` across the record's text fields plus the optional Tags input. Zero friction:
+  `#hashtags` across the record's text fields plus the tag picker's selection. Zero friction:
   typing `#fomo` in any thesis/note/lesson is enough. No migration; undefined = [].
+- **`components/TagPicker.tsx` is the one way to set tags in the UI** — recent chips + a
+  "New tag" box, overflow behind "More tags". See the decisions log entry for the rules.
 - **Save rules**: full editors *recompute* tags (their Tags input is prefilled, so deleting
   there + removing the hashtag from text removes a tag). Quick/partial saves (review panel,
   morning/evening check-ins) only *grow* tags (`mergeTags`) so they never wipe tags added
@@ -214,6 +216,29 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   `TagsField` on full editors only (quick flows stay tap-only — friction budgets intact).
   Deliberately NOT done: AI-proposed tags (the tag vocabulary stays the trader's own;
   extraction already maps mistakes to structured tags), and no stored/inverted index.
+
+- **Tag picker — the vocabulary is the trader's, and it stays uncrowded**
+  (`components/TagPicker.tsx`). Every place you can set tags now shows your own tags as
+  one-tap chips plus a **"New tag"** pill that opens an inline box, so a tag can be invented
+  anywhere without leaving the form. Crowding is handled by **recency**: the record's current
+  tags plus your **6 most recently used** sit in the front row, the whole rest of the
+  vocabulary folds behind **"More tags (n)"**. A tag you just invented is by definition the
+  most recent, so it's in the front row next time.
+  - `getTagVocabulary()` (`lib/data.ts`) ranks every tag by last-used across trades, notes,
+    lessons, assets, asset notes, journals and setups. Recency beats frequency on purpose.
+  - The picker posts the same single `tags` field the old text input did — `lib/tags.ts` is
+    still the one tokenizer, and `normalizeTag()` validates a custom tag as you add it.
+  - Because the picker always renders the record's existing tags as selected chips, its
+    selection is the **complete** truth for that record: unticking a chip removes the tag.
+    Surfaces without a picker still only grow tags (`mergeTags`), unchanged.
+  - Live on: quick trade log (Today + `/trades/new`), trade page, `/inbox` capture + note
+    edit, `/lessons` add + edit, `/assets/[id]` (asset, new note, each note edit),
+    `/playbook` add + edit, and the `/daily` evening review. **Deliberately not** on the
+    `/daily` morning form — morning and evening are two separate forms, so a second tags
+    field there would be a fresh way to lose a tag by saving the other ritual.
+  - It's the one form control in the app that ships client JS; inventing a tag can't be done
+    with a plain `<form>`. Enter inside the box adds the tag and never submits the page.
+  - `TagsField` (the old free-text tags input) is gone — one tag control, not two.
 
 - **One button saves the page** (owner: "if I hit ONE button it should capture everything on
   that page — I was losing notes"). The old failure was two independent `<form>`s per page:

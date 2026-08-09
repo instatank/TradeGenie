@@ -4,12 +4,12 @@ import { Pencil, Pin, Trash2 } from "lucide-react";
 import { addManualLessonAction, deleteLessonAction, toggleLessonActiveAction, toggleLessonPinAction, updateLessonAction } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
-import { TagPills, TagsField } from "@/components/TagPills";
-import { formatTagsForInput } from "@/lib/tags";
+import { TagPills } from "@/components/TagPills";
+import { TagPicker } from "@/components/TagPicker";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { coreLessonCategories, humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
-import { db } from "@/lib/data";
+import { db, getTagVocabulary } from "@/lib/data";
 import type { Lesson } from "@/lib/types";
 
 const lessonViews = [
@@ -28,7 +28,10 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
   const page = normalizePage(params.page);
   const pageSize = normalizePageSize(params.pageSize, [10, 25, 50], 10);
   const calendarRange = getCalendarRange(params);
-  const [allLessons, trades, transcripts] = await Promise.all([db.list("lessons"), db.list("trades"), db.list("transcripts")]);
+  const [allLessons, trades, transcripts, tagVocabulary] = await Promise.all([
+    db.list("lessons"), db.list("trades"), db.list("transcripts"), getTagVocabulary(),
+  ]);
+  const tagNames = tagVocabulary.map((entry) => entry.tag);
   const lessons = allLessons
     .filter((lesson) => applyLessonView(lesson, view))
     .filter((lesson) => isWithinCalendarRange(lesson.createdAt, calendarRange))
@@ -53,7 +56,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
             <h2 className="font-semibold">Add manual lesson</h2>
             <TextAreaField label="Lesson" name="lessonText" required rows={4} />
             <SelectField label="Category" name="category" options={coreLessonCategories} defaultValue="PROCESS" />
-            <TagsField />
+            <TagPicker vocabulary={tagNames} />
             <button className="button" type="submit">Add lesson</button>
           </form>
 
@@ -149,7 +152,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                   <TextAreaField label="Lesson" name="lessonText" defaultValue={lesson.lessonText} rows={3} />
                   <div className="grid gap-3 sm:grid-cols-2">
                     <SelectField label="Category" name="category" options={lessonCategories} defaultValue={lesson.category} />
-                    <TagsField defaultValue={formatTagsForInput(lesson.tags)} />
+                    <TagPicker selected={lesson.tags ?? []} vocabulary={tagNames} />
                   </div>
                   <button className="button-secondary" type="submit">Save</button>
                 </form>

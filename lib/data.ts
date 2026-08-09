@@ -29,6 +29,45 @@ export const db = {
   upsertBy,
 };
 
+export type TagVocabularyEntry = { tag: string; count: number; lastUsed: Date };
+
+// Your own tag vocabulary, most recently used first. Tag pickers show the top
+// handful as one-tap chips and fold the rest away, so the vocabulary can grow
+// without the forms ever getting crowded. Recency beats frequency here: the
+// tags you're using this week are the ones you want under your thumb.
+export async function getTagVocabulary(): Promise<TagVocabularyEntry[]> {
+  const [trades, transcripts, lessons, assets, assetNotes, journals, setups] = await Promise.all([
+    listRecords("trades"),
+    listRecords("transcripts"),
+    listRecords("lessons"),
+    listRecords("assets"),
+    listRecords("assetNotes"),
+    listRecords("dailyJournals"),
+    listRecords("setups"),
+  ]);
+  const usage = new Map<string, { count: number; lastUsed: Date }>();
+  const record = (tags: string[] | undefined, date: Date) => {
+    for (const tag of tags ?? []) {
+      const entry = usage.get(tag);
+      if (!entry) usage.set(tag, { count: 1, lastUsed: date });
+      else {
+        entry.count += 1;
+        if (date > entry.lastUsed) entry.lastUsed = date;
+      }
+    }
+  };
+  for (const trade of trades) record(trade.tags, trade.updatedAt ?? trade.tradeDateTime);
+  for (const transcript of transcripts) record(transcript.tags, transcript.updatedAt ?? transcript.createdAt);
+  for (const lesson of lessons) record(lesson.tags, lesson.updatedAt ?? lesson.createdAt);
+  for (const asset of assets) record(asset.tags, asset.updatedAt ?? asset.createdAt);
+  for (const note of assetNotes) record(note.tags, note.updatedAt ?? note.createdAt);
+  for (const journal of journals) record(journal.tags, journal.updatedAt ?? journal.date);
+  for (const setup of setups) record(setup.tags, setup.updatedAt ?? setup.createdAt);
+  return [...usage.entries()]
+    .map(([tag, entry]) => ({ tag, ...entry }))
+    .sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime() || b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
 export async function getTradesWithMistakes(): Promise<TradeWithMistakes[]> {
   const [trades, links, tags] = await Promise.all([
     listRecords("trades"),

@@ -5,9 +5,9 @@ import { ArrowLeft, ClipboardCheck, Trash2 } from "lucide-react";
 import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, saveTradeAction } from "@/app/actions";
 import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { SaveBar } from "@/components/SaveBar";
-import { TagPills, TagsField } from "@/components/TagPills";
+import { TagPills } from "@/components/TagPills";
+import { TagPicker } from "@/components/TagPicker";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
-import { formatTagsForInput } from "@/lib/tags";
 import {
   conditionTagOptions,
   directions,
@@ -18,7 +18,7 @@ import {
   primaryMistakeTagNames,
   riskPostures,
 } from "@/lib/constants";
-import { db, getActiveSetups, getTradeDetail } from "@/lib/data";
+import { db, getActiveSetups, getTagVocabulary, getTradeDetail } from "@/lib/data";
 import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metrics";
 
 // One trade, one form, one Save. The review ritual sits on top; every other
@@ -26,11 +26,12 @@ import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metri
 // press of Save captures whatever you touched, wherever you touched it.
 export default async function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [trade, mistakeTags, unlinkedExecutions, setups] = await Promise.all([
+  const [trade, mistakeTags, unlinkedExecutions, setups, tagVocabulary] = await Promise.all([
     getTradeDetail(id),
     db.list("mistakeTags"),
     db.list("rawExecutions"),
     getActiveSetups(),
+    getTagVocabulary(),
   ]);
   if (!trade) throw new Error("Trade not found");
   const sortedMistakeTags = mistakeTags.sort((a, b) => a.label.localeCompare(b.label));
@@ -125,7 +126,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Setup name (freeform)" name="setupName" defaultValue={trade.setupName} />
           </div>
           <p className="text-xs text-forge-muted">Status lives in the review panel above — one control, one place.</p>
-          <TagsField defaultValue={formatTagsForInput(trade.tags)} />
+          <TagPicker selected={trade.tags ?? []} vocabulary={tagVocabulary.map((entry) => entry.tag)} />
         </details>
 
         <details className="panel space-y-4">

@@ -1,16 +1,20 @@
 import { quickLogTradeAction } from "@/app/actions";
 import { BigChoice, ChipRadioGroup } from "@/components/Chips";
+import { TagPicker } from "@/components/TagPicker";
 import { mindStateLabel, mindStateOptions } from "@/lib/constants";
 
 // The 30-second trade log. Symbol + direction + status is a complete entry;
-// everything else is optional and stays out of the way. Zero client JS —
-// chips are styled radio inputs, so this renders and posts as a plain form.
+// everything else is optional and stays out of the way. Chips are styled radio
+// inputs, so the form still posts as a plain form — only the tag picker (which
+// has to be interactive to let you invent a tag) ships any client JS.
 export function QuickTradeForm({
   recentSymbols,
+  tagVocabulary = [],
   redirectTo,
   submitLabel = "Log it",
 }: {
   recentSymbols: string[];
+  tagVocabulary?: string[];
   redirectTo: string;
   submitLabel?: string;
 }) {
@@ -63,6 +67,12 @@ export function QuickTradeForm({
         </span>
         <textarea name="entryThesis" rows={2} placeholder="What did you see? e.g. bounced off support, funding reset…" className="textarea min-h-16" />
       </label>
+
+      <TagPicker
+        vocabulary={tagVocabulary}
+        label="Tags (optional)"
+        hint="One tap each. Hit “New tag” to invent your own — it sticks around for next time."
+      />
 
       <details className="rounded-lg border border-forge-line p-3">
         <summary className="cursor-pointer text-sm font-semibold text-forge-muted">

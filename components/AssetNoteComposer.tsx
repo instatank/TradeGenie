@@ -3,13 +3,14 @@
 import { useRef, useState, useTransition } from "react";
 import { Sparkles, Undo2 } from "lucide-react";
 import { structureAssetNoteDraftAction } from "@/app/actions";
+import { TagPicker } from "@/components/TagPicker";
 import { assetTimeframes, humanize } from "@/lib/constants";
 
 // The thread composer. It is NOT its own form any more — it lives inside the
 // asset page's single form, so whatever is typed here is captured by the same
 // Save that stores the current view and any note edits. A half-written note can
 // no longer be lost by pressing the "other" button.
-export function AssetNoteComposer({ resetKey }: { resetKey: string | number }) {
+export function AssetNoteComposer({ resetKey, tagVocabulary = [] }: { resetKey: string | number; tagVocabulary?: string[] }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [pending, startTransition] = useTransition();
   const [original, setOriginal] = useState<string | null>(null);
@@ -97,6 +98,14 @@ export function AssetNoteComposer({ resetKey }: { resetKey: string | number }) {
           {pending ? "Tidying…" : "Tidy this note with AI"}
         </button>
       </div>
+      <TagPicker
+        key={resetKey}
+        name="noteTags"
+        vocabulary={tagVocabulary}
+        label="Tags for this note (optional)"
+        hint="Tap the ones that fit, or make a new one. #hashtags in the note text are picked up too."
+      />
+
       <p className="text-xs text-forge-muted">Saved by the Save button at the bottom — along with everything else on this page.</p>
     </div>
   );

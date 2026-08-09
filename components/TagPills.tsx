@@ -18,20 +18,3 @@ export function TagPills({ tags, className = "" }: { tags?: string[]; className?
     </span>
   );
 }
-
-// The optional "Tags" input for forms. Inline #hashtags in the note text work
-// without this — it exists for tags you don't want cluttering the prose.
-export function TagsField({ defaultValue, label = "Tags" }: { defaultValue?: string; label?: string }) {
-  return (
-    <label className="field">
-      <span className="label">{label}</span>
-      <input
-        name="tags"
-        defaultValue={defaultValue ?? ""}
-        placeholder="e.g. breakout, funding — or just type #hashtags in the note itself"
-        className="input"
-      />
-      <span className="text-xs text-forge-muted">Optional. Comma or space separated; #hashtags typed in the text are picked up automatically.</span>
-    </label>
-  );
-}

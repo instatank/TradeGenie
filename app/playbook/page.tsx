@@ -1,12 +1,14 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { createSetupAction, deleteSetupAction, toggleSetupActiveAction, updateSetupAction } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { TagPicker } from "@/components/TagPicker";
 import { humanize, setupDirectionBiases } from "@/lib/constants";
-import { db, getTradesWithMistakes } from "@/lib/data";
+import { db, getTagVocabulary, getTradesWithMistakes } from "@/lib/data";
 import { setupPerformance } from "@/lib/metrics";
 
 export default async function PlaybookPage() {
-  const [setups, trades] = await Promise.all([db.list("setups"), getTradesWithMistakes()]);
+  const [setups, trades, tagVocabulary] = await Promise.all([db.list("setups"), getTradesWithMistakes(), getTagVocabulary()]);
+  const tagNames = tagVocabulary.map((entry) => entry.tag);
   const nameById = new Map(setups.map((setup) => [setup.id, setup.name]));
   const performance = new Map(setupPerformance(trades, nameById).map((bucket) => [bucket.key, bucket]));
   const sortedSetups = [...setups].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name));
@@ -24,6 +26,7 @@ export default async function PlaybookPage() {
           <TextAreaField label="Rules (what must be true to take it)" name="rules" rows={4} />
           <TextAreaField label="Entry checklist" name="checklist" rows={3} />
           <TextAreaField label="Notes" name="notes" rows={2} />
+          <TagPicker vocabulary={tagNames} />
           <button className="button" type="submit">Add setup</button>
         </form>
 
@@ -79,6 +82,7 @@ export default async function PlaybookPage() {
                     <TextAreaField label="Rules" name="rules" defaultValue={setup.rules} rows={4} />
                     <TextAreaField label="Entry checklist" name="checklist" defaultValue={setup.checklist} rows={3} />
                     <TextAreaField label="Notes" name="notes" defaultValue={setup.notes} rows={2} />
+                    <TagPicker selected={setup.tags ?? []} vocabulary={tagNames} />
                     <button className="button-secondary" type="submit">Save setup</button>
                   </form>
                 </details>

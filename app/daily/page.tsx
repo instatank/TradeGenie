@@ -4,9 +4,10 @@ import { Sunrise, Sunset, Trash2 } from "lucide-react";
 import { deleteDailyJournalAction, saveEveningReviewAction, saveMorningCheckinAction } from "@/app/actions";
 import { ChipRadioGroup, ScaleChips, YesNoChips } from "@/components/Chips";
 import { PageTitle } from "@/components/Fields";
+import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
 import { humanize, mindStateLabel, mindStateOptions } from "@/lib/constants";
-import { db, getTodayJournal } from "@/lib/data";
+import { db, getTagVocabulary, getTodayJournal } from "@/lib/data";
 import { getTradePnl } from "@/lib/metrics";
 
 const modeOptions = [
@@ -22,7 +23,10 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
   const params = await searchParams;
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
-  const [journal, allTrades] = await Promise.all([getTodayJournal(selectedDate), db.list("trades")]);
+  const [journal, allTrades, tagVocabulary] = await Promise.all([
+    getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(),
+  ]);
+  const tagNames = tagVocabulary.map((entry) => entry.tag);
   const dayTrades = allTrades
     .filter((trade) => isSameDay(trade.tradeDateTime, selectedDate))
     .sort((a, b) => a.tradeDateTime.getTime() - b.tradeDateTime.getTime());
@@ -176,6 +180,12 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
             </label>
           </div>
         </details>
+
+        {/* The day's tags live on this form only. Morning and evening are two
+            separate forms, so a second tags field up there would be a way to
+            lose a tag by saving "the other" ritual. Morning still grows the
+            day's tags from any #hashtags it captures. */}
+        <TagPicker selected={journal?.tags ?? []} vocabulary={tagNames} label="Tags for today" />
 
         <button className="button" type="submit">Finish the day</button>
       </form>

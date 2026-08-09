@@ -5,7 +5,7 @@ import { DisciplineLines, DivergingColumns, EquityCurve, HBarList, MoneyBars } f
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { conditionLabel, humanize } from "@/lib/constants";
-import { db, getResurfacedLessons, getSetupNameMap, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
+import { db, getResurfacedLessons, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import {
   analyticsLeaks,
   calculateRuleAdherenceRate,
@@ -25,7 +25,7 @@ import {
 export default async function TodayPage() {
   const now = new Date();
   const today = startOfDay(now);
-  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal] = await Promise.all([
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
     db.list("transcripts"),
@@ -33,6 +33,7 @@ export default async function TodayPage() {
     getResurfacedLessons(1),
     getSetupNameMap(),
     getTodayJournal(now),
+    getTagVocabulary(),
   ]);
 
   // Streak counts showing up in any form — never profitability.
@@ -188,7 +189,7 @@ export default async function TodayPage() {
               <h2 className="font-semibold">Log a trade</h2>
               <span className="text-xs text-forge-muted">~30 seconds · symbol + direction is enough</span>
             </div>
-            <QuickTradeForm recentSymbols={recentSymbols} redirectTo="/" />
+            <QuickTradeForm recentSymbols={recentSymbols} tagVocabulary={tagVocabulary.map((entry) => entry.tag)} redirectTo="/" />
           </div>
 
           <div className="panel">

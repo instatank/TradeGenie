@@ -12,12 +12,12 @@ import {
   updateTranscriptAction,
 } from "@/app/actions";
 import { BoolSelect, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { TagPills, TagsField } from "@/components/TagPills";
-import { formatTagsForInput } from "@/lib/tags";
+import { TagPills } from "@/components/TagPills";
+import { TagPicker } from "@/components/TagPicker";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { directions, followedPlanOptions, humanize, mindStateOptions, riskPostures, transcriptTypes } from "@/lib/constants";
-import { db, getTranscriptsWithLinks } from "@/lib/data";
+import { db, getTagVocabulary, getTranscriptsWithLinks } from "@/lib/data";
 import { getSettings } from "@/lib/settings-store";
 
 const inboxViews = [
@@ -31,12 +31,14 @@ const inboxViews = [
 // card leads each note — every other action is folded behind "More".
 export default async function InboxPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
-  const [settings, transcripts, trades, journals] = await Promise.all([
+  const [settings, transcripts, trades, journals, tagVocabulary] = await Promise.all([
     getSettings(),
     getTranscriptsWithLinks(),
     db.list("trades"),
     db.list("dailyJournals"),
+    getTagVocabulary(),
   ]);
+  const tagNames = tagVocabulary.map((entry) => entry.tag);
   const view = params.view ?? "review";
   const page = normalizePage(params.page);
   const pageSize = normalizePageSize(params.pageSize, [5, 10, 25], 10);
@@ -83,7 +85,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
             <SelectField label="Note type" name="transcriptType" options={transcriptTypes} defaultValue="UNKNOWN" />
           </div>
           <div className="mt-3">
-            <TagsField />
+            <TagPicker vocabulary={tagNames} />
           </div>
           <p className="mt-2 text-xs text-forge-muted">Leave the type on Unknown — it gets detected from what you wrote.</p>
         </details>
@@ -183,7 +185,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                       <TextField label="Source" name="sourceTool" defaultValue={transcript.sourceTool} />
                       <SelectField label="Note type" name="transcriptType" options={transcriptTypes} defaultValue={transcript.transcriptType} />
                       <div className="sm:col-span-3">
-                        <TagsField defaultValue={formatTagsForInput(transcript.tags)} />
+                        <TagPicker selected={transcript.tags ?? []} vocabulary={tagNames} />
                       </div>
                       <p className="text-xs text-forge-muted sm:col-span-2">Saving edits re-queues the note for structuring.</p>
                       <div className="flex items-end justify-end">

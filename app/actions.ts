@@ -453,7 +453,7 @@ export async function quickLogTradeAction(formData: FormData) {
     setupName: null,
     setupId: null,
     entryThesis: toText(formData.get("entryThesis")),
-    tags: deriveTags([toText(formData.get("entryThesis"))]),
+    tags: deriveTags([toText(formData.get("entryThesis"))], toText(formData.get("tags"))),
     premortem: null,
     conditions: [],
     invalidation: null,
@@ -624,10 +624,14 @@ export async function saveMorningCheckinAction(formData: FormData) {
     reasonNotToTrade: formData.has("reasonNotToTrade") ? toText(formData.get("reasonNotToTrade")) : existing?.reasonNotToTrade ?? null,
     updatedAt: new Date(),
   };
-  const morningTags = mergeTags(
-    existing?.tags,
-    deriveTags([payload.maxLossForDay, payload.learningFocus, payload.marketsWatched, payload.reasonNotToTrade]),
+  // The tag picker shows every tag already on the day, so when it's on screen
+  // its selection is the final word (unticking a chip removes the tag). Without
+  // it, a partial save can only grow the tag set.
+  const morningDerived = deriveTags(
+    [payload.maxLossForDay, payload.learningFocus, payload.marketsWatched, payload.reasonNotToTrade],
+    toText(formData.get("tags")),
   );
+  const morningTags = formData.has("tags") ? morningDerived : mergeTags(existing?.tags, morningDerived);
   if (existing) {
     await db.update("dailyJournals", existing.id, { ...payload, tags: morningTags });
   } else {
@@ -672,13 +676,14 @@ export async function saveEveningReviewAction(formData: FormData) {
     eodNotes: formData.has("eodNotes") ? toText(formData.get("eodNotes")) : existing?.eodNotes ?? null,
     updatedAt: new Date(),
   };
-  const eveningTags = mergeTags(
-    existing?.tags,
-    deriveTags([
+  const eveningDerived = deriveTags(
+    [
       payload.oneThingDoneWell, payload.oneThingToAvoidTomorrow, payload.bestDecision,
       payload.worstDecision, payload.mainMistake, payload.eodNotes,
-    ]),
+    ],
+    toText(formData.get("tags")),
   );
+  const eveningTags = formData.has("tags") ? eveningDerived : mergeTags(existing?.tags, eveningDerived);
   if (existing) {
     await db.update("dailyJournals", existing.id, { ...payload, tags: eveningTags });
   } else {
@@ -953,6 +958,11 @@ function objectiveNumbers(formData: FormData) {
   };
 }
 
+function sameTags(a: string[], b: string[] | undefined) {
+  const other = b ?? [];
+  return a.length === other.length && a.every((tag, index) => tag === other[index]);
+}
+
 function cleanConditions(values: FormDataEntryValue[]) {
   const allowed = new Set(conditionTagValues);
   return values.map(String).filter((value) => allowed.has(value));
@@ -1005,7 +1015,7 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
     };
     await db.update("assets", assetId, {
       ...texts,
-      tags: deriveTags(Object.values(texts)),
+      tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
       marketType: enumValue(MarketType, formData.get("marketType"), asset.marketType),
       updatedAt: now,
     });
@@ -1021,8 +1031,9 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
     const text = toText(formData.get(key));
     if (!text) continue;
     const timeframe = optionalEnum(AssetTimeframe, formData.get(`noteTimeframe-${note.id}`));
-    if (text === note.text && timeframe === (note.timeframe ?? null)) continue;
-    await db.update("assetNotes", note.id, { text, timeframe, tags: deriveTags([text]), updatedAt: now });
+    const tags = deriveTags([text], toText(formData.get(`noteTags-${note.id}`)));
+    if (text === note.text && timeframe === (note.timeframe ?? null) && sameTags(tags, note.tags)) continue;
+    await db.update("assetNotes", note.id, { text, timeframe, tags, updatedAt: now });
     notesEdited += 1;
   }
 
@@ -1035,7 +1046,7 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
       assetId,
       timeframe: optionalEnum(AssetTimeframe, formData.get("noteTimeframe")),
       text: newNote,
-      tags: deriveTags([newNote]),
+      tags: deriveTags([newNote], toText(formData.get("noteTags"))),
     });
   }
 
@@ -1095,7 +1106,7 @@ export async function createSetupAction(formData: FormData) {
     name,
     directionBias: enumValue(SetupDirectionBias, formData.get("directionBias"), SetupDirectionBias.BOTH),
     ...texts,
-    tags: deriveTags(Object.values(texts)),
+    tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
     idealRiskReward: toNumber(formData.get("idealRiskReward")),
     isActive: true,
   });
@@ -1117,7 +1128,7 @@ export async function updateSetupAction(formData: FormData) {
     name,
     directionBias: enumValue(SetupDirectionBias, formData.get("directionBias"), SetupDirectionBias.BOTH),
     ...texts,
-    tags: deriveTags(Object.values(texts)),
+    tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
     idealRiskReward: toNumber(formData.get("idealRiskReward")),
     updatedAt: new Date(),
   });

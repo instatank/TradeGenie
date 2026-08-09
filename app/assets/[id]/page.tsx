@@ -6,17 +6,19 @@ import { deleteAssetAction, deleteAssetNoteAction, saveAssetWorkspaceAction } fr
 import { AssetNoteComposer } from "@/components/AssetNoteComposer";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { SaveBar } from "@/components/SaveBar";
+import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
 import { assetTimeframes, humanize, marketTypes } from "@/lib/constants";
-import { getAssetWorkspace } from "@/lib/data";
+import { getAssetWorkspace, getTagVocabulary } from "@/lib/data";
 
 // The whole page is ONE form: current view, new thread note, and edits to notes
 // already in the thread. One Save captures all of it — there is no way to save
 // half of what is on screen and lose the rest.
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const asset = await getAssetWorkspace(id);
+  const [asset, tagVocabulary] = await Promise.all([getAssetWorkspace(id), getTagVocabulary()]);
   if (!asset) notFound();
+  const tagNames = tagVocabulary.map((entry) => entry.tag);
 
   return (
     <main className="page-shell pb-28">
@@ -66,6 +68,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 placeholder="What you want to do and why — the plan you'd want to re-read tomorrow."
               />
               <SelectField label="Market" name="marketType" options={marketTypes} defaultValue={asset.marketType} />
+              <TagPicker selected={asset.tags ?? []} vocabulary={tagNames} label="Tags for this asset" />
             </div>
 
             {asset.relatedTrades.length ? (
@@ -89,7 +92,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
           {/* The thread — append-only running thought log, newest first. */}
           <div className="space-y-4">
-            <AssetNoteComposer resetKey={`${asset.notes.length}-${asset.notes[0]?.id ?? "none"}`} />
+            <AssetNoteComposer resetKey={`${asset.notes.length}-${asset.notes[0]?.id ?? "none"}`} tagVocabulary={tagNames} />
 
             <div className="space-y-3">
               {asset.notes.map((note) => (
@@ -131,6 +134,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                           Delete note
                         </button>
                       </div>
+                      <TagPicker
+                        name={`noteTags-${note.id}`}
+                        selected={note.tags ?? []}
+                        vocabulary={tagNames}
+                        label="Tags"
+                      />
                       <p className="text-xs text-forge-muted">Edits here are saved by the Save button — no separate save needed.</p>
                     </div>
                   </details>
