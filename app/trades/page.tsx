@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { format, startOfWeek } from "date-fns";
-import { ArrowUpRight, CalendarDays, ChevronRight, Plus, X } from "lucide-react";
+import { ArrowUpRight, CalendarDays, ChevronRight, ClipboardCheck, Plus, X } from "lucide-react";
+import { saveTradeAction } from "@/app/actions";
 import { PageTitle, SelectField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { TagPills } from "@/components/TagPills";
+import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, marketTypes, tradeStatuses } from "@/lib/constants";
+import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, marketTypes, primaryMistakeTagNames, tradeStatuses } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
-import { calculateTotalR, calculateWinRate, getTradePnl } from "@/lib/metrics";
+import { calculateTotalR, calculateWinRate, getTradePnl, tradeNeedsReview } from "@/lib/metrics";
 
 const tradeViews = [
   { label: "All", value: "all" },
@@ -51,6 +53,12 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
 
   const pagedTrades = paginate(trades, page, pageSize);
   const dayGroups = groupByDay(pagedTrades);
+  // The nine chips shown in the inline review, so a trade can be reviewed
+  // without ever leaving the list.
+  const primaryTags = mistakeTags
+    .filter((tag) => primaryMistakeTagNames.has(tag.name))
+    .map((tag) => ({ id: tag.id, label: tag.label, description: tag.description }));
+  const openRowId = params.open ?? null;
 
   return (
     <main className="page-shell max-w-5xl">
@@ -147,7 +155,15 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
               )}
             </header>
             <div className="divide-y divide-forge-line">
-              {group.trades.map((trade) => <TradeRow key={trade.id} trade={trade} />)}
+              {group.trades.map((trade) => (
+                <TradeRow
+                  key={trade.id}
+                  trade={trade}
+                  primaryTags={primaryTags}
+                  open={openRowId === trade.id}
+                  backTo={rowUrl(params, trade.id)}
+                />
+              ))}
             </div>
           </section>
         ))}
@@ -164,14 +180,26 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
 }
 
 type TradeRowData = Awaited<ReturnType<typeof getTradesWithMistakes>>[number];
+type ReviewTag = { id: string; label: string; description: string | null };
 
-// Row = objective data only; tap it for an in-place preview (numbers + notes),
-// and the full trade page is one more click from there.
-function TradeRow({ trade }: { trade: TradeRowData }) {
+// Row = objective data only; tap it for an in-place preview that also contains
+// the full one-minute review, so the daily "review my closed trades" pass never
+// needs a page load at all. The full trade page stays one click away.
+function TradeRow({
+  trade,
+  primaryTags,
+  open,
+  backTo,
+}: {
+  trade: TradeRowData;
+  primaryTags: ReviewTag[];
+  open: boolean;
+  backTo: string;
+}) {
   const pnl = getTradePnl(trade);
-  const needsReview = trade.status === "CLOSED" && ((trade.followedPlan ?? "NA") === "NA" || !trade.lesson);
+  const needsReview = tradeNeedsReview(trade);
   return (
-    <details className="group">
+    <details className="group scroll-mt-24" id={`trade-${trade.id}`} open={open}>
       <summary className="flex cursor-pointer items-center gap-3 px-4 py-3 transition hover:bg-forge-panel/60">
         <ChevronRight className="h-4 w-4 shrink-0 text-forge-muted transition group-open:rotate-90" aria-hidden="true" />
         <span className="w-11 shrink-0 text-xs tabular-nums text-forge-muted">{format(trade.tradeDateTime, "HH:mm")}</span>
@@ -219,14 +247,27 @@ function TradeRow({ trade }: { trade: TradeRowData }) {
           <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
         </Link>
       </summary>
-      <TradePreview trade={trade} pnl={pnl} needsReview={needsReview} />
+      <TradePreview trade={trade} pnl={pnl} needsReview={needsReview} primaryTags={primaryTags} backTo={backTo} />
     </details>
   );
 }
 
 // The in-place preview: key numbers on one side, the trade's own words on the
-// other. Editing and everything else lives on the full trade page.
-function TradePreview({ trade, pnl, needsReview }: { trade: TradeRowData; pnl: number | null; needsReview: boolean }) {
+// other, and the one-minute review right underneath — saving it keeps the row
+// open so you can see the result and move to the next trade.
+function TradePreview({
+  trade,
+  pnl,
+  needsReview,
+  primaryTags,
+  backTo,
+}: {
+  trade: TradeRowData;
+  pnl: number | null;
+  needsReview: boolean;
+  primaryTags: ReviewTag[];
+  backTo: string;
+}) {
   const notes = [
     ["Thesis", trade.entryThesis],
     ["Invalidation", trade.invalidation],
@@ -259,7 +300,7 @@ function TradePreview({ trade, pnl, needsReview }: { trade: TradeRowData; pnl: n
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Link href={`/trades/${trade.id}`} className="button-secondary min-h-9 px-3 text-sm">
-              {needsReview ? "Review this trade" : "Open full trade"} <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+              Open full trade <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
             </Link>
           </div>
         </div>
@@ -280,6 +321,24 @@ function TradePreview({ trade, pnl, needsReview }: { trade: TradeRowData; pnl: n
           </div>
         </div>
       </div>
+
+      <details className="mt-4 rounded-lg border border-forge-line bg-white p-3" open={needsReview}>
+        <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
+          <ClipboardCheck className="h-4 w-4 text-forge-blue" aria-hidden="true" />
+          {needsReview ? "Review it here — one minute, no page load" : "Review — done (tap to edit)"}
+        </summary>
+        <form action={saveTradeAction} className="mt-3 space-y-4">
+          <input type="hidden" name="id" value={trade.id} />
+          <input type="hidden" name="redirectTo" value={backTo} />
+          <TradeReviewFields
+            trade={trade}
+            mistakeTags={primaryTags}
+            selectedMistakes={trade.mistakeTags.map((link) => link.mistakeTagId)}
+            compact
+          />
+          <button className="button" type="submit">Save review</button>
+        </form>
+      </details>
     </div>
   );
 }
@@ -359,6 +418,17 @@ function groupByDay(trades: TradeRowData[]) {
   });
 }
 
+// Where an inline review returns to: the same filtered list, same row still
+// expanded and scrolled to, so a review pass is one continuous flow.
+function rowUrl(params: Record<string, string | undefined>, tradeId: string) {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value && !["open", "feedback", "feedbackType"].includes(key)) next.set(key, value);
+  }
+  next.set("open", tradeId);
+  return `/trades?${next.toString()}#trade-${tradeId}`;
+}
+
 function pickEnum(options: readonly string[], value: string | undefined) {
   return value && options.includes(value) ? value : undefined;
 }
@@ -372,7 +442,7 @@ function hasAdvancedFilters(params: Record<string, string | undefined>) {
 function applyTradeView(trade: TradeRowData, view: string, thisWeek: Date) {
   if (view === "open") return trade.status === "OPEN" || trade.status === "IDEA";
   if (view === "closed") return trade.status === "CLOSED";
-  if (view === "needs-review") return trade.status === "CLOSED" && ((trade.followedPlan ?? "NA") === "NA" || !trade.lesson);
+  if (view === "needs-review") return tradeNeedsReview(trade);
   if (view === "mistakes") return trade.mistakeTags.length > 0;
   if (view === "this-week") return trade.tradeDateTime >= thisWeek;
   return true;

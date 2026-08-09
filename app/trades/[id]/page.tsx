@@ -1,27 +1,29 @@
 import Image from "next/image";
+import Link from "next/link";
 import { format } from "date-fns";
-import { ClipboardCheck, Trash2 } from "lucide-react";
-import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, reviewTradeAction, updateTradeAction } from "@/app/actions";
-import { BigChoice, ChipCheckboxGroup, ChipRadioGroup } from "@/components/Chips";
+import { ArrowLeft, ClipboardCheck, Trash2 } from "lucide-react";
+import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, saveTradeAction } from "@/app/actions";
 import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { SaveBar } from "@/components/SaveBar";
 import { TagPills, TagsField } from "@/components/TagPills";
+import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { formatTagsForInput } from "@/lib/tags";
 import {
   conditionTagOptions,
   directions,
-  entryGrades,
-  followedPlanOptions,
   humanize,
   lessonCategories,
   marketTypes,
   mindStateOptions,
   primaryMistakeTagNames,
   riskPostures,
-  tradeStatuses,
 } from "@/lib/constants";
 import { db, getActiveSetups, getTradeDetail } from "@/lib/data";
-import { exitEfficiency, tradeProcessScore } from "@/lib/metrics";
+import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metrics";
 
+// One trade, one form, one Save. The review ritual sits on top; every other
+// detail is a fold below it — but they all belong to the same form, so a single
+// press of Save captures whatever you touched, wherever you touched it.
 export default async function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [trade, mistakeTags, unlinkedExecutions, setups] = await Promise.all([
@@ -38,15 +40,21 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
     .filter((execution) => !execution.linkedTradeId)
     .sort((a, b) => b.executionDateTime.getTime() - a.executionDateTime.getTime())
     .slice(0, 25);
-  const selectedMistakes = new Set(trade.mistakeTags.map((link) => link.mistakeTagId));
+  const selectedMistakes = trade.mistakeTags.map((link) => link.mistakeTagId);
   const primaryTags = sortedMistakeTags.filter((tag) => primaryMistakeTagNames.has(tag.name));
-  const reviewable = trade.status === "OPEN" || trade.status === "CLOSED";
-  const reviewed = trade.status === "CLOSED" && trade.followedPlan != null && trade.followedPlan !== "NA";
+  const otherTags = sortedMistakeTags.filter((tag) => !primaryMistakeTagNames.has(tag.name));
+  const needsReview = tradeNeedsReview(trade);
 
   return (
-    <main className="page-shell max-w-5xl">
+    <main className="page-shell max-w-5xl pb-28">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <PageTitle title={`${trade.instrument} trade`} subtitle="Review it in a minute up top; every detail stays one click below." />
+        <div>
+          <Link href="/trades" className="mb-2 inline-flex items-center gap-1 text-sm text-forge-muted transition hover:text-forge-ink">
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            All trades
+          </Link>
+          <PageTitle title={`${trade.instrument} trade`} subtitle="Review it in a minute up top; every detail is a fold below. One Save covers the lot." />
+        </div>
         <form action={deleteTradeAction}>
           <input type="hidden" name="id" value={trade.id} />
           <input type="hidden" name="redirectTo" value="/trades" />
@@ -81,104 +89,29 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         </div>
       </section>
 
-      {/* The one-minute review ritual: outcome, plan-followed, grade, mistakes, lesson. */}
-      {reviewable ? (
-        <details className={`panel mb-5 ${reviewed ? "" : "border-l-4 border-forge-blue"}`} open={!reviewed}>
+      <form action={saveTradeAction} className="space-y-5">
+        <input type="hidden" name="id" value={trade.id} />
+        {/* First submit button in the form: Enter in any field saves the page. */}
+        <SaveBar label="Save trade" hint="One save covers the review and every fold below." />
+
+        <details className={`panel ${needsReview ? "border-l-4 border-forge-blue" : ""}`} open={needsReview}>
           <summary className="flex cursor-pointer items-center gap-2 font-semibold">
             <ClipboardCheck className="h-4 w-4 text-forge-blue" aria-hidden="true" />
-            {reviewed ? "Review — done (tap to edit)" : trade.status === "OPEN" ? "Close & review this trade" : "Review this trade — one minute"}
+            {needsReview ? (trade.status === "OPEN" ? "Close & review this trade" : "Review this trade — one minute") : "Review — done (tap to edit)"}
           </summary>
-          <form action={reviewTradeAction} className="mt-4 space-y-4">
-            <input type="hidden" name="id" value={trade.id} />
-            <input type="hidden" name="shownMistakeTagIds" value={primaryTags.map((tag) => tag.id).join(",")} />
-
-            {trade.status === "OPEN" ? (
-              <ChipRadioGroup
-                label="Where does this trade stand?"
-                name="outcome"
-                options={[
-                  { value: "CLOSED", label: "It's closed — reviewing it" },
-                  { value: "OPEN", label: "Still open — just checking in" },
-                ]}
-                defaultValue="CLOSED"
-              />
-            ) : (
-              <input type="hidden" name="outcome" value="CLOSED" />
-            )}
-
-            <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
-              <label className="field">
-                <span className="text-xs font-medium text-forge-muted">Exit price</span>
-                <input name="exitPrice" type="number" step="any" defaultValue={trade.exitPrice ?? ""} className="input" />
-              </label>
-              <label className="field">
-                <span className="text-xs font-medium text-forge-muted">Realized P&L</span>
-                <input name="realizedPnl" type="number" step="any" defaultValue={trade.realizedPnl ?? ""} className="input" />
-              </label>
-            </div>
-
-            <ChipRadioGroup
-              label="Did you follow your plan?"
-              name="followedPlan"
-              options={[
-                { value: "YES", label: "Yes" },
-                { value: "PARTIAL", label: "Partly" },
-                { value: "NO", label: "No" },
-              ]}
-              defaultValue={trade.followedPlan && trade.followedPlan !== "NA" ? trade.followedPlan : undefined}
-              toneByValue={{ YES: "green", PARTIAL: "gold", NO: "red" }}
-              hint="Judge the plan, not the P&L. A rule-following loss is a good trade."
-            />
-
-            <BigChoice
-              label="Grade the execution"
-              name="entryGrade"
-              options={[
-                { value: "A", label: "A", hint: "followed my rules" },
-                { value: "B", label: "B", hint: "minor slip" },
-                { value: "C", label: "C", hint: "broke my rules" },
-              ]}
-              defaultValue={trade.entryGrade !== "NA" ? trade.entryGrade : undefined}
-              toneByValue={{ A: "green", B: "gold", C: "red" }}
-            />
-
-            <ChipCheckboxGroup
-              label="Any of these happen? (tap all that apply)"
-              name="mistakeTagId"
-              options={primaryTags.map((tag) => ({ value: tag.id, label: tag.label, hint: tag.description ?? undefined }))}
-              selected={[...selectedMistakes]}
-            />
-
-            <label className="field">
-              <span className="label">The one lesson from this trade</span>
-              <input name="lesson" defaultValue={trade.lesson ?? ""} placeholder="e.g. wait for the candle to close before entering" className="input" />
-              <span className="text-xs text-forge-muted">Saved to your lessons list automatically, so it resurfaces before future trades.</span>
-            </label>
-
-            <details className="rounded-lg border border-forge-line p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-forge-muted">What happened at the exit? (optional)</summary>
-              <textarea name="exitReason" rows={3} defaultValue={trade.exitReason ?? ""} className="textarea mt-3 min-h-20 w-full" />
-            </details>
-
-            <button className="button" type="submit">Save review</button>
-          </form>
+          <div className="mt-4 space-y-4">
+            <TradeReviewFields trade={trade} mistakeTags={primaryTags} selectedMistakes={selectedMistakes} />
+          </div>
         </details>
-      ) : (
-        <p className="panel muted mb-5">
-          This is {trade.status === "IDEA" ? "still an idea" : "a cancelled trade"} — change its status in the full editor below if it became a real trade.
-        </p>
-      )}
 
-      <h2 className="mb-2 text-sm font-semibold text-forge-muted">Everything else — open only what you need</h2>
-      <form action={updateTradeAction} className="space-y-5">
-        <input type="hidden" name="id" value={trade.id} />
+        <h2 className="text-sm font-semibold text-forge-muted">Everything else — open only what you need</h2>
+
         <details className="panel space-y-4">
           <summary className="cursor-pointer font-semibold">Core idea</summary>
           <div className="grid gap-4 sm:grid-cols-3">
             <TextField label="Trade date/time" name="tradeDateTime" type="datetime-local" defaultValue={format(trade.tradeDateTime, "yyyy-MM-dd'T'HH:mm")} />
             <TextField label="Instrument" name="instrument" defaultValue={trade.instrument} />
             <SelectField label="Direction" name="direction" options={directions} defaultValue={trade.direction} />
-            <SelectField label="Status" name="status" options={tradeStatuses} defaultValue={trade.status} />
             <SelectField label="Market type" name="marketType" options={marketTypes} defaultValue={trade.marketType} />
             <label className="field">
               <span className="label">Playbook setup</span>
@@ -191,6 +124,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             </label>
             <TextField label="Setup name (freeform)" name="setupName" defaultValue={trade.setupName} />
           </div>
+          <p className="text-xs text-forge-muted">Status lives in the review panel above — one control, one place.</p>
           <TagsField defaultValue={formatTagsForInput(trade.tags)} />
         </details>
 
@@ -204,24 +138,24 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <SelectField label="Mind state" name="emotionalState" options={mindStateOptions} includeBlank defaultValue={trade.emotionalState} />
             <SelectField label="Risk posture" name="riskPosture" options={riskPostures} includeBlank defaultValue={trade.riskPosture} />
             <TextField label="Confidence score" name="confidenceScore" type="number" defaultValue={trade.confidenceScore} />
-            <SelectField label="Entry grade" name="entryGrade" options={entryGrades} defaultValue={trade.entryGrade} />
           </div>
+          <input type="hidden" name="hasConditions" value="1" />
           <CheckboxGroup label="Market conditions" name="conditions" options={conditionTagOptions} selected={trade.conditions ?? []} />
+          <TextAreaField label="Free-form notes" name="notes" defaultValue={trade.notes} rows={3} />
         </details>
 
         <details className="panel space-y-4">
           <summary className="cursor-pointer font-semibold">Objective trade data</summary>
+          <p className="text-xs text-forge-muted">Exit price and realized P&L live in the review panel above.</p>
           <div className="grid gap-4 sm:grid-cols-4">
             <TextField label="Entry price" name="entryPrice" type="number" step="0.01" defaultValue={trade.entryPrice} />
             <TextField label="Stop price" name="stopPrice" type="number" step="0.01" defaultValue={trade.stopPrice} />
             <TextField label="Target price" name="targetPrice" type="number" step="0.01" defaultValue={trade.targetPrice} />
-            <TextField label="Exit price" name="exitPrice" type="number" step="0.01" defaultValue={trade.exitPrice} />
             <TextField label="Best price reached (MFE)" name="mfePrice" type="number" step="0.01" defaultValue={trade.mfePrice} />
             <TextField label="Worst price reached (MAE)" name="maePrice" type="number" step="0.01" defaultValue={trade.maePrice} />
             <TextField label="Quantity / size" name="quantity" type="number" step="any" defaultValue={trade.quantity} />
             <TextField label="Total order value" name="totalOrderValue" type="number" step="0.01" defaultValue={trade.totalOrderValue} />
             <TextField label="Leverage" name="leverage" type="number" defaultValue={trade.leverage} />
-            <TextField label="Realized P&L" name="realizedPnl" type="number" step="0.01" defaultValue={trade.realizedPnl} />
             <TextField label="Fees" name="fees" type="number" step="0.01" defaultValue={trade.fees} />
             <TextField label="Funding" name="funding" type="number" step="0.01" defaultValue={trade.funding} />
             <div className="rounded-lg bg-forge-panel p-3">
@@ -243,28 +177,14 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </p>
         </details>
 
-        <details className="panel space-y-4">
-          <summary className="cursor-pointer font-semibold">Exit review (full)</summary>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextAreaField label="Exit reason" name="exitReason" defaultValue={trade.exitReason} rows={3} />
-            <SelectField label="Followed plan" name="followedPlan" options={followedPlanOptions} includeBlank defaultValue={trade.followedPlan} />
-            <TextAreaField label="Lesson" name="lesson" defaultValue={trade.lesson} rows={3} />
-            <TextAreaField label="Notes" name="notes" defaultValue={trade.notes} rows={3} />
-          </div>
-        </details>
-
-        <details className="panel space-y-4">
-          <summary className="cursor-pointer font-semibold">Mistakes (full list)</summary>
-          <MistakeTagGrid tags={sortedMistakeTags.filter((t) => primaryMistakeTagNames.has(t.name))} selected={selectedMistakes} />
-          {sortedMistakeTags.some((t) => !primaryMistakeTagNames.has(t.name)) && (
-            <details className="rounded-lg border border-forge-line p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-forge-muted">More tags</summary>
-              <div className="mt-3">
-                <MistakeTagGrid tags={sortedMistakeTags.filter((t) => !primaryMistakeTagNames.has(t.name))} selected={selectedMistakes} />
-              </div>
-            </details>
-          )}
-        </details>
+        {otherTags.length ? (
+          <details className="panel space-y-4">
+            <summary className="cursor-pointer font-semibold">More mistake tags</summary>
+            <p className="text-xs text-forge-muted">The nine you tag most are chips in the review panel above; the rest live here.</p>
+            <input type="hidden" name="shownMistakeTagIds" value={otherTags.map((tag) => tag.id).join(",")} />
+            <MistakeTagGrid tags={otherTags} selected={new Set(selectedMistakes)} />
+          </details>
+        ) : null}
 
         <details className="panel space-y-4" open={trade.screenshots.length > 0}>
           <summary className="cursor-pointer font-semibold">Screenshots</summary>
@@ -277,22 +197,24 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             ))}
           </div>
         </details>
-
-        <button className="button" type="submit">Save trade changes</button>
       </form>
 
       <section className="mt-5 grid gap-4 lg:grid-cols-2">
         <div className="panel space-y-3">
           <h2 className="font-semibold">Lessons</h2>
-          <form action={createLessonFromTradeAction} className="space-y-3">
-            <input type="hidden" name="tradeId" value={trade.id} />
-            <TextAreaField label="Create lesson from this trade" name="lessonText" defaultValue={trade.lesson} rows={3} />
-            <SelectField label="Category" name="category" options={lessonCategories} defaultValue="PROCESS" />
-            <button className="button-secondary" type="submit">Add lesson</button>
-          </form>
           {trade.lessons.map((lesson) => (
             <p key={lesson.id} className="rounded-md bg-forge-panel p-3 text-sm">{lesson.lessonText}</p>
           ))}
+          <details className="rounded-lg border border-forge-line p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-forge-muted">Add another lesson from this trade</summary>
+            <form action={createLessonFromTradeAction} className="mt-3 space-y-3">
+              <input type="hidden" name="tradeId" value={trade.id} />
+              <TextAreaField label="Lesson" name="lessonText" rows={3} />
+              <SelectField label="Category" name="category" options={lessonCategories} defaultValue="PROCESS" />
+              <button className="button-secondary" type="submit">Add lesson</button>
+            </form>
+          </details>
+          <p className="text-xs text-forge-muted">The lesson you write in the review panel is banked automatically.</p>
         </div>
 
         <div className="panel space-y-3">

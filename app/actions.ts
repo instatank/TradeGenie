@@ -490,37 +490,87 @@ export async function quickLogTradeAction(formData: FormData) {
   redirect(withFeedback(redirectTo, `${label} logged. Review it when you close it.`));
 }
 
-// One-screen "close & review" ritual on the trade page: outcome numbers,
-// followed-plan, execution grade, mistake chips, one lesson. Only the mistake
-// tags that were shown as chips are replaced, so tags picked from the full
-// list elsewhere are never silently dropped.
-export async function reviewTradeAction(formData: FormData) {
+// ONE save for a trade, wherever it is edited from: the review panel and the
+// full editor on the trade page (a single form now), or the compact inline
+// review in an expanded row on /trades.
+//
+// Rule: a field is only touched if its input was actually on screen
+// (`formData.has(...)`). Everything that wasn't rendered keeps its stored value,
+// so no surface can silently wipe another surface's work — and one button press
+// always captures every change on the page it was pressed from.
+export async function saveTradeAction(formData: FormData) {
   const id = String(formData.get("id"));
   const trade = await db.get("trades", id);
   if (!trade) return;
-  const exitPrice = toNumber(formData.get("exitPrice")) ?? trade.exitPrice;
-  const realizedPnl = toNumber(formData.get("realizedPnl")) ?? trade.realizedPnl;
-  const stillOpen = formData.get("outcome") === "OPEN";
-  const lesson = toText(formData.get("lesson"));
-  const exitReasonText = toText(formData.get("exitReason"));
+  const present = (key: string) => formData.has(key);
+  const text = (key: string, fallback: string | null | undefined) => (present(key) ? toText(formData.get(key)) : fallback ?? null);
+  const num = (key: string, fallback: number | null | undefined) => (present(key) ? toNumber(formData.get(key)) : fallback ?? null);
+
+  const status = present("status") ? enumValue(TradeStatus, formData.get("status"), trade.status) : trade.status;
+  const direction = present("direction") ? enumValue(Direction, formData.get("direction"), trade.direction) : trade.direction;
+  const entryPrice = num("entryPrice", trade.entryPrice);
+  const stopPrice = num("stopPrice", trade.stopPrice);
+  const exitPrice = num("exitPrice", trade.exitPrice);
+  const realizedPnl = num("realizedPnl", trade.realizedPnl);
+  const fees = num("fees", trade.fees);
+  const funding = num("funding", trade.funding);
+  const order = calculateOrderFields({
+    price: entryPrice,
+    quantity: num("quantity", trade.quantity),
+    totalOrderValue: num("totalOrderValue", trade.totalOrderValue),
+  });
+  const texts = {
+    entryThesis: text("entryThesis", trade.entryThesis),
+    premortem: text("premortem", trade.premortem),
+    invalidation: text("invalidation", trade.invalidation),
+    concern: text("concern", trade.concern),
+    exitReason: text("exitReason", trade.exitReason),
+    lesson: text("lesson", trade.lesson),
+    notes: text("notes", trade.notes),
+  };
+
   await db.update("trades", id, {
-    // Partial save (no Tags input here): tags only grow, never wiped.
-    tags: mergeTags(trade.tags, deriveTags([lesson, exitReasonText])),
-    status: stillOpen ? TradeStatus.OPEN : TradeStatus.CLOSED,
-    exitPrice: stillOpen ? trade.exitPrice : exitPrice,
-    realizedPnl: stillOpen ? trade.realizedPnl : realizedPnl,
-    netPnl: stillOpen ? trade.netPnl : calculateNetPnl(realizedPnl, trade.fees, trade.funding),
-    rMultiple: stillOpen
-      ? trade.rMultiple
-      : calculateRMultiple({ entryPrice: trade.entryPrice, stopPrice: trade.stopPrice, exitPrice, direction: trade.direction }) ?? trade.rMultiple,
-    exitReason: exitReasonText ?? trade.exitReason,
-    followedPlan: optionalEnum(FollowedPlan, formData.get("followedPlan")) ?? trade.followedPlan,
-    entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), trade.entryGrade),
-    lesson: lesson ?? trade.lesson,
+    tradeDateTime: present("tradeDateTime") ? dateFromForm(formData.get("tradeDateTime"), trade.tradeDateTime) : trade.tradeDateTime,
+    marketType: present("marketType") ? enumValue(MarketType, formData.get("marketType"), trade.marketType) : trade.marketType,
+    instrument: present("instrument") ? String(formData.get("instrument") ?? "").trim().toUpperCase() || trade.instrument : trade.instrument,
+    direction,
+    status,
+    setupName: text("setupName", trade.setupName),
+    setupId: text("setupId", trade.setupId),
+    conditions: present("hasConditions") ? cleanConditions(formData.getAll("conditions")) : trade.conditions,
+    ...texts,
+    // The full editor ships a prefilled Tags input, so it can remove a tag;
+    // partial surfaces (inline review) can only grow the tag set.
+    tags: present("tags")
+      ? deriveTags(Object.values(texts), toText(formData.get("tags")))
+      : mergeTags(trade.tags, deriveTags(Object.values(texts))),
+    emotionalState: present("emotionalState") ? optionalEnum(EmotionalState, formData.get("emotionalState")) : trade.emotionalState,
+    riskPosture: present("riskPosture") ? optionalEnum(RiskPosture, formData.get("riskPosture")) : trade.riskPosture,
+    confidenceScore: num("confidenceScore", trade.confidenceScore),
+    entryGrade: present("entryGrade") ? enumValue(EntryGrade, formData.get("entryGrade"), trade.entryGrade) : trade.entryGrade,
+    followedPlan: present("followedPlan")
+      ? optionalEnum(FollowedPlan, formData.get("followedPlan")) ?? trade.followedPlan
+      : trade.followedPlan,
+    entryPrice,
+    stopPrice,
+    targetPrice: num("targetPrice", trade.targetPrice),
+    exitPrice,
+    maePrice: num("maePrice", trade.maePrice),
+    mfePrice: num("mfePrice", trade.mfePrice),
+    quantity: order.quantity,
+    totalOrderValue: order.totalOrderValue,
+    leverage: num("leverage", trade.leverage),
+    realizedPnl,
+    fees,
+    funding,
+    netPnl: calculateNetPnl(realizedPnl, fees, funding),
+    rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
     updatedAt: new Date(),
   });
 
-  const shownTagIds = String(formData.get("shownMistakeTagIds") ?? "").split(",").filter(Boolean);
+  // Only the mistake tags that were actually on screen get replaced, so tags
+  // picked from the full list elsewhere survive a quick inline review.
+  const shownTagIds = formData.getAll("shownMistakeTagIds").flatMap((value) => String(value).split(",")).filter(Boolean);
   if (shownTagIds.length) {
     const shown = new Set(shownTagIds);
     const picked = formData.getAll("mistakeTagId").map(String).filter((tagId) => shown.has(tagId));
@@ -530,13 +580,16 @@ export async function reviewTradeAction(formData: FormData) {
     }
   }
 
+  await saveScreenshot(formData.get("screenshot"), id);
+
   // Turn the reflection into a reusable lesson with zero extra clicks.
-  if (lesson) {
+  const lessonText = texts.lesson;
+  if (lessonText) {
     const lessons = await db.list("lessons");
-    const duplicate = lessons.some((entry) => entry.linkedTradeId === id && entry.lessonText.trim() === lesson.trim());
+    const duplicate = lessons.some((entry) => entry.linkedTradeId === id && entry.lessonText.trim() === lessonText.trim());
     if (!duplicate) {
       await createLesson({
-        lessonText: lesson,
+        lessonText,
         category: LessonCategory.PROCESS,
         sourceType: LessonSourceType.TRADE,
         linkedTradeId: id,
@@ -549,7 +602,11 @@ export async function reviewTradeAction(formData: FormData) {
   revalidatePath("/trades");
   revalidatePath("/");
   revalidatePath("/lessons");
-  redirect(withFeedback(`/trades/${id}`, stillOpen ? "Review saved — trade stays open." : "Trade reviewed and closed. Good work showing up."));
+  const reviewed = status === TradeStatus.CLOSED && (formData.get("followedPlan") ?? "NA") !== "NA";
+  redirect(withFeedback(
+    toText(formData.get("redirectTo")) ?? `/trades/${id}`,
+    reviewed ? "Saved — trade reviewed and closed." : "Saved.",
+  ));
 }
 
 // Morning and evening save only their own fields (merged over the existing
@@ -643,49 +700,6 @@ export async function saveEveningReviewAction(formData: FormData) {
   revalidatePath("/daily");
   revalidatePath("/");
   redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Day reviewed. That's the habit that compounds."));
-}
-
-export async function updateTradeAction(formData: FormData) {
-  const id = String(formData.get("id"));
-  const numeric = objectiveNumbers(formData);
-  const texts = {
-    entryThesis: toText(formData.get("entryThesis")),
-    premortem: toText(formData.get("premortem")),
-    invalidation: toText(formData.get("invalidation")),
-    concern: toText(formData.get("concern")),
-    exitReason: toText(formData.get("exitReason")),
-    lesson: toText(formData.get("lesson")),
-    notes: toText(formData.get("notes")),
-  };
-  await db.update("trades", id, {
-    tradeDateTime: dateFromForm(formData.get("tradeDateTime")),
-    marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
-    instrument: String(formData.get("instrument") ?? "").trim().toUpperCase(),
-    direction: enumValue(Direction, formData.get("direction"), Direction.UNKNOWN),
-    status: enumValue(TradeStatus, formData.get("status"), TradeStatus.IDEA),
-    setupName: toText(formData.get("setupName")),
-    setupId: toText(formData.get("setupId")),
-    conditions: cleanConditions(formData.getAll("conditions")),
-    ...texts,
-    // Full editor: recompute from everything (its Tags input is prefilled with
-    // the current tags), so this is the one place a tag can be removed.
-    tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
-    emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
-    riskPosture: optionalEnum(RiskPosture, formData.get("riskPosture")),
-    confidenceScore: toNumber(formData.get("confidenceScore")),
-    entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), EntryGrade.NA),
-    followedPlan: optionalEnum(FollowedPlan, formData.get("followedPlan")),
-    updatedAt: new Date(),
-    ...numeric,
-  });
-  await db.deleteWhere("tradeMistakes", (link) => link.tradeId === id);
-  for (const mistakeTagId of formData.getAll("mistakeTagId").map(String)) {
-    await db.create("tradeMistakes", { tradeId: id, mistakeTagId });
-  }
-  await saveScreenshot(formData.get("screenshot"), id);
-  revalidatePath(`/trades/${id}`);
-  revalidatePath("/trades");
-  redirect(withFeedback(`/trades/${id}`, "Trade changes saved."));
 }
 
 export async function deleteTradeAction(formData: FormData) {
@@ -969,23 +983,78 @@ export async function createAssetAction(formData: FormData) {
   redirect(withFeedback(`/assets/${asset.id}`, `Now tracking ${symbol}.`));
 }
 
-export async function updateAssetAction(formData: FormData) {
-  const id = String(formData.get("id"));
-  const texts = {
-    htfBias: toText(formData.get("htfBias")),
-    ltfBias: toText(formData.get("ltfBias")),
-    levels: toText(formData.get("levels")),
-    gamePlan: toText(formData.get("gamePlan")),
-  };
-  await db.update("assets", id, {
-    ...texts,
-    tags: deriveTags(Object.values(texts)),
-    marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
-    updatedAt: new Date(),
-  });
-  revalidatePath(`/assets/${id}`);
+// The whole asset page is one form, so one press of Save captures everything on
+// screen at once: the current view, a new thread note, and any edits made to
+// existing notes. Nothing typed can be lost by pressing "the other button" —
+// there is no other button.
+async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
+  const assetId = String(formData.get("assetId"));
+  const asset = await db.get("assets", assetId);
+  if (!asset) return { assetId, viewSaved: false, noteAdded: false, notesEdited: 0 };
+  const now = new Date();
+  let viewSaved = false;
+  let notesEdited = 0;
+
+  // 1. Current view — only when its panel was actually on screen.
+  if (["htfBias", "ltfBias", "levels", "gamePlan"].some((key) => formData.has(key))) {
+    const texts = {
+      htfBias: toText(formData.get("htfBias")),
+      ltfBias: toText(formData.get("ltfBias")),
+      levels: toText(formData.get("levels")),
+      gamePlan: toText(formData.get("gamePlan")),
+    };
+    await db.update("assets", assetId, {
+      ...texts,
+      tags: deriveTags(Object.values(texts)),
+      marketType: enumValue(MarketType, formData.get("marketType"), asset.marketType),
+      updatedAt: now,
+    });
+    viewSaved = true;
+  }
+
+  // 2. In-place edits to notes already in the thread.
+  const notes = (await db.list("assetNotes")).filter((note) => note.assetId === assetId);
+  for (const note of notes) {
+    if (note.id === skipNoteId) continue;
+    const key = `noteText-${note.id}`;
+    if (!formData.has(key)) continue;
+    const text = toText(formData.get(key));
+    if (!text) continue;
+    const timeframe = optionalEnum(AssetTimeframe, formData.get(`noteTimeframe-${note.id}`));
+    if (text === note.text && timeframe === (note.timeframe ?? null)) continue;
+    await db.update("assetNotes", note.id, { text, timeframe, tags: deriveTags([text]), updatedAt: now });
+    notesEdited += 1;
+  }
+
+  // 3. A new note in the composer — appended, never silently dropped.
+  const newNote = toText(formData.get("noteText"));
+  if (newNote) {
+    await db.create("assetNotes", {
+      createdAt: now,
+      updatedAt: now,
+      assetId,
+      timeframe: optionalEnum(AssetTimeframe, formData.get("noteTimeframe")),
+      text: newNote,
+      tags: deriveTags([newNote]),
+    });
+  }
+
+  // Touch the asset so it bubbles to the top of the index on any activity.
+  if (!viewSaved && (newNote || notesEdited)) await db.update("assets", assetId, { updatedAt: now });
+  revalidatePath(`/assets/${assetId}`);
   revalidatePath("/assets");
-  await redirectBackWithFeedback("Asset view updated.", `/assets/${id}`);
+  revalidatePath("/");
+  return { assetId, viewSaved, noteAdded: Boolean(newNote), notesEdited };
+}
+
+export async function saveAssetWorkspaceAction(formData: FormData) {
+  const result = await applyAssetWorkspace(formData);
+  const parts = [
+    result.noteAdded ? "note added to the thread" : null,
+    result.notesEdited ? `${result.notesEdited} note${result.notesEdited === 1 ? "" : "s"} updated` : null,
+    result.viewSaved ? "current view saved" : null,
+  ].filter(Boolean);
+  redirect(withFeedback(`/assets/${result.assetId}`, parts.length ? `Saved — ${parts.join(" · ")}.` : "Nothing to save yet."));
 }
 
 export async function deleteAssetAction(formData: FormData) {
@@ -1002,49 +1071,13 @@ export async function structureAssetNoteDraftAction(rawText: string) {
   return structureAssetNote(typeof rawText === "string" ? rawText : "");
 }
 
-export async function addAssetNoteAction(formData: FormData) {
-  const assetId = String(formData.get("assetId"));
-  const text = toText(formData.get("text"));
-  if (!text) {
-    redirect(withFeedback(await currentPathFallback(`/assets/${assetId}`), "Write something before saving the note.", "error"));
-  }
-  const now = new Date();
-  await db.create("assetNotes", {
-    createdAt: now,
-    updatedAt: now,
-    assetId,
-    timeframe: optionalEnum(AssetTimeframe, formData.get("timeframe")),
-    text,
-    tags: deriveTags([text]),
-  });
-  // Touch the asset so it bubbles to the top of the index on new activity.
-  await db.update("assets", assetId, { updatedAt: now });
-  revalidatePath(`/assets/${assetId}`);
-  revalidatePath("/assets");
-  await redirectBackWithFeedback("Note added to the thread.", `/assets/${assetId}`);
-}
-
-export async function updateAssetNoteAction(formData: FormData) {
-  const id = String(formData.get("id"));
-  const assetId = String(formData.get("assetId"));
-  const text = toText(formData.get("text"));
-  if (!text) return;
-  await db.update("assetNotes", id, {
-    text,
-    tags: deriveTags([text]),
-    timeframe: optionalEnum(AssetTimeframe, formData.get("timeframe")),
-    updatedAt: new Date(),
-  });
-  revalidatePath(`/assets/${assetId}`);
-  await redirectBackWithFeedback("Note updated.", `/assets/${assetId}`);
-}
-
-export async function deleteAssetNoteAction(formData: FormData) {
-  const id = String(formData.get("id"));
-  const assetId = String(formData.get("assetId"));
-  await db.deleteWhere("assetNotes", (note) => note.id === id);
-  revalidatePath(`/assets/${assetId}`);
-  await redirectBackWithFeedback("Note deleted.", `/assets/${assetId}`);
+// Deleting one note still saves everything else on the page first, so a delete
+// never costs you the edits sitting next to it.
+export async function deleteAssetNoteAction(noteId: string, formData: FormData) {
+  const result = await applyAssetWorkspace(formData, noteId);
+  await db.deleteWhere("assetNotes", (note) => note.id === noteId);
+  revalidatePath(`/assets/${result.assetId}`);
+  redirect(withFeedback(`/assets/${result.assetId}`, "Note deleted — your other changes were saved."));
 }
 
 export async function createSetupAction(formData: FormData) {

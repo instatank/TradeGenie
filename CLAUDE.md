@@ -164,9 +164,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     chips, Long/Short, status, optional one-line why, numbers/mood behind one fold. Only
     the symbol is required (`quickLogTradeAction`).
   - **Trade page is review-first**: "Close & review" panel (exit numbers → followed-plan →
-    A/B/C grade → 9 primary mistake chips → one lesson, auto-saved to the lesson bank) via
-    `reviewTradeAction`; the full editor stays below, collapsed. Only the mistake tags
-    shown as chips are replaced on save, so "More tags" picked elsewhere survive.
+    A/B/C grade → 9 primary mistake chips → one lesson, auto-saved to the lesson bank);
+    the full editor stays below, collapsed. Only the mistake tags shown as chips are
+    replaced on save, so "More tags" picked elsewhere survive. (Now saved by the single
+    page-wide save — see "One button saves the page" below.)
   - **`/daily` is two rituals**: morning (mind-state chips, mode, 3 guardrail inputs) and
     evening (today's trades listed, 3 Yes/No taps, two one-liners, discipline 1–10).
     `saveMorningCheckinAction` / `saveEveningReviewAction` merge into the day's journal
@@ -213,6 +214,38 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   `TagsField` on full editors only (quick flows stay tap-only — friction budgets intact).
   Deliberately NOT done: AI-proposed tags (the tag vocabulary stays the trader's own;
   extraction already maps mistakes to structured tags), and no stored/inverted index.
+
+- **One button saves the page** (owner: "if I hit ONE button it should capture everything on
+  that page — I was losing notes"). The old failure was two independent `<form>`s per page:
+  typing a note and pressing "Save current view" (or filling the review and pressing "Save
+  trade changes") silently threw the other one away.
+  - **A page is now one form with one Save.** `components/SaveBar.tsx` is that button: fixed
+    to the bottom of the screen, always reachable, says "Unsaved changes" the moment you type,
+    saves on Cmd/Ctrl+S, and asks before you leave a dirty page (both tab-close and in-app
+    `<Link>` clicks — `beforeunload` alone doesn't catch client-side navigation). It renders
+    first inside its form so Enter in any field triggers Save, never a delete button.
+  - **`/assets/[id]`** = current view + new thread note + edits to existing notes, all in one
+    form (`saveAssetWorkspaceAction`). Note fields are `noteText-<id>` / `noteTimeframe-<id>`;
+    "Delete note" uses `formAction={deleteAssetNoteAction.bind(null, id)}` and still saves
+    everything else first. (React forbids `name` on a button with a function `formAction` —
+    bind the id, don't encode it in name/value.)
+  - **`/trades/[id]`** = review panel + every fold, one form (`saveTradeAction`, which replaced
+    `reviewTradeAction` + `updateTradeAction`). Duplicated controls were removed rather than
+    left to fight: status lives only in the review chips, exit price / realized P&L / plan /
+    grade / lesson / exit reason only in the review panel, the 9 primary mistake chips in the
+    review and the rest under "More mistake tags".
+  - **`saveTradeAction` is field-presence-based**: a field is only written if its input was on
+    screen (`formData.has(...)`), so a partial surface can never wipe fields it didn't render.
+    `shownMistakeTagIds` is read with `getAll()` so several groups of chips can coexist.
+  - **Review without leaving the list**: the expanded row on `/trades` carries the same
+    `TradeReviewFields` (`components/TradeReviewFields.tsx`) posting to the same action;
+    saving returns to the same filtered list with that row still open (`?open=<id>#trade-<id>`).
+  - **One definition of "reviewed"**: `tradeNeedsReview()` in `lib/metrics.ts`, used by Today,
+    `/trades` and the trade page. It keys off `followedPlan` only — requiring a lesson too left
+    reviewed trades nagging "Review →" forever while the trade page said "done".
+  - Deliberately NOT done: timer-based autosave. Every save is a server action + redirect, so
+    autosaving mid-sentence would fight the cursor and duplicate thread notes; the dirty
+    warning + always-visible Save gets the same "never lose work" guarantee without that.
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged

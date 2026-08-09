@@ -108,7 +108,10 @@ export async function getAssetsIndex() {
         null,
       );
       const lastActivity = lastNoteAt && lastNoteAt > asset.updatedAt ? lastNoteAt : asset.updatedAt;
-      return { ...asset, noteCount: assetNotes.length, lastActivity };
+      // Newest thought comes along for the ride so the index can be skimmed
+      // without opening every asset.
+      const lastNote = assetNotes.sort(descCreated)[0] ?? null;
+      return { ...asset, noteCount: assetNotes.length, lastActivity, lastNote };
     })
     .sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime());
 }

@@ -5,7 +5,11 @@ import { Sparkles, Undo2 } from "lucide-react";
 import { structureAssetNoteDraftAction } from "@/app/actions";
 import { assetTimeframes, humanize } from "@/lib/constants";
 
-export function AssetNoteComposer({ assetId, addAction }: { assetId: string; addAction: (formData: FormData) => void }) {
+// The thread composer. It is NOT its own form any more — it lives inside the
+// asset page's single form, so whatever is typed here is captured by the same
+// Save that stores the current view and any note edits. A half-written note can
+// no longer be lost by pressing the "other" button.
+export function AssetNoteComposer({ resetKey }: { resetKey: string | number }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [pending, startTransition] = useTransition();
   const [original, setOriginal] = useState<string | null>(null);
@@ -43,23 +47,15 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
   }
 
   return (
-    <form
-      action={addAction}
-      onSubmit={() => {
-        // React 19 resets the uncontrolled form after the action; clear our UI hints too.
-        setOriginal(null);
-        setSource(null);
-        setError(null);
-      }}
-      className="panel space-y-3"
-    >
+    <div className="panel space-y-3">
       <h2 className="font-semibold">Add to the thread</h2>
       <label className="field">
         <span className="label">What are you thinking right now?</span>
         <textarea
+          // Remounts once the note is saved, clearing the box for the next thought.
+          key={resetKey}
           ref={textareaRef}
-          name="text"
-          required
+          name="noteText"
           rows={6}
           placeholder="Dump your thought process — analysis, what changed, what you're watching for. Free-form; tidy it after."
           className="textarea"
@@ -79,10 +75,10 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
       ) : null}
       {error ? <p className="text-sm text-forge-red">{error}</p> : null}
 
-      <div className="grid gap-3 sm:grid-cols-[200px_1fr_auto] sm:items-end">
+      <div className="grid gap-3 sm:grid-cols-[200px_1fr] sm:items-end">
         <label className="field">
           <span className="label">Timeframe (optional)</span>
-          <select name="timeframe" defaultValue="" className="input">
+          <select name="noteTimeframe" defaultValue="" className="input">
             <option value="">None</option>
             {assetTimeframes.map((option) => (
               <option key={option} value={option}>
@@ -98,11 +94,10 @@ export function AssetNoteComposer({ assetId, addAction }: { assetId: string; add
           className="button-secondary flex items-center justify-center gap-2"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {pending ? "Tidying…" : "Structure"}
+          {pending ? "Tidying…" : "Tidy this note with AI"}
         </button>
-        <button className="button" type="submit">Add note</button>
       </div>
-      <input type="hidden" name="assetId" value={assetId} />
-    </form>
+      <p className="text-xs text-forge-muted">Saved by the Save button at the bottom — along with everything else on this page.</p>
+    </div>
   );
 }

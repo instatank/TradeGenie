@@ -17,6 +17,7 @@ import {
   mistakeCostLedger,
   mistakeFrequency,
   setupPerformance,
+  tradeNeedsReview,
 } from "@/lib/metrics";
 
 // Today: the one screen of the daily habit. Morning check-in → log trades as
@@ -75,7 +76,7 @@ export default async function TodayPage() {
 
   // Trades waiting on a one-minute review (closed but not reflected on), plus open positions.
   const needsReview = trades
-    .filter((trade) => trade.status === "CLOSED" && ((trade.followedPlan ?? "NA") === "NA" || !trade.lesson))
+    .filter(tradeNeedsReview)
     .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
     .slice(0, 4);
   const openTrades = trades

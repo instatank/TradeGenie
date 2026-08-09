@@ -178,6 +178,14 @@ export function getTradePnl(trade: MetricTrade) {
   return calculateNetPnl(trade.realizedPnl, trade.fees, trade.funding);
 }
 
+// THE definition of "reviewed", used by Today, /trades and the trade page so the
+// three never disagree. Answering "did I follow my plan?" is what closes the
+// loop — the lesson is nudged, never required (an empty lesson used to leave a
+// reviewed trade nagging as "Review →" forever).
+export function tradeNeedsReview(trade: { status?: string | null; followedPlan?: string | null }) {
+  return trade.status === "CLOSED" && (trade.followedPlan ?? "NA") === "NA";
+}
+
 // --- Process score: did I follow my own rules, independent of P&L? ---
 // This is the beginner's real KPI. A losing trade can be A-grade process;
 // a winning trade can be terrible process. We score the second kind down.

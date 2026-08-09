@@ -61,6 +61,11 @@ export default async function AssetsPage() {
               ) : (
                 <p className="mt-2 text-sm text-forge-muted">No bias noted yet.</p>
               )}
+              {asset.lastNote ? (
+                <p className="mt-2 line-clamp-2 rounded-md bg-forge-panel px-2 py-1.5 text-sm text-forge-muted">
+                  <span className="font-medium text-forge-ink">Latest:</span> {asset.lastNote.text}
+                </p>
+              ) : null}
               <p className="mt-2 text-xs text-forge-muted">
                 {asset.noteCount} note{asset.noteCount === 1 ? "" : "s"} in the thread
               </p>
