@@ -104,6 +104,15 @@ function toDate(iso: string | null): Date | null {
 function toStored(wire: z.infer<typeof wireSchema>): MarketContext | null {
   const capturedAt = toDate(wire.capturedAt);
   if (!capturedAt) return null; // a snapshot with no capture time is not evidence
+
+  // SignalDesk answers 200 with null sections when ITS Firestore is down, so a
+  // reply can be well-formed and still carry nothing. Storing that would put an
+  // empty panel on the trade and, worse, mark it as "has context" — hiding it
+  // from the Phase B backfill that would otherwise fill it in later.
+  const hasAnything =
+    wire.fearGreed || wire.coin || wire.btc || wire.topHeadline || wire.briefingHeadline || wire.macroNext;
+  if (!hasAnything) return null;
+
   return {
     marketDate: wire.marketDate,
     slot: wire.slot,

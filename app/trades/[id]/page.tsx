@@ -20,6 +20,7 @@ import {
 } from "@/lib/constants";
 import { db, getActiveSetups, getTagVocabulary, getTradeDetail } from "@/lib/data";
 import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metrics";
+import type { MarketContext } from "@/lib/market-context";
 
 // One trade, one form, one Save. The review ritual sits on top; every other
 // detail is a fold below it — but they all belong to the same form, so a single
@@ -178,6 +179,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </p>
         </details>
 
+        <MarketContextPanel context={trade.marketContext} />
+
         {otherTags.length ? (
           <details className="panel space-y-4">
             <summary className="cursor-pointer font-semibold">More mistake tags</summary>
@@ -293,6 +296,58 @@ function LinkedExecutions({ executions }: { executions: { id: string; executionD
         </tbody>
       </table>
     </div>
+  );
+}
+
+// What the market looked like when this trade was entered — copied once from
+// SignalDesk and frozen. Read-only on purpose: it is evidence, not a field.
+// Trades logged before the bridge existed (and any trade saved while
+// SignalDesk was unreachable) simply have nothing here, so render nothing —
+// never an empty panel implying data went missing.
+function MarketContextPanel({ context }: { context: MarketContext | null | undefined }) {
+  if (!context) return null;
+  const { coin, btc, fearGreed, topHeadline, macroNext } = context;
+  const slotLabel = `${format(new Date(`${context.marketDate}T00:00:00Z`), "d MMM")} · ${context.slot}:00 IST briefing`;
+
+  return (
+    <details className="panel space-y-4">
+      <summary className="cursor-pointer font-semibold">
+        Market context at entry
+        {fearGreed ? <span className="ml-2 text-sm font-normal text-forge-muted">Fear &amp; Greed {fearGreed.value} · {fearGreed.classification}</span> : null}
+      </summary>
+
+      <p className="text-xs text-forge-muted">
+        From SignalDesk, {slotLabel}. Captured once when this trade was logged and never updated — the point is what the market looked like then.
+      </p>
+
+      {context.briefingHeadline ? (
+        <p className="rounded-lg bg-forge-panel p-3 text-sm italic">&ldquo;{context.briefingHeadline}&rdquo;</p>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {fearGreed ? <MiniMetric label="Fear & Greed" value={`${fearGreed.value}${fearGreed.classification ? ` · ${fearGreed.classification}` : ""}`} /> : null}
+        {coin?.fundingLabel ? <MiniMetric label={`${coin.symbol} funding`} value={coin.fundingLabel} tone={coin.fundingBand === "red" ? "bad" : coin.fundingBand === "green" ? "good" : undefined} /> : null}
+        {coin?.price != null ? <MiniMetric label={`${coin.symbol} price`} value={`${coin.price.toLocaleString("en-US")}${coin.change24h == null ? "" : ` (${coin.change24h >= 0 ? "+" : ""}${coin.change24h.toFixed(1)}%)`}`} /> : null}
+        {coin?.flowTag ? <MiniMetric label={`${coin.symbol} flow (24h)`} value={coin.flowTag} /> : null}
+        {btc?.price != null ? <MiniMetric label="BTC" value={`${btc.price.toLocaleString("en-US")}${btc.change24h == null ? "" : ` (${btc.change24h >= 0 ? "+" : ""}${btc.change24h.toFixed(1)}%)`}`} /> : null}
+      </div>
+
+      {topHeadline?.title ? (
+        <p className="text-sm">
+          <span className="text-forge-muted">In the news: </span>
+          {topHeadline.url ? (
+            <a href={topHeadline.url} target="_blank" rel="noreferrer" className="text-forge-blue underline">{topHeadline.title}</a>
+          ) : (
+            topHeadline.title
+          )}
+          {topHeadline.source ? <span className="text-forge-muted"> ({topHeadline.source})</span> : null}
+        </p>
+      ) : null}
+
+      {macroNext ? (
+        <p className="text-sm text-forge-muted">Next macro event: {macroNext.name} — {format(macroNext.date, "d MMM")}</p>
+      ) : null}
+    </details>
   );
 }
 
