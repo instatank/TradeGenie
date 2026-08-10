@@ -1,3 +1,5 @@
+import type { MarketContext } from "@/lib/market-context";
+
 export const TranscriptType = {
   UNKNOWN: "UNKNOWN",
   DAILY_CHECKIN: "DAILY_CHECKIN",
@@ -137,6 +139,11 @@ export type Trade = {
   netPnl: number | null;
   rMultiple: number | null;
   tags?: string[];
+  // What the market looked like when this trade was entered, copied once from
+  // SignalDesk and frozen. Never recomputed — the point is what it looked like
+  // THEN. Absent on every trade logged before the bridge existed, and null
+  // whenever SignalDesk was unreachable; both render as nothing.
+  marketContext?: MarketContext | null;
 };
 
 export type Setup = {

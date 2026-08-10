@@ -9,6 +9,7 @@ import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { structureAssetNote } from "@/lib/asset-note-structurer";
+import { captureMarketContext } from "@/lib/market-context";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
@@ -391,6 +392,10 @@ export async function deleteDailyJournalAction(formData: FormData) {
 export async function createTradeAction(formData: FormData) {
   const numeric = objectiveNumbers(formData);
   const now = new Date();
+  const instrument = String(formData.get("instrument") ?? "").trim().toUpperCase();
+  // Started here so it overlaps the rest of the work; awaited at the write.
+  // Capped at 2s and never throws — see lib/market-context.ts.
+  const marketContext = captureMarketContext(instrument, now);
   const texts = {
     entryThesis: toText(formData.get("entryThesis")),
     premortem: toText(formData.get("premortem")),
@@ -402,7 +407,8 @@ export async function createTradeAction(formData: FormData) {
     updatedAt: now,
     tradeDateTime: now,
     marketType: enumValue(MarketType, formData.get("marketType"), MarketType.CRYPTO_PERP),
-    instrument: String(formData.get("instrument") ?? "").trim().toUpperCase(),
+    instrument,
+    marketContext: await marketContext,
     direction: enumValue(Direction, formData.get("direction"), Direction.UNKNOWN),
     status: enumValue(TradeStatus, formData.get("status"), TradeStatus.IDEA),
     ...texts,
@@ -434,6 +440,10 @@ export async function quickLogTradeAction(formData: FormData) {
   if (!instrument) {
     redirect(withFeedback(redirectTo, "Type a symbol (like BTC) to log the trade.", "error"));
   }
+  const now = new Date();
+  // Kicked off before the settings read so the two overlap: the quick log has
+  // a 30-second budget and this must not add to it. Capped at 2s, never throws.
+  const marketContext = captureMarketContext(instrument, now);
   const settings = await getSettings();
   const direction = enumValue(Direction, formData.get("direction"), Direction.UNKNOWN);
   const status = enumValue(TradeStatus, formData.get("status"), TradeStatus.OPEN);
@@ -441,11 +451,11 @@ export async function quickLogTradeAction(formData: FormData) {
   const stopPrice = toNumber(formData.get("stopPrice"));
   const exitPrice = toNumber(formData.get("exitPrice"));
   const realizedPnl = toNumber(formData.get("realizedPnl"));
-  const now = new Date();
   const trade = await db.create("trades", {
     createdAt: now,
     updatedAt: now,
     tradeDateTime: now,
+    marketContext: await marketContext,
     marketType: enumValue(MarketType, settings.defaultMarketType, MarketType.CRYPTO_PERP),
     instrument,
     direction,
@@ -1178,12 +1188,17 @@ async function createTradeFromStructured(tradeDateTime: Date, structured: Struct
   const realizedPnl = nullableNumber(structured.realizedPnl);
   const order = calculateOrderFields({ price: entryPrice, quantity: nullableNumber(structured.quantity), totalOrderValue: null });
   const hasExit = exitPrice != null || realizedPnl != null;
+  const instrument = String(structured.instrument ?? "UNKNOWN").toUpperCase();
+  // Keyed to the note's own time, not to when it was confirmed: a voice note
+  // spoken at 06:00 and confirmed at 10:00 gets the 06:00 context.
+  const marketContext = await captureMarketContext(instrument, tradeDateTime);
   return db.create("trades", {
     createdAt: new Date(),
     updatedAt: new Date(),
     tradeDateTime,
     marketType: MarketType.CRYPTO_PERP,
-    instrument: String(structured.instrument ?? "UNKNOWN").toUpperCase(),
+    instrument,
+    marketContext,
     direction,
     status: hasExit ? TradeStatus.CLOSED : TradeStatus.IDEA,
     setupName: nullableString(structured.setupName),

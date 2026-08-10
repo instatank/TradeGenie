@@ -24,12 +24,16 @@ import { z } from "zod";
 
 const TIMEOUT_MS = 2000;
 
+// --- the wire shape -------------------------------------------------------
 // Every field is nullable by contract: SignalDesk returns null sections rather
-// than failing, and a half-empty snapshot is worth more than none. .catch()
-// on the outer parse is not enough — we want a malformed payload to become
-// null rather than corrupt journal data, so the shape is validated strictly
-// and any parse failure is treated as "no context".
-const coinSchema = z.object({
+// than failing, and a half-empty snapshot is worth more than none.
+//
+// Optional fields use .default(null), never .optional(). An absent key would
+// parse to `undefined`, and lib/store.ts hands values straight to Firestore,
+// which REJECTS undefined — that would throw inside db.create and take the
+// whole trade save down with it. The one thing this feature must never do.
+
+const wireCoin = z.object({
   symbol: z.string(),
   price: z.number().nullable(),
   change24h: z.number().nullable(),
@@ -40,17 +44,17 @@ const coinSchema = z.object({
   flowTag: z.string().nullable(),
 });
 
-const marketContextSchema = z.object({
+const wireSchema = z.object({
   marketDate: z.string(),
   slot: z.string(),
-  slotAt: z.string().nullable().optional(),
+  slotAt: z.string().nullable().default(null),
   capturedAt: z.string(),
   source: z.literal("signaldesk"),
   version: z.number(),
-  instrument: z.string().nullable(),
-  fearGreed: z.object({ value: z.number(), classification: z.string().nullable() }).nullable(),
-  coin: coinSchema.nullable(),
-  btc: z.object({ price: z.number().nullable(), change24h: z.number().nullable() }).nullable(),
+  instrument: z.string().nullable().default(null),
+  fearGreed: z.object({ value: z.number(), classification: z.string().nullable() }).nullable().default(null),
+  coin: wireCoin.nullable().default(null),
+  btc: z.object({ price: z.number().nullable(), change24h: z.number().nullable() }).nullable().default(null),
   topHeadline: z
     .object({
       title: z.string().nullable(),
@@ -58,13 +62,69 @@ const marketContextSchema = z.object({
       url: z.string().nullable(),
       publishedAt: z.string().nullable(),
     })
-    .nullable(),
-  briefingHeadline: z.string().nullable(),
-  briefingSlot: z.string().nullable().optional(),
-  macroNext: z.object({ name: z.string(), date: z.string() }).nullable(),
+    .nullable()
+    .default(null),
+  briefingHeadline: z.string().nullable().default(null),
+  briefingSlot: z.string().nullable().default(null),
+  macroNext: z.object({ name: z.string(), date: z.string() }).nullable().default(null),
 });
 
-export type MarketContext = z.infer<typeof marketContextSchema>;
+// --- the stored shape -----------------------------------------------------
+// Timestamps are Dates, not ISO strings, because lib/store.ts hydrates any key
+// ending in "At" (and the key "date") back into a Date on read. Storing
+// strings there would mean the type says string and the value is a Date — a
+// lie that surfaces as a crash on the trade page months later. Match the
+// store's convention instead of fighting it.
+
+export type MarketContext = {
+  marketDate: string; // IST calendar day, "2026-08-10"
+  slot: string; // "07" | "19" — the briefing in effect at entry
+  slotAt: Date | null; // when that briefing published
+  capturedAt: Date; // when this copy was taken
+  source: "signaldesk";
+  version: number;
+  instrument: string | null;
+  fearGreed: { value: number; classification: string | null } | null;
+  coin: z.infer<typeof wireCoin> | null;
+  btc: { price: number | null; change24h: number | null } | null;
+  topHeadline: { title: string | null; source: string | null; url: string | null; publishedAt: Date | null } | null;
+  briefingHeadline: string | null;
+  briefingSlot: string | null; // which slot's briefing supplied the headline
+  macroNext: { name: string; date: Date } | null;
+};
+
+function toDate(iso: string | null): Date | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// Explicit field-by-field construction, so no key can arrive as undefined and
+// blow up the Firestore write.
+function toStored(wire: z.infer<typeof wireSchema>): MarketContext | null {
+  const capturedAt = toDate(wire.capturedAt);
+  if (!capturedAt) return null; // a snapshot with no capture time is not evidence
+  return {
+    marketDate: wire.marketDate,
+    slot: wire.slot,
+    slotAt: toDate(wire.slotAt),
+    capturedAt,
+    source: wire.source,
+    version: wire.version,
+    instrument: wire.instrument,
+    fearGreed: wire.fearGreed,
+    coin: wire.coin,
+    btc: wire.btc,
+    topHeadline: wire.topHeadline
+      ? { ...wire.topHeadline, publishedAt: toDate(wire.topHeadline.publishedAt) }
+      : null,
+    briefingHeadline: wire.briefingHeadline,
+    briefingSlot: wire.briefingSlot,
+    // A calendar day carried as a Date because the store hydrates the key
+    // "date" anyway. Render it in UTC — it is a day, not a moment.
+    macroNext: wire.macroNext ? { name: wire.macroNext.name, date: new Date(`${wire.macroNext.date}T00:00:00Z`) } : null,
+  };
+}
 
 // True when both env vars are set. Until then the bridge is off and nothing
 // breaks — no network call, no delay, no error.
@@ -98,8 +158,8 @@ export async function captureMarketContext(
     });
     if (!response.ok) return null;
 
-    const parsed = marketContextSchema.safeParse(await response.json());
-    return parsed.success ? parsed.data : null;
+    const parsed = wireSchema.safeParse(await response.json());
+    return parsed.success ? toStored(parsed.data) : null;
   } catch {
     // Timeout, DNS, TLS, bad JSON — all the same answer. The trade still saves.
     return null;
