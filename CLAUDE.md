@@ -272,6 +272,33 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     autosaving mid-sentence would fight the cursor and duplicate thread notes; the dirty
     warning + always-visible Save gets the same "never lose work" guarantee without that.
 
+- **SignalDesk bridge — Phase A** (design record: `signaldesk/TRADEGENIE_BRIDGE.md`,
+  which spans both repos — read it before touching anything here). Saving a trade
+  now staples a frozen snapshot of the market onto it: `Trade.marketContext`,
+  captured by `lib/market-context.ts` at all three `db.create("trades", …)` sites,
+  shown as a read-only "Market context at entry" fold on `/trades/[id]`.
+  - **Never load-bearing.** 2s timeout, every failure path returns `null`, the
+    trade saves regardless. If a change could make a trade save fail because the
+    market-data app is down, the change is wrong. Same rule as "AI is optional".
+  - **Off until configured.** No `SIGNALDESK_SNAPSHOT_URL` +
+    `SIGNALDESK_SNAPSHOT_TOKEN` means no network call at all — zero cost to the
+    30-second quick-log budget while the owner decides.
+  - **Entry only, copied not linked, never recomputed.** The decision being
+    graded is the entry. The snapshot is a permanent part of the journal and must
+    stay readable with SignalDesk switched off.
+  - **The slot rule lives in SignalDesk, not here.** We send the trade's
+    timestamp; it resolves the briefing at or before that instant (a 06:00 IST
+    trade gets the previous evening's). Never reimplement that comparison here —
+    two implementations would drift, the same way two tag tokenizers did in DayOS.
+  - **Two `lib/store.ts` traps the stored type works around**: `dehydrate()` hands
+    values straight to Firestore, which rejects `undefined` (so the zod schema uses
+    `.default(null)`, never `.optional()`), and `hydrate()` turns any key ending in
+    `At` — and the key `date` — back into a `Date` on read (so those fields are
+    typed `Date`, matching the store's convention instead of fighting it).
+  - Deliberately NOT done: backfilling old trades, and any analytics over the
+    captured context. That's Phase B, and the analysis needs ~30 context-carrying
+    trades before it says anything true rather than noise that looks like signal.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

@@ -29,6 +29,9 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - `FIREBASE_STORAGE_BUCKET`
 - Optional local ADC path:
   - `GOOGLE_APPLICATION_CREDENTIALS`
+- Optional SignalDesk bridge (both required, or the feature is off):
+  - `SIGNALDESK_SNAPSHOT_URL`
+  - `SIGNALDESK_SNAPSHOT_TOKEN`
 - Do not commit secrets, service account JSON, `.env`, `.env.local`, or local data exports.
 - Screenshot uploads use Firebase Storage when Firebase is configured; local disk under `public/uploads` is only a development fallback.
 
@@ -45,6 +48,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
 - `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
+- `lib/market-context.ts`: the SignalDesk bridge — fetches the market snapshot for a trade's entry and returns null on any failure. Design record lives in the other repo: `signaldesk/TRADEGENIE_BRIDGE.md`.
 
 ## Product Areas
 
@@ -130,6 +134,22 @@ Use `PENDING_TASKS.md` as the backlog. Current recommended sequence:
 1. Vercel production-branch permanent fix.
 2. Today workspace / dashboard refinement.
 3. Trade lifecycle prompts (unfinished-loop nudges).
+
+## SignalDesk Bridge (Phase A)
+
+- When a trade is saved, `captureMarketContext()` asks SignalDesk what the
+  market looked like at that moment and freezes the answer onto the trade as
+  `Trade.marketContext`. Shown read-only on `/trades/[id]`; never recomputed.
+- **It is never load-bearing.** 2-second timeout, every failure returns null,
+  the trade saves regardless. If a change could make a trade save fail because
+  SignalDesk is down, the change is wrong.
+- Off until `SIGNALDESK_SNAPSHOT_URL` + `SIGNALDESK_SNAPSHOT_TOKEN` are set —
+  no network call, nothing slower.
+- The context is keyed to the briefing slot in effect **at or before** the
+  entry (SignalDesk publishes 07:00/19:00 IST). That comparison lives in
+  SignalDesk; TradeGenie sends the trade's timestamp and never computes a slot.
+- Full design + reasoning: `signaldesk/TRADEGENIE_BRIDGE.md`. Backfill and any
+  analysis over the captured context are Phase B and not built.
 
 ## Known Risks / Gotchas
 
