@@ -1,3 +1,5 @@
+Before any work in this repo: run git fetch && git status. If behind origin/main, pull and npm install before proceeding. Report if diverged.
+
 # CLAUDE.md
 
 Working guide for Claude Code on **TradeGenie** (tagline: "magic journal"). Keep it short and current.
