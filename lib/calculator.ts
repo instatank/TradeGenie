@@ -7,6 +7,10 @@
 // the gross move to the exchange, which quietly turns a "2R" plan into well under
 // 1R. So every number here comes in two flavours — gross (what the chart says)
 // and net (what actually lands in the account) — and the net one is the headline.
+//
+// Slippage is the same shape of cost and is folded into the same place: it moves
+// the price you actually get filled at, on all three legs. It's opt-in — pass
+// slippagePct: 0 and every number below is exactly the fees-only answer.
 
 export type CalcDirection = "LONG" | "SHORT";
 
@@ -27,11 +31,16 @@ export type CalcInput = {
   /** Funding per 8h as a % of notional. Positive = you pay it. */
   fundingPct: number;
   hoursHeld: number;
+  /**
+   * How far the fill misses the quoted price, as a % of price, per leg. Always
+   * against you: worse entry, worse target, worse stop. 0 turns it off entirely.
+   */
+  slippagePct: number;
 };
 
-export type FeeDragRow = {
+export type CostDragRow = {
   movePct: number;
-  /** Share of the gross move handed to the exchange, as a %. */
+  /** Share of the quoted move lost to costs, as a %. */
   bitePct: number;
   /** Gross R:R you'd need for this move to net exactly 1R. */
   grossRRForOneNetR: number | null;
@@ -53,16 +62,18 @@ export type CalcResult = {
   netRiskPerUnit: number;
   netRewardPerUnit: number;
 
-  // --- the move and what the exchange takes out of it ---
-  /** Distance entry → target, as a % of entry. */
+  // --- the move and what it costs to capture ---
+  /** Distance entry → target on the chart, as a % of entry. */
   grossMovePct: number;
   /** Distance entry → stop, as a % of entry. */
   stopDistancePct: number;
   /** Entry fee + exit fee, as a % of entry notional. */
   roundTripFeePct: number;
-  /** Fees + funding as a share of the gross move — the "25% fee structure" number. */
-  feeBitePct: number;
-  /** Price where the trade is exactly flat after all costs. */
+  /** Every cost as a share of the quoted move — the "25% fee structure" number. */
+  costBitePct: number;
+  /** Whether slippage is switched on, so callers can label costs honestly. */
+  slippageOn: boolean;
+  /** Quoted price the market must print for the trade to be flat after all costs. */
   breakEvenPrice: number;
   /** How far price must travel from entry just to cover costs, as a %. */
   breakEvenMovePct: number;
@@ -79,7 +90,7 @@ export type CalcResult = {
 
   // --- sizing ---
   riskBudget: number;
-  /** Sized so that a stop-out costs exactly the risk budget, fees included. */
+  /** Sized so that a stop-out costs exactly the risk budget, all costs included. */
   quantity: number;
   notional: number;
   margin: number;
@@ -89,16 +100,24 @@ export type CalcResult = {
   // --- money ---
   grossWin: number;
   netWin: number;
-  /** Positive number: what a stop-out actually costs, fees included. */
+  /** Positive number: what a stop-out actually costs, all costs included. */
   netLoss: number;
   entryFee: number;
   exitFeeAtTarget: number;
   exitFeeAtStop: number;
   fundingCost: number;
+  /** What slippage alone costs on a winning round trip. 0 when it's switched off. */
+  slippageCostAtTarget: number;
+  /** Fees + funding + slippage on the way to the target. */
   totalCostAtTarget: number;
 
+  // --- the prices you'd actually get filled at ---
+  entryFill: number;
+  targetFill: number;
+  stopFill: number;
+
   // --- tables ---
-  feeDrag: FeeDragRow[];
+  costDrag: CostDragRow[];
   targetsForNetR: TargetForRRow[];
 };
 
@@ -147,17 +166,35 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
   const periods = Math.max(input.hoursHeld, 0) / 8;
   const fundingPerUnit = entry * (input.fundingPct / 100) * periods;
 
-  const feeAtEntryPerUnit = entry * feeEntry;
-  const feeAtTargetPerUnit = target * feeExit;
-  const feeAtStopPerUnit = stop * feeExit;
+  // Slippage always works against you, on every leg: you pay up to get in, and
+  // you give up a tick getting out — including out of a stop, which typically
+  // fills worse than the trigger. Everything below is computed from these fill
+  // prices, so slippage flows into R, break-even, sizing and expectancy at once.
+  // At 0 the fills collapse back onto the quoted prices and nothing changes.
+  const slip = Math.max(input.slippagePct, 0) / 100;
+  const slippageOn = slip > 0;
+  const entryFill = entry * (1 + dir * slip);
+  const targetFill = target * (1 - dir * slip);
+  const stopFill = stop * (1 - dir * slip);
 
+  const feeAtEntryPerUnit = entryFill * feeEntry;
+  const feeAtTargetPerUnit = targetFill * feeExit;
+  const feeAtStopPerUnit = stopFill * feeExit;
+
+  // Gross stays on the quoted prices on purpose — it's "what the chart says",
+  // the thing net R is being contrasted against.
   const grossRiskPerUnit = Math.abs(entry - stop);
   const grossRewardPerUnit = dir * (target - entry);
 
-  // Fees make the win smaller AND the loss bigger — that double hit is why net R
+  // What the fills alone do, before a single fee: the win shrinks by slippage on
+  // both legs, the loss grows by it on both legs.
+  const filledRewardPerUnit = dir * (targetFill - entryFill);
+  const filledRiskPerUnit = dir * (entryFill - stopFill);
+
+  // Costs make the win smaller AND the loss bigger — that double hit is why net R
   // falls off so much faster than people expect on small moves.
-  const netRewardPerUnit = grossRewardPerUnit - feeAtEntryPerUnit - feeAtTargetPerUnit - fundingPerUnit;
-  const netRiskPerUnit = grossRiskPerUnit + feeAtEntryPerUnit + feeAtStopPerUnit + fundingPerUnit;
+  const netRewardPerUnit = filledRewardPerUnit - feeAtEntryPerUnit - feeAtTargetPerUnit - fundingPerUnit;
+  const netRiskPerUnit = filledRiskPerUnit + feeAtEntryPerUnit + feeAtStopPerUnit + fundingPerUnit;
 
   const grossR = grossRewardPerUnit / grossRiskPerUnit;
   const netR = netRewardPerUnit / netRiskPerUnit;
@@ -165,20 +202,23 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
   const grossMovePct = (Math.abs(target - entry) / entry) * 100;
   const stopDistancePct = (grossRiskPerUnit / entry) * 100;
   const roundTripFeePct = ((feeAtEntryPerUnit + feeAtTargetPerUnit) / entry) * 100;
-  const totalCostPerUnit = feeAtEntryPerUnit + feeAtTargetPerUnit + fundingPerUnit;
-  const feeBitePct = Math.abs(grossRewardPerUnit) > 0 ? (totalCostPerUnit / Math.abs(grossRewardPerUnit)) * 100 : 0;
+  const slippagePerUnit = slip * (entry + target);
+  const totalCostPerUnit = feeAtEntryPerUnit + feeAtTargetPerUnit + fundingPerUnit + slippagePerUnit;
+  const costBitePct = Math.abs(grossRewardPerUnit) > 0 ? (totalCostPerUnit / Math.abs(grossRewardPerUnit)) * 100 : 0;
 
-  const breakEvenPrice = breakEven(entry, dir, feeEntry, feeExit, fundingPerUnit);
+  // Quoted price the market has to print, not the fill — the fill will slip off
+  // it again, which the exit multiplier accounts for.
+  const breakEvenPrice = breakEven(entryFill, dir, feeEntry, feeExit, fundingPerUnit, slip);
   const breakEvenMovePct = (Math.abs(breakEvenPrice - entry) / entry) * 100;
 
   // Size off the *net* loss so a stop-out costs exactly the risk budget. Sizing
   // off the raw stop distance (what most calculators do) quietly overshoots the
-  // budget by the fee bill.
+  // budget by the fee bill — and by the slipped stop, when slippage is on.
   const riskBudget = Math.max(input.accountSize, 0) * (Math.max(input.riskPct, 0) / 100);
   const quantity = netRiskPerUnit > 0 ? riskBudget / netRiskPerUnit : 0;
-  const notional = quantity * entry;
+  const notional = quantity * entryFill;
   const margin = leverage > 0 ? notional / leverage : notional;
-  const liquidationPrice = leverage > 1 ? entry * (1 - dir / leverage) : null;
+  const liquidationPrice = leverage > 1 ? entryFill * (1 - dir / leverage) : null;
 
   if (liquidationPrice != null && dir * (stop - liquidationPrice) <= 0) {
     warnings.push(
@@ -202,7 +242,8 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
     grossMovePct,
     stopDistancePct,
     roundTripFeePct,
-    feeBitePct,
+    costBitePct,
+    slippageOn,
     breakEvenPrice,
     breakEvenMovePct,
     grossR,
@@ -221,70 +262,106 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
     exitFeeAtTarget: quantity * feeAtTargetPerUnit,
     exitFeeAtStop: quantity * feeAtStopPerUnit,
     fundingCost: quantity * fundingPerUnit,
+    slippageCostAtTarget: quantity * slippagePerUnit,
     totalCostAtTarget: quantity * totalCostPerUnit,
-    feeDrag: feeDragLadder(entry, dir, feeEntry, feeExit),
-    targetsForNetR: targetLadder(entry, dir, feeEntry, feeExit, fundingPerUnit, netRiskPerUnit),
+    entryFill,
+    targetFill,
+    stopFill,
+    costDrag: costDragLadder(entry, dir, feeEntry, feeExit, slip, fundingPerUnit),
+    targetsForNetR: targetLadder(entryFill, dir, feeEntry, feeExit, fundingPerUnit, netRiskPerUnit, slip, entry),
   };
 }
 
 /**
- * The price at which the position is exactly flat after entry fee, exit fee and
- * funding. Solved, not iterated: the exit fee is charged on the *exit* price, so
- * break-even is not simply entry + costs.
+ * The **quoted** price at which the position is exactly flat after entry fee,
+ * exit fee, funding and slippage. Solved, not iterated, for two reasons: the
+ * exit fee is charged on the *exit* price, and the exit itself slips off the
+ * quoted price — so break-even is not simply entry + costs.
+ *
+ * Takes the already-slipped entry fill. `exitSlip` is the factor the quoted exit
+ * gets multiplied by to become a fill: `1 - dir*slip`.
  */
-export function breakEven(entry: number, dir: 1 | -1, feeEntry: number, feeExit: number, fundingPerUnit: number) {
+export function breakEven(
+  entryFill: number,
+  dir: 1 | -1,
+  feeEntry: number,
+  feeExit: number,
+  fundingPerUnit: number,
+  slip = 0,
+) {
+  const exitSlip = 1 - dir * slip;
   return dir === 1
-    ? (entry * (1 + feeEntry) + fundingPerUnit) / (1 - feeExit)
-    : (entry * (1 - feeEntry) - fundingPerUnit) / (1 + feeExit);
+    ? (entryFill * (1 + feeEntry) + fundingPerUnit) / (exitSlip * (1 - feeExit))
+    : (entryFill * (1 - feeEntry) - fundingPerUnit) / (exitSlip * (1 + feeExit));
 }
 
-/** Target price that produces a given *net* R, given the same costs. */
+/** Quoted target price that produces a given *net* R, given the same costs. */
 function targetForNetR(
-  entry: number,
+  entryFill: number,
   dir: 1 | -1,
   feeEntry: number,
   feeExit: number,
   fundingPerUnit: number,
   netRiskPerUnit: number,
   netR: number,
+  slip: number,
 ) {
   const wanted = netR * netRiskPerUnit;
+  const exitSlip = 1 - dir * slip;
   return dir === 1
-    ? (wanted + entry * (1 + feeEntry) + fundingPerUnit) / (1 - feeExit)
-    : (entry * (1 - feeEntry) - fundingPerUnit - wanted) / (1 + feeExit);
+    ? (wanted + entryFill * (1 + feeEntry) + fundingPerUnit) / (exitSlip * (1 - feeExit))
+    : (entryFill * (1 - feeEntry) - fundingPerUnit - wanted) / (exitSlip * (1 + feeExit));
 }
 
 function targetLadder(
-  entry: number,
+  entryFill: number,
   dir: 1 | -1,
   feeEntry: number,
   feeExit: number,
   fundingPerUnit: number,
   netRiskPerUnit: number,
+  slip: number,
+  quotedEntry: number,
 ): TargetForRRow[] {
   return NET_R_LADDER.map((netR) => {
-    const price = targetForNetR(entry, dir, feeEntry, feeExit, fundingPerUnit, netRiskPerUnit, netR);
-    return { netR, price, movePct: (Math.abs(price - entry) / entry) * 100 };
+    const price = targetForNetR(entryFill, dir, feeEntry, feeExit, fundingPerUnit, netRiskPerUnit, netR, slip);
+    // The move is measured from the quoted entry — that's the number you'd read
+    // off a chart when deciding whether the target is realistic.
+    return { netR, price, movePct: (Math.abs(price - quotedEntry) / quotedEntry) * 100 };
   });
 }
 
 /**
- * "How much of the move do fees eat?" across a ladder of move sizes — the table
+ * "How much of the move do costs eat?" across a ladder of move sizes — the table
  * that makes the whole problem obvious at a glance. Independent of the current
- * stop/target; it only depends on the fee rates.
+ * stop and target; it depends only on the fee rates, the slippage assumption and
+ * the funding already accrued.
  */
-function feeDragLadder(entry: number, dir: 1 | -1, feeEntry: number, feeExit: number): FeeDragRow[] {
+function costDragLadder(
+  entry: number,
+  dir: 1 | -1,
+  feeEntry: number,
+  feeExit: number,
+  slip: number,
+  fundingPerUnit: number,
+): CostDragRow[] {
+  const entryFill = entry * (1 + dir * slip);
+  const exitSlip = 1 - dir * slip;
   return MOVE_LADDER.map((movePct) => {
     const target = entry * (1 + (dir * movePct) / 100);
+    const targetFill = target * exitSlip;
     const move = Math.abs(target - entry);
-    const cost = entry * feeEntry + target * feeExit;
-    const bitePct = move > 0 ? (cost / move) * 100 : 0;
-    // Net 1R means net reward == net risk. With risk distance d and reward
-    // distance m: m - c_win = d + c_loss. Solving for the gross R:R m/d, using
-    // the exit fee at roughly entry price for the losing side.
-    const netReward = move - cost;
-    const costOnLoss = entry * feeEntry + entry * feeExit;
-    const grossRRForOneNetR = netReward > costOnLoss ? move / (netReward - costOnLoss) : null;
+    const netReward = dir * (targetFill - entryFill) - entryFill * feeEntry - targetFill * feeExit - fundingPerUnit;
+    const bitePct = move > 0 ? ((move - netReward) / move) * 100 : 0;
+
+    // Net 1R means net reward == net risk. Solved exactly for the stop distance d
+    // rather than approximating the losing side's costs at the entry price: the
+    // stop's own exit fee scales with the stop price, which is what the
+    // exitSlip*(1 - dir*feeExit) denominator carries. Approximating it puts the
+    // tight-stop rows visibly wrong — and those are the rows that matter here.
+    const numerator = netReward - 2 * slip * entry - entryFill * feeEntry - entry * exitSlip * feeExit - fundingPerUnit;
+    const stopDistance = numerator / (exitSlip * (1 - dir * feeExit));
+    const grossRRForOneNetR = stopDistance > 0 ? move / stopDistance : null;
     return { movePct, bitePct, grossRRForOneNetR };
   });
 }

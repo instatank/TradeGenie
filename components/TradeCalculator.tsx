@@ -26,6 +26,8 @@ type Fields = {
   leverage: string;
   fundingPct: string;
   hoursHeld: string;
+  slippageOn: boolean;
+  slippagePct: string;
   winRatePct: string;
 };
 
@@ -43,13 +45,25 @@ const baseDefaults: Fields = {
   leverage: "10",
   fundingPct: "0",
   hoursHeld: "0",
+  // Off until you've watched your own fills long enough to know your number.
+  // At 0 every result is identical to the fees-only answer.
+  slippageOn: false,
+  slippagePct: "0.02",
   winRatePct: "50",
 };
 
 // Only the settings-shaped fields are remembered — your fee tier and account
 // size don't change between sessions, prices do.
 const STORAGE_KEY = "tradegenie.calculator.defaults";
-const remembered = ["entryFeePct", "exitFeePct", "accountSize", "riskPct", "leverage", "winRatePct"] as const;
+const remembered = [
+  "entryFeePct",
+  "exitFeePct",
+  "accountSize",
+  "riskPct",
+  "leverage",
+  "winRatePct",
+  "slippagePct",
+] as const;
 
 export function TradeCalculator({ journalWinRate, journalTradeCount }: { journalWinRate: number | null; journalTradeCount: number }) {
   const [fields, setFields] = useState<Fields>(() => ({
@@ -68,6 +82,7 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
           const value = saved[key];
           if (typeof value === "string" && value !== "") next[key] = value;
         }
+        if (typeof saved.slippageOn === "boolean") next.slippageOn = saved.slippageOn;
         return next;
       });
     } catch {
@@ -78,7 +93,7 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
   useEffect(() => {
     try {
       const payload = Object.fromEntries(remembered.map((key) => [key, fields[key]]));
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...payload, slippageOn: fields.slippageOn }));
     } catch {
       // Ignore — remembering the fee tier is a convenience, never load-bearing.
     }
@@ -98,6 +113,7 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
     leverage: num(fields.leverage),
     fundingPct: num(fields.fundingPct),
     hoursHeld: num(fields.hoursHeld),
+    slippagePct: fields.slippageOn ? num(fields.slippagePct) : 0,
   });
 
   return (
@@ -172,6 +188,32 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
           <Num label="Leverage" value={fields.leverage} onChange={set("leverage")} />
         </div>
 
+        <div className="space-y-2 rounded-lg border border-forge-line p-3">
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              checked={fields.slippageOn}
+              onChange={(event) => setFields((current) => ({ ...current, slippageOn: event.target.checked }))}
+              className="mt-0.5 h-4 w-4 accent-forge-ink"
+            />
+            <span className="text-sm font-semibold text-forge-ink">
+              Include slippage{" "}
+              <span className="font-normal text-forge-muted">
+                {fields.slippageOn ? "(on — every number below allows for it)" : "(off — turn it on once you know your fills)"}
+              </span>
+            </span>
+          </label>
+          {fields.slippageOn ? (
+            <div className="space-y-2 pl-6">
+              <Num label="Slippage % per leg" value={fields.slippagePct} onChange={set("slippagePct")} />
+              <p className="text-xs text-forge-muted">
+                Applied against you on all three legs — you pay up to get in, and give a tick back on the target and on
+                the stop.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
         <details className="rounded-lg border border-forge-line p-3">
           <summary className="cursor-pointer text-sm font-semibold text-forge-muted">
             Funding <span className="font-normal">(only matters if you hold)</span>
@@ -232,7 +274,7 @@ function Results({
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Tile
-          label="Real R after fees"
+          label={result.slippageOn ? "Real R after costs" : "Real R after fees"}
           value={`${result.netR.toFixed(2)}R`}
           sub={`${result.grossR.toFixed(2)}R on the chart`}
           tone={result.netR >= 1 ? "green" : result.netR > 0 ? "gold" : "red"}
@@ -242,33 +284,50 @@ function Results({
           value={result.netBreakEvenWinRate != null ? pct(result.netBreakEvenWinRate * 100, 1) : "impossible"}
           sub={
             result.grossBreakEvenWinRate != null
-              ? `${pct(result.grossBreakEvenWinRate * 100, 1)} if fees were free`
+              ? `${pct(result.grossBreakEvenWinRate * 100, 1)} if it cost nothing to trade`
               : "target is on the wrong side"
           }
           tone={result.netBreakEvenWinRate == null ? "red" : result.netBreakEvenWinRate > 0.55 ? "gold" : "green"}
         />
         <Tile
-          label="Fees eat"
-          value={pct(result.feeBitePct, 0)}
+          label={result.slippageOn ? "Fees + slippage eat" : "Fees eat"}
+          value={pct(result.costBitePct, 0)}
           sub={`of your ${pct(result.grossMovePct, 2)} move`}
-          tone={result.feeBitePct >= 25 ? "red" : result.feeBitePct >= 12 ? "gold" : "green"}
+          tone={result.costBitePct >= 25 ? "red" : result.costBitePct >= 12 ? "gold" : "green"}
         />
       </div>
 
       <div className="panel space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-forge-muted">Break-even &amp; costs</h2>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          <Stat label="Break-even price" value={price(result.breakEvenPrice)} />
+          <Stat
+            label="Break-even price"
+            value={price(result.breakEvenPrice)}
+            hint={result.slippageOn ? "quoted price, slipped fill allowed for" : undefined}
+          />
           <Stat label="Move to break even" value={pct(result.breakEvenMovePct, 3)} hint="before you make a cent" />
           <Stat label="Round-trip fee" value={pct(result.roundTripFeePct, 3)} hint="of position size" />
-          <Stat label="Total cost at target" value={money(result.totalCostAtTarget)} hint="fees + funding" />
+          <Stat
+            label="Total cost at target"
+            value={money(result.totalCostAtTarget)}
+            hint={result.slippageOn ? "fees + funding + slippage" : "fees + funding"}
+          />
         </dl>
+        {result.slippageOn ? (
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-forge-line pt-3 sm:grid-cols-4">
+            <Stat label="Slippage alone" value={money(result.slippageCostAtTarget)} hint="round trip" />
+            <Stat label="You fill entry at" value={price(result.entryFill)} />
+            <Stat label="Target fills at" value={price(result.targetFill)} />
+            <Stat label="Stop fills at" value={price(result.stopFill)} />
+          </dl>
+        ) : null}
       </div>
 
       <div className="panel space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-forge-muted">Position size</h2>
         <p className="text-sm text-forge-muted">
-          Sized so a stop-out costs exactly your {money(result.riskBudget)} risk budget — fees included, not on top.
+          Sized so a stop-out costs exactly your {money(result.riskBudget)} risk budget —{" "}
+          {result.slippageOn ? "fees and a slipped stop" : "fees"} included, not on top.
         </p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <Stat label="Size" value={qty(result.quantity)} hint="units" />
@@ -334,23 +393,28 @@ function Results({
 
       <details className="panel">
         <summary className="cursor-pointer text-sm font-semibold text-forge-muted">
-          Why small moves hurt <span className="font-normal">(fee drag by move size, and the targets you&rsquo;d actually need)</span>
+          Why small moves hurt{" "}
+          <span className="font-normal">
+            ({result.slippageOn ? "cost" : "fee"} drag by move size, and the targets you&rsquo;d actually need)
+          </span>
         </summary>
 
         <div className="mt-4 space-y-5">
           <div>
-            <h3 className="text-sm font-semibold">At your fee tier, every move loses this much to fees</h3>
+            <h3 className="text-sm font-semibold">
+              At your {result.slippageOn ? "fee tier and slippage" : "fee tier"}, every move loses this much
+            </h3>
             <div className="mt-2 overflow-x-auto">
               <table className="w-full min-w-[26rem] text-sm">
                 <thead>
                   <tr className="border-b border-forge-line text-left text-xs uppercase tracking-wide text-forge-muted">
                     <th className="py-2 pr-3 font-medium">Move</th>
-                    <th className="py-2 pr-3 font-medium">Fees eat</th>
+                    <th className="py-2 pr-3 font-medium">{result.slippageOn ? "Costs eat" : "Fees eat"}</th>
                     <th className="py-2 font-medium">Gross R:R needed to net 1R</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {result.feeDrag.map((row) => (
+                  {result.costDrag.map((row) => (
                     <tr key={row.movePct} className="border-b border-forge-line/60 last:border-0">
                       <td className="py-2 pr-3 tabular-nums">{row.movePct}%</td>
                       <td className={`py-2 pr-3 tabular-nums ${row.bitePct >= 25 ? "text-forge-red" : row.bitePct >= 12 ? "text-forge-gold" : "text-forge-green"}`}>
@@ -365,8 +429,9 @@ function Results({
               </table>
             </div>
             <p className="mt-2 text-xs text-forge-muted">
-              This is the whole problem in one table: fees are a flat cut of position size, so the smaller the move you&rsquo;re
-              chasing, the bigger the share they take. Nothing about the setup changes it — only a wider move or a cheaper fee.
+              This is the whole problem in one table: {result.slippageOn ? "fees and slippage are" : "fees are"} a flat
+              cut of position size, so the smaller the move you&rsquo;re chasing, the bigger the share they take. Nothing
+              about the setup changes it — only a wider move or a cheaper fill.
             </p>
           </div>
 
