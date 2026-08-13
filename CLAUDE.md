@@ -308,6 +308,16 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     instead of 33%. That gap is the whole reason the page exists.
   - Break-even price is **solved, not approximated**: the exit fee is charged on the *exit*
     price, so break-even is not `entry + costs`. Long: `(E(1+fe) + funding) / (1 − fx)`.
+  - **Slippage is opt-in and off by default** (a checkbox, `slippagePct: 0` = exact fees-only
+    answer). When on it moves the *fill* price against you on all three legs — pay up to get
+    in, give a tick back on the target and on the stop — and everything reprices off those
+    fills. Break-even and the target ladder carry an extra `exitSlip = 1 − dir·slip` factor,
+    since the exit slips off the quoted price as well as paying a fee on it. On the owner's
+    0.3% example, 0.02%/leg takes 0.87R → **0.61R** and the required win rate 53% → 62%.
+  - The cost-drag ladder solves the stop distance **exactly** (`exitSlip·(1 − dir·fx)`
+    denominator) and includes funding. Approximating the loss-side cost at the entry price
+    put the tight-stop rows visibly wrong — and those are the rows the table exists to warn
+    about.
   - Position size is off the **net** loss, so a stop-out costs exactly the risk budget with
     fees included rather than the budget plus the fee bill.
   - Outputs: net vs gross R, break-even win rate (net vs gross), fee bite as a share of the
