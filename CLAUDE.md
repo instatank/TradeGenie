@@ -299,6 +299,31 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     captured context. That's Phase B, and the analysis needs ~30 context-carrying
     trades before it says anything true rather than noise that looks like signal.
 
+- **Profitability calculator** (`/calculator`, under "More"). A scratchpad — nothing is saved —
+  that answers one question before a trade: *once fees are paid, is this worth taking?*
+  - **`lib/calculator.ts` is the math**, pure and store-free. The idea it's built around:
+    **fees are charged on notional, not on your risk**, so they shrink the win *and* grow the
+    loss. Net R = `(reward − fees) / (risk + fees)`. On the owner's own example — a 0.3% move
+    planned at 2R, 0.045% taker each side — that's **0.87R real, needing a 53% win rate**
+    instead of 33%. That gap is the whole reason the page exists.
+  - Break-even price is **solved, not approximated**: the exit fee is charged on the *exit*
+    price, so break-even is not `entry + costs`. Long: `(E(1+fe) + funding) / (1 − fx)`.
+  - Position size is off the **net** loss, so a stop-out costs exactly the risk budget with
+    fees included rather than the budget plus the fee bill.
+  - Outputs: net vs gross R, break-even win rate (net vs gross), fee bite as a share of the
+    move, break-even price/move, sizing + notional + margin + rough liquidation, expectancy
+    per trade / per 100 at a chosen win rate — **defaulted to the journal's real win rate**
+    once there are ≥5 closed trades, which is the bit a generic web calculator can't do.
+    Behind one fold: fee drag across move sizes, and the target you'd need for a true 1/2/3R.
+  - Warnings (not silent nonsense) for a stop on the wrong side, a stop past the rough
+    liquidation, and a size needing more margin than the account holds.
+  - **It ships client JS on purpose** — the second exception after `TagPicker`. A calculator
+    you have to submit isn't a calculator; you'd never scrub the stop around to find where
+    fees stop eating the trade. Fee tier / account / risk / leverage persist in
+    `localStorage` (convenience only, never load-bearing); prices don't.
+  - Deliberately NOT done: saving scenarios, prefilling from an existing trade, and writing a
+    planned-R back onto a trade. All three turn a scratchpad into a record with a migration.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

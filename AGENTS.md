@@ -44,6 +44,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/store.ts`: persistence adapter.
 - `lib/data.ts`: higher-level data fetch helpers.
 - `lib/metrics.ts`: P&L, R, win rate, expectancy, weekly stats, frequency helpers.
+- `lib/calculator.ts`: pre-trade math for `/calculator` — net-of-fees R, solved break-even price, break-even win rate, fee-aware position sizing. Pure functions, no store access.
 - `lib/tags.ts`: THE tag tokenizer — normalize/extract/derive for free-form `#tags`; every tag path goes through it.
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
@@ -63,6 +64,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/lessons`: lesson bank
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews
+- `/calculator`: pre-trade profitability scratchpad — net-of-fees R, break-even price, required win rate, position size (nothing is saved)
 - `/settings`: AI settings and prompt templates
 - `/search`: global search — one box over every collection (words = AND substring, `#tags` = exact), type filter tabs, highlighted anchored snippets; empty state doubles as the browsable tag index
 
