@@ -1,0 +1,11 @@
+{
+  "name": "Asset musing with no trade becomes an ASSET_NOTE",
+  "why": "Bias, levels and a plan about an instrument, explicitly not a position. There was no route from capture to an asset note before.",
+  "minEntries": 1,
+  "kinds": ["ASSET_NOTE"],
+  "fields": [
+    { "kind": "ASSET_NOTE", "field": "assetSymbol", "equals": "HYPE" },
+    { "kind": "ASSET_NOTE", "field": "text", "present": true }
+  ],
+  "forbidKinds": ["TRADE_ENTRY", "TRADE_EXIT"]
+}

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { endOfDay, format, startOfDay } from "date-fns";
+import { checkAiConnection } from "@/lib/ai-status";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { defaultMistakeTagNames } from "@/lib/constants";
 import {
@@ -22,9 +23,23 @@ import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
 import { deriveTags, mergeTags } from "@/lib/tags";
+import {
+  entryKindLabels,
+  entrySummary,
+  entryTexts,
+  normalizeEntry,
+  normalizeExtraction,
+  type AssetNoteEntry,
+  type ExtractedEntry,
+  type JournalEntry,
+  type SegmentedExtraction,
+  type TradeEntryEntry,
+  type WeeklyReflectionEntry,
+} from "@/lib/extraction";
 import { structureTranscript } from "@/lib/transcript-processor";
 import {
   AiConfidence,
+  AssetTimeframe,
   Direction,
   EmotionalState,
   EntryGrade,
@@ -40,8 +55,6 @@ import {
   TradingMode,
   type Lesson,
 } from "@/lib/types";
-
-type StructuredJson = Record<string, unknown>;
 
 function withFeedback(target: string, message: string, type = "success") {
   const url = new URL(target, "http://tradeforge.local");
@@ -103,9 +116,18 @@ function aiConfidence(value: unknown) {
   return AiConfidence.LOW;
 }
 
-function transcriptType(value: unknown) {
-  const text = String(value ?? "UNKNOWN").toUpperCase();
-  return Object.values(TranscriptType).includes(text as TranscriptType) ? (text as TranscriptType) : TranscriptType.UNKNOWN;
+// The stored transcriptType is now DERIVED from the entries a note produced —
+// it is a label for the inbox/calendar/search chips, not a routing decision.
+// Routing happens per entry.
+function deriveTranscriptType(entries: ExtractedEntry[]): TranscriptType {
+  const kinds = new Set(entries.map((entry) => entry.kind));
+  if (kinds.has("TRADE_ENTRY")) return TranscriptType.TRADE_ENTRY_NOTE;
+  if (kinds.has("TRADE_EXIT")) return TranscriptType.TRADE_EXIT_REVIEW;
+  if (kinds.has("WEEKLY_REFLECTION")) return TranscriptType.WEEKLY_REFLECTION;
+  if (kinds.has("JOURNAL")) return TranscriptType.EOD_REVIEW;
+  if (kinds.has("ASSET_NOTE")) return TranscriptType.PLAYBOOK_NOTE;
+  if (kinds.has("LESSON")) return TranscriptType.GENERAL_LEARNING_NOTE;
+  return TranscriptType.UNKNOWN;
 }
 
 async function saveScreenshot(file: FormDataEntryValue | null, tradeId?: string) {
@@ -123,7 +145,6 @@ async function saveScreenshot(file: FormDataEntryValue | null, tradeId?: string)
 
 export async function saveTranscriptAction(formData: FormData) {
   const now = new Date();
-  const declaredType = enumValue(TranscriptType, formData.get("transcriptType"), TranscriptType.UNKNOWN);
   const rawText = toText(formData.get("rawText")) ?? "";
   const created = await db.create("transcripts", {
     createdAt: now,
@@ -132,7 +153,7 @@ export async function saveTranscriptAction(formData: FormData) {
     sourceTool: toText(formData.get("sourceTool")),
     rawText,
     cleanedSummary: null,
-    transcriptType: declaredType,
+    transcriptType: TranscriptType.UNKNOWN,
     processingStatus: ProcessingStatus.UNPROCESSED,
     linkedTradeId: null,
     linkedDailyJournalId: null,
@@ -143,148 +164,195 @@ export async function saveTranscriptAction(formData: FormData) {
 
   // Auto-structure on save so the note lands as a reviewable draft in a single
   // step — no separate "Structure" click. structureTranscript() never throws
-  // (it falls back to a regex mock), so a failure still leaves a usable note.
+  // (it falls back to a single FREE_NOTE), so a failure still leaves the note
+  // intact and reviewable rather than losing what was said.
   if (rawText.trim()) {
-    const extraction = await structureTranscript(rawText, declaredType);
-    await db.update("transcripts", created.id, {
-      transcriptType: transcriptType(extraction.transcriptType),
-      structuredJson: JSON.stringify(extraction, null, 2),
-      processingStatus: ProcessingStatus.STRUCTURED,
-      aiConfidence: aiConfidence(extraction.confidence),
-      cleanedSummary: buildTranscriptSummary(extraction),
-      updatedAt: new Date(),
-    });
+    await db.update("transcripts", created.id, await structuredPatch(rawText));
   }
 
   revalidatePath("/inbox");
-  redirect(withFeedback("/inbox", "Saved and structured. Review the draft below, then confirm."));
+  redirect(withFeedback("/inbox", "Saved. Review the entries below, then confirm."));
 }
 
 export async function structureTranscriptAction(formData: FormData) {
   const id = String(formData.get("id"));
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
-  const extraction = await structureTranscript(transcript.rawText, transcript.transcriptType);
-  await db.update("transcripts", id, {
-    transcriptType: transcriptType(extraction.transcriptType),
+  await db.update("transcripts", id, await structuredPatch(transcript.rawText));
+  revalidatePath("/inbox");
+  await redirectBackWithFeedback("Voice note re-read. Review the entries before confirming.", "/inbox");
+}
+
+async function structuredPatch(rawText: string) {
+  const extraction = await structureTranscript(rawText);
+  return {
+    transcriptType: deriveTranscriptType(extraction.entries),
     structuredJson: JSON.stringify(extraction, null, 2),
     processingStatus: ProcessingStatus.STRUCTURED,
-    aiConfidence: aiConfidence(extraction.confidence),
+    aiConfidence: aiConfidence(extraction.overallConfidence),
     cleanedSummary: buildTranscriptSummary(extraction),
+    updatedAt: new Date(),
+  };
+}
+
+// Remove one entry from a note's draft before confirming. The model will
+// sometimes over-split; the trader has to be able to say "that isn't a separate
+// thing" without editing JSON.
+export async function dropTranscriptEntryAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const index = Number(formData.get("entryIndex"));
+  const transcript = await db.get("transcripts", id);
+  if (!transcript?.structuredJson) return;
+  const extraction = readExtraction(transcript.structuredJson);
+  if (!Number.isInteger(index) || index < 0 || index >= extraction.entries.length) return;
+  const dropped = extraction.entries[index];
+  const remaining = { ...extraction, entries: extraction.entries.filter((_, position) => position !== index) };
+  await db.update("transcripts", id, {
+    structuredJson: JSON.stringify(remaining, null, 2),
+    transcriptType: deriveTranscriptType(remaining.entries),
+    cleanedSummary: buildTranscriptSummary(remaining),
     updatedAt: new Date(),
   });
   revalidatePath("/inbox");
-  await redirectBackWithFeedback("Voice note structured. Review the draft before confirming.", "/inbox");
+  await redirectBackWithFeedback(`Removed the ${entryKindWord(dropped)} entry. Nothing was saved to your journal.`, "/inbox");
 }
 
+// Confirm writes EVERY remaining entry in one go. The on-screen edits win over
+// the AI draft (per entry now, not per note), and an exit can only ever update
+// an existing trade — never create one.
 export async function confirmTranscriptAction(formData: FormData) {
   const id = String(formData.get("id"));
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
-  // Merge any edits the trader made on the review card over the AI draft, so the
-  // confirmed record reflects what they actually see and corrected on screen.
-  const draft = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : {};
-  const structured: StructuredJson = { ...draft, ...readReviewOverrides(formData) };
-  // The vocabulary stays the trader's: a mind state / risk posture only enters
-  // it from the review card's own "type another" box, never from AI output.
+
+  const draft = readExtraction(transcript.structuredJson);
+  const entries = draft.entries.map((entry, index) => applyEntryOverrides(entry, formData, index));
   const options = await getOptionCatalog();
-  for (const [key, group] of [["emotionalState", "mindState"], ["riskPosture", "riskPosture"], ["mainEmotion", "mindState"]] as const) {
-    if (formData.has(key)) structured[key] = await options.resolve(group, formData, key);
+  if (!entries.length) {
+    await redirectBackWithFeedback("Nothing left to confirm on this note.", "/inbox");
+    return;
   }
-  const type = transcriptType(structured.transcriptType ?? transcript.transcriptType);
+
+  // Validate before writing anything, so a note never lands half-saved. An exit
+  // with no resolvable trade is the one hard stop: the old code fell through and
+  // created a brand-new closed trade, leaving the real position open forever.
+  const unlinkedExit = entries.find((entry) => entry.kind === "TRADE_EXIT" && !entry.linkTradeId);
+  if (unlinkedExit) {
+    await redirectBackWithFeedback(
+      "Pick which open trade the exit belongs to before confirming — an exit only ever updates an existing trade.",
+      "/inbox",
+    );
+    return;
+  }
+
   let linkedTradeId = transcript.linkedTradeId;
   let linkedDailyJournalId = transcript.linkedDailyJournalId;
+  const written: ExtractedEntry[] = [];
 
-  if (type === "TRADE_ENTRY_NOTE" || (structured.instrument && !linkedTradeId && type !== "EOD_REVIEW")) {
-    const trade = await createTradeFromStructured(transcript.transcriptDateTime, structured, options, transcript.tags);
-    linkedTradeId = trade.id;
-    await linkSuggestedMistakes(trade.id, structured.suggestedMistakeTags);
-  }
-
-  if (type === "TRADE_EXIT_REVIEW" && linkedTradeId) {
-    const existingTrade = await db.get("trades", linkedTradeId);
-    const exitPrice = nullableNumber(structured.exitPrice);
-    const realizedPnl = nullableNumber(structured.realizedPnl);
-    await db.update("trades", linkedTradeId, {
-      status: TradeStatus.CLOSED,
-      exitReason: nullableString(structured.exitReason),
-      followedPlan: enumFromText(FollowedPlan, structured.followedPlan, FollowedPlan.NA),
-      emotionalState: extendedValue(options, "mindState", structured.emotionalState) ?? EmotionalState.UNKNOWN,
-      lesson: nullableString(structured.lesson),
-      ...(exitPrice != null ? { exitPrice } : {}),
-      ...(realizedPnl != null ? { realizedPnl, netPnl: calculateNetPnl(realizedPnl, existingTrade?.fees, existingTrade?.funding) } : {}),
-      ...(exitPrice != null && existingTrade
-        ? { rMultiple: calculateRMultiple({ entryPrice: existingTrade.entryPrice, stopPrice: existingTrade.stopPrice, exitPrice, direction: existingTrade.direction }) }
-        : {}),
-      updatedAt: new Date(),
-    });
-    await linkSuggestedMistakes(linkedTradeId, structured.suggestedMistakeTags);
-  }
-
-  if (type === "EOD_REVIEW" || type === "DAILY_CHECKIN") {
-    const day = startOfDay(transcript.transcriptDateTime);
-    const existing = await getTodayJournal(day);
-    const journalTexts = [
-      nullableString(structured.bestDecision),
-      nullableString(structured.worstDecision),
-      nullableString(structured.mainMistake),
-      nullableString(structured.oneThingDoneWell),
-      nullableString(structured.oneThingToAvoidTomorrow),
-    ];
-    const payload = {
-      tradedToday: nullableBool(structured.tradedToday),
-      followedMaxLoss: nullableBool(structured.followedMaxLoss),
-      followedMaxTrades: nullableBool(structured.followedMaxTrades),
-      bestDecision: nullableString(structured.bestDecision),
-      worstDecision: nullableString(structured.worstDecision),
-      mainEmotion: nullableString(structured.mainEmotion),
-      mainMistake: nullableString(structured.mainMistake),
-      oneThingDoneWell: nullableString(structured.oneThingDoneWell),
-      oneThingToAvoidTomorrow: nullableString(structured.oneThingToAvoidTomorrow),
-      disciplineScore: nullableNumber(structured.disciplineScore),
-      // Partial save: tags only grow (spoken #hashtags + the note's own tags).
-      tags: mergeTags(existing?.tags, [...(transcript.tags ?? []), ...deriveTags(journalTexts)]),
-      updatedAt: new Date(),
-    };
-    const daily = existing
-      ? await db.update("dailyJournals", existing.id, payload)
-      : await db.create("dailyJournals", {
-          id: newId(),
-          date: day,
-          createdAt: new Date(),
-          tradingMode: TradingMode.PAPER,
-          marketsWatched: null,
-          maxLossForDay: null,
-          maxTradesForDay: null,
-          currentState: null,
-          learningFocus: null,
-          reasonNotToTrade: null,
-          eodNotes: null,
-          ...payload,
+  for (const entry of entries) {
+    switch (entry.kind) {
+      case "TRADE_ENTRY": {
+        const trade = await createTradeFromEntry(transcript.transcriptDateTime, entry, options, transcript.tags);
+        await linkSuggestedMistakes(trade.id, entry.suggestedMistakeTags);
+        linkedTradeId = linkedTradeId ?? trade.id;
+        break;
+      }
+      case "TRADE_EXIT": {
+        const tradeId = entry.linkTradeId!;
+        const existing = await db.get("trades", tradeId);
+        if (!existing) break;
+        await db.update("trades", tradeId, {
+          status: TradeStatus.CLOSED,
+          exitReason: entry.exitReason ?? existing.exitReason,
+          followedPlan: enumFromText(FollowedPlan, entry.followedPlan, FollowedPlan.NA),
+          emotionalState:
+            extendedValue(options, "mindState", entry.emotionalState) ?? existing.emotionalState ?? EmotionalState.UNKNOWN,
+          lesson: entry.lesson ?? existing.lesson,
+          // Partial save (no Tags input on a review card): tags only grow.
+          tags: mergeTags(existing.tags, [...(transcript.tags ?? []), ...deriveTags(entryTexts(entry))]),
+          ...(entry.exitPrice != null ? { exitPrice: entry.exitPrice } : {}),
+          ...(entry.realizedPnl != null
+            ? { realizedPnl: entry.realizedPnl, netPnl: calculateNetPnl(entry.realizedPnl, existing.fees, existing.funding) }
+            : {}),
+          ...(entry.exitPrice != null
+            ? {
+                rMultiple:
+                  calculateRMultiple({
+                    entryPrice: existing.entryPrice,
+                    stopPrice: existing.stopPrice,
+                    exitPrice: entry.exitPrice,
+                    direction: existing.direction,
+                  }) ?? existing.rMultiple,
+              }
+            : {}),
+          updatedAt: new Date(),
         });
-    linkedDailyJournalId = daily.id;
+        await linkSuggestedMistakes(tradeId, entry.suggestedMistakeTags);
+        linkedTradeId = linkedTradeId ?? tradeId;
+        break;
+      }
+      case "ASSET_NOTE": {
+        await appendAssetNote(entry, transcript.tags);
+        break;
+      }
+      case "JOURNAL": {
+        linkedDailyJournalId = await mergeJournalEntry(transcript.transcriptDateTime, entry, transcript.tags);
+        break;
+      }
+      case "LESSON": {
+        await createLesson(
+          {
+            lessonText: entry.lessonText,
+            category: enumFromText(LessonCategory, entry.category, LessonCategory.PROCESS),
+            sourceType: LessonSourceType.TRANSCRIPT,
+            linkedTranscriptId: id,
+            linkedTradeId: linkedTradeId ?? null,
+          },
+          null,
+          transcript.tags,
+        );
+        break;
+      }
+      case "WEEKLY_REFLECTION": {
+        await createWeeklyReviewFromEntry(transcript.transcriptDateTime, entry);
+        break;
+      }
+      case "FREE_NOTE": {
+        await db.create("freeNotes", {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          text: entry.text,
+          linkedTranscriptId: id,
+          tags: mergeTags(transcript.tags, deriveTags([entry.text])),
+        });
+        break;
+      }
+    }
+    written.push(entry);
   }
 
-  await createLessonsFromStructured(structured, id, linkedTradeId ?? undefined, transcript.tags);
+  const confirmed: SegmentedExtraction = { ...draft, entries };
   await db.update("transcripts", id, {
     linkedTradeId,
     linkedDailyJournalId,
+    structuredJson: JSON.stringify(confirmed, null, 2),
+    transcriptType: deriveTranscriptType(entries),
+    cleanedSummary: buildTranscriptSummary(confirmed),
     processingStatus: ProcessingStatus.CONFIRMED,
     updatedAt: new Date(),
   });
+
   revalidatePath("/inbox");
   revalidatePath("/trades");
   revalidatePath("/daily");
   revalidatePath("/lessons");
-  if (linkedTradeId && (type === "TRADE_ENTRY_NOTE" || type === "TRADE_EXIT_REVIEW")) {
-    // Stay on the inbox instead of forcing a second confirmation on the trade
-    // page. The confirmed note links straight to the saved trade if needed.
-    redirect(withFeedback("/inbox?view=confirmed", type === "TRADE_ENTRY_NOTE" ? "Trade saved to your log." : "Exit review saved to the linked trade."));
-  }
-  if (linkedDailyJournalId && (type === "EOD_REVIEW" || type === "DAILY_CHECKIN")) {
-    redirect(withFeedback(`/daily?date=${format(transcript.transcriptDateTime, "yyyy-MM-dd")}`, type === "EOD_REVIEW" ? "EOD review saved." : "Daily check-in saved."));
-  }
-  redirect(withFeedback("/lessons", "Transcript confirmed and lessons saved."));
+  revalidatePath("/assets");
+  revalidatePath("/weekly-review");
+  revalidatePath("/search");
+  revalidatePath("/");
+  // Stay on the inbox — the trader keeps working through the queue instead of
+  // being thrown onto whichever page the last entry happened to touch.
+  redirect(withFeedback("/inbox?view=confirmed", `Saved ${describeWritten(written)}.`));
 }
 
 export async function archiveTranscriptAction(formData: FormData) {
@@ -304,7 +372,7 @@ export async function updateTranscriptAction(formData: FormData) {
     sourceTool: toText(formData.get("sourceTool")),
     rawText,
     tags: deriveTags([rawText], toText(formData.get("tags"))),
-    transcriptType: enumValue(TranscriptType, formData.get("transcriptType"), TranscriptType.UNKNOWN),
+    transcriptType: TranscriptType.UNKNOWN,
     processingStatus: ProcessingStatus.UNPROCESSED,
     cleanedSummary: null,
     structuredJson: null,
@@ -312,19 +380,22 @@ export async function updateTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
   revalidatePath("/inbox");
-  await redirectBackWithFeedback("Voice note edits saved.", "/inbox");
+  await redirectBackWithFeedback("Voice note edits saved. Re-read it to get fresh entries.", "/inbox");
 }
 
 export async function deleteTranscriptAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("transcripts", (transcript) => transcript.id === id);
   await db.deleteWhere("screenshots", (screenshot) => screenshot.linkedTranscriptId === id);
-  const lessons = await db.list("lessons");
-  await Promise.all(
-    lessons
+  const [lessons, freeNotes] = await Promise.all([db.list("lessons"), db.list("freeNotes")]);
+  await Promise.all([
+    ...lessons
       .filter((lesson) => lesson.linkedTranscriptId === id)
       .map((lesson) => db.update("lessons", lesson.id, { linkedTranscriptId: null, updatedAt: new Date() })),
-  );
+    ...freeNotes
+      .filter((note) => note.linkedTranscriptId === id)
+      .map((note) => db.update("freeNotes", note.id, { linkedTranscriptId: null, updatedAt: new Date() })),
+  ]);
   revalidatePath("/inbox");
   revalidatePath("/lessons");
   await redirectBackWithFeedback("Voice note deleted.", "/inbox");
@@ -340,15 +411,35 @@ export async function linkTranscriptAction(formData: FormData) {
   await redirectBackWithFeedback("Voice note links saved.", "/inbox");
 }
 
+// "Save lessons only": write just the LESSON entries and leave the rest of the
+// note unconfirmed, for when the trade or journal side isn't worth keeping.
 export async function extractLessonsAction(formData: FormData) {
   const id = String(formData.get("id"));
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
-  const structured = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : await structureTranscript(transcript.rawText, transcript.transcriptType);
-  await createLessonsFromStructured(structured, id, transcript.linkedTradeId ?? undefined, transcript.tags);
+  const extraction = transcript.structuredJson
+    ? readExtraction(transcript.structuredJson)
+    : await structureTranscript(transcript.rawText);
+  const lessons = extraction.entries.filter((entry) => entry.kind === "LESSON");
+  for (const lesson of lessons) {
+    await createLesson(
+      {
+        lessonText: lesson.lessonText,
+        category: enumFromText(LessonCategory, lesson.category, LessonCategory.PROCESS),
+        sourceType: LessonSourceType.TRANSCRIPT,
+        linkedTranscriptId: id,
+        linkedTradeId: transcript.linkedTradeId ?? null,
+      },
+      null,
+      transcript.tags,
+    );
+  }
   revalidatePath("/lessons");
   revalidatePath("/inbox");
-  await redirectBackWithFeedback("Lessons saved from voice note.", "/inbox");
+  await redirectBackWithFeedback(
+    lessons.length ? `Saved ${lessons.length} lesson${lessons.length === 1 ? "" : "s"} from this note.` : "No lessons in this note.",
+    "/inbox",
+  );
 }
 
 export async function saveDailyJournalAction(formData: FormData) {
@@ -939,16 +1030,24 @@ export async function saveSettingsAction(formData: FormData) {
     defaultSourceTool: String(formData.get("defaultSourceTool") ?? "Voice memo"),
     promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,
     promptTemplates: {
-      tradeEntry: String(formData.get("tradeEntry") ?? defaultPromptTemplates.tradeEntry),
-      tradeExit: String(formData.get("tradeExit") ?? defaultPromptTemplates.tradeExit),
-      eodReview: String(formData.get("eodReview") ?? defaultPromptTemplates.eodReview),
-      lessonExtraction: String(formData.get("lessonExtraction") ?? defaultPromptTemplates.lessonExtraction),
-      weeklyReview: String(formData.get("weeklyReview") ?? defaultPromptTemplates.weeklyReview),
+      capture: String(formData.get("capture") ?? defaultPromptTemplates.capture),
     },
   };
   await saveSettings(settings);
   revalidatePath("/settings");
   redirect(withFeedback("/settings", "Settings saved."));
+}
+
+// Makes one tiny real call to Anthropic and reports exactly what came back.
+// This is the answer to "is the AI actually working?" without reading logs.
+export async function testAiConnectionAction() {
+  const result = await checkAiConnection();
+  const target = new URL("/settings", "http://tradeforge.local");
+  target.searchParams.set("aiCheck", result.ok ? "ok" : "fail");
+  target.searchParams.set("aiCheckDetail", result.detail);
+  target.searchParams.set("aiCheckModel", result.model);
+  revalidatePath("/settings");
+  redirect(`${target.pathname}${target.search}`);
 }
 
 export async function generateWeeklyReviewAction(formData: FormData) {
@@ -1248,22 +1347,18 @@ export async function toggleLessonPinAction(formData: FormData) {
   await redirectBackWithFeedback(isPinned ? "Lesson unpinned." : "Lesson pinned.", "/lessons");
 }
 
-async function createTradeFromStructured(
+// A TRADE_ENTRY becomes a trade. Spoken numbers carry through so nothing has to
+// be re-typed on the trade page; derived fields are computed here. Status comes
+// from the model: OPEN when they actually entered, IDEA when they're watching.
+async function createTradeFromEntry(
   tradeDateTime: Date,
-  structured: StructuredJson,
+  entry: TradeEntryEntry,
   options: OptionCatalog,
   sourceTags?: string[],
 ) {
-  // Carry the spoken numbers through to the trade so the trader doesn't have to
-  // re-type prices/size on the trade page. Derived fields are computed here.
-  const direction = enumFromText(Direction, structured.direction, Direction.UNKNOWN);
-  const entryPrice = nullableNumber(structured.entryPrice);
-  const stopPrice = nullableNumber(structured.stopPrice);
-  const exitPrice = nullableNumber(structured.exitPrice);
-  const realizedPnl = nullableNumber(structured.realizedPnl);
-  const order = calculateOrderFields({ price: entryPrice, quantity: nullableNumber(structured.quantity), totalOrderValue: null });
-  const hasExit = exitPrice != null || realizedPnl != null;
-  const instrument = String(structured.instrument ?? "UNKNOWN").toUpperCase();
+  const direction = enumFromText(Direction, entry.direction, Direction.UNKNOWN);
+  const order = calculateOrderFields({ price: entry.entryPrice, quantity: entry.quantity, totalOrderValue: null });
+  const instrument = (entry.instrument ?? "UNKNOWN").toUpperCase();
   // Keyed to the note's own time, not to when it was confirmed: a voice note
   // spoken at 06:00 and confirmed at 10:00 gets the 06:00 context.
   const marketContext = await captureMarketContext(instrument, tradeDateTime);
@@ -1275,69 +1370,193 @@ async function createTradeFromStructured(
     instrument,
     marketContext,
     direction,
-    status: hasExit ? TradeStatus.CLOSED : TradeStatus.IDEA,
-    setupName: nullableString(structured.setupName),
-    entryThesis: nullableString(structured.entryThesis),
-    invalidation: nullableString(structured.invalidation),
-    concern: nullableString(structured.concern),
+    status: enumFromText(TradeStatus, entry.status, TradeStatus.IDEA),
+    setupName: entry.setupName,
+    entryThesis: entry.entryThesis,
+    invalidation: entry.invalidation,
+    concern: entry.concern,
     // #hashtags in the original voice note follow the note into the trade.
-    tags: mergeTags(sourceTags, deriveTags([
-      nullableString(structured.entryThesis),
-      nullableString(structured.invalidation),
-      nullableString(structured.concern),
-      nullableString(structured.exitReason),
-    ])),
-    emotionalState: extendedValue(options, "mindState", structured.emotionalState) ?? EmotionalState.UNKNOWN,
-    riskPosture: extendedValue(options, "riskPosture", structured.riskPosture) ?? RiskPosture.UNKNOWN,
-    confidenceScore: nullableNumber(structured.confidenceScore),
-    entryGrade: enumFromText(EntryGrade, structured.entryGrade, EntryGrade.NA),
-    exitReason: hasExit ? nullableString(structured.exitReason) : null,
+    tags: mergeTags(sourceTags, deriveTags(entryTexts(entry))),
+    // extendedValue (not enumFromText) so a mind state / risk posture the trader
+    // added themselves survives the capture path, same as everywhere else.
+    emotionalState: extendedValue(options, "mindState", entry.emotionalState) ?? EmotionalState.UNKNOWN,
+    riskPosture: extendedValue(options, "riskPosture", entry.riskPosture) ?? RiskPosture.UNKNOWN,
+    confidenceScore: entry.confidenceScore,
+    entryGrade: EntryGrade.NA,
+    exitReason: null,
     followedPlan: null,
     lesson: null,
     notes: null,
-    entryPrice,
-    stopPrice,
-    targetPrice: nullableNumber(structured.targetPrice),
-    exitPrice,
+    entryPrice: entry.entryPrice,
+    stopPrice: entry.stopPrice,
+    targetPrice: entry.targetPrice,
+    exitPrice: null,
     quantity: order.quantity,
     totalOrderValue: order.totalOrderValue,
-    leverage: nullableNumber(structured.leverage),
-    realizedPnl,
+    leverage: entry.leverage,
+    realizedPnl: null,
     fees: null,
     funding: null,
-    netPnl: calculateNetPnl(realizedPnl, null, null),
-    rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
+    netPnl: null,
+    rMultiple: null,
   });
 }
 
-// Pull the trader's on-screen edits from the review-card form. Only keys that
-// were actually submitted override the AI draft, so each note type's card can
-// surface just its relevant fields without wiping the others.
-function readReviewOverrides(formData: FormData): StructuredJson {
-  const overrides: StructuredJson = {};
-  const textKeys = [
-    "transcriptType", "instrument", "direction", "setupName", "entryThesis", "invalidation",
-    "concern", "emotionalState", "riskPosture", "exitReason", "followedPlan", "bestDecision",
-    "worstDecision", "mainEmotion", "mainMistake", "oneThingDoneWell", "oneThingToAvoidTomorrow",
-  ];
-  for (const key of textKeys) {
-    if (formData.has(key)) overrides[key] = toText(formData.get(key));
+// An ASSET_NOTE appends to the symbol's running thread, creating the asset the
+// first time it's mentioned. This is the route from capture to the per-asset
+// tracker that simply did not exist before.
+async function appendAssetNote(entry: AssetNoteEntry, sourceTags?: string[]) {
+  const symbol = entry.assetSymbol.trim().toUpperCase();
+  if (!symbol || !entry.text.trim()) return;
+  const now = new Date();
+  const assets = await db.list("assets");
+  const existing = assets.find((asset) => asset.symbol.toUpperCase() === symbol);
+  const asset =
+    existing ??
+    (await db.create("assets", {
+      createdAt: now,
+      updatedAt: now,
+      symbol,
+      marketType: MarketType.CRYPTO_PERP,
+      htfBias: null,
+      ltfBias: null,
+      levels: null,
+      gamePlan: null,
+      isArchived: false,
+      tags: [],
+    }));
+  await db.create("assetNotes", {
+    createdAt: now,
+    updatedAt: now,
+    assetId: asset.id,
+    timeframe: enumFromText(AssetTimeframe, entry.timeframe, AssetTimeframe.GENERAL),
+    text: entry.text,
+    tags: mergeTags(sourceTags, deriveTags([entry.text])),
+  });
+  // Touch the asset so it bubbles to the top of the index on new activity.
+  await db.update("assets", asset.id, { updatedAt: now });
+}
+
+// A JOURNAL entry merges into the day's journal without wiping the fields the
+// morning/evening rituals already wrote.
+async function mergeJournalEntry(date: Date, entry: JournalEntry, sourceTags?: string[]) {
+  const day = startOfDay(date);
+  const existing = await getTodayJournal(day);
+  const mainEmotion = entry.mainEmotion === "UNKNOWN" ? null : entry.mainEmotion;
+  const payload = {
+    tradedToday: entry.tradedToday ?? existing?.tradedToday ?? null,
+    followedMaxLoss: entry.followedMaxLoss ?? existing?.followedMaxLoss ?? null,
+    followedMaxTrades: entry.followedMaxTrades ?? existing?.followedMaxTrades ?? null,
+    bestDecision: entry.bestDecision ?? existing?.bestDecision ?? null,
+    worstDecision: entry.worstDecision ?? existing?.worstDecision ?? null,
+    mainEmotion: mainEmotion ?? existing?.mainEmotion ?? null,
+    mainMistake: entry.mainMistake ?? existing?.mainMistake ?? null,
+    oneThingDoneWell: entry.oneThingDoneWell ?? existing?.oneThingDoneWell ?? null,
+    oneThingToAvoidTomorrow: entry.oneThingToAvoidTomorrow ?? existing?.oneThingToAvoidTomorrow ?? null,
+    disciplineScore: entry.disciplineScore ?? existing?.disciplineScore ?? null,
+    // Partial save: tags only grow (spoken #hashtags + the note's own tags).
+    tags: mergeTags(existing?.tags, [...(sourceTags ?? []), ...deriveTags(entryTexts(entry))]),
+    updatedAt: new Date(),
+  };
+  const daily = existing
+    ? await db.update("dailyJournals", existing.id, payload)
+    : await db.create("dailyJournals", {
+        id: newId(),
+        date: day,
+        createdAt: new Date(),
+        tradingMode: TradingMode.PAPER,
+        marketsWatched: null,
+        maxLossForDay: null,
+        maxTradesForDay: null,
+        currentState: null,
+        learningFocus: null,
+        reasonNotToTrade: null,
+        eodNotes: null,
+        ...payload,
+      });
+  return daily.id;
+}
+
+// A WEEKLY_REFLECTION becomes a real weekly review: the trader's own words for
+// the narrative, the log for the numbers. The weekly-only fields the old
+// extraction schema stripped (whatImproved / whatDeteriorated) are kept in the
+// summary rather than being silently dropped.
+async function createWeeklyReviewFromEntry(date: Date, entry: WeeklyReflectionEntry) {
+  const { weekStart, weekEnd } = weekBounds(date);
+  const trades = await getClosedTradesInRange(weekStart, weekEnd);
+  const stats = summarizeWeeklyStats(trades, weekStart, weekEnd);
+  const summaryText = [
+    entry.summaryText,
+    entry.whatImproved ? `What improved: ${entry.whatImproved}` : null,
+    entry.whatDeteriorated ? `What got worse: ${entry.whatDeteriorated}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  await db.create("weeklyReviews", {
+    createdAt: new Date(),
+    weekStart,
+    weekEnd,
+    summaryText,
+    totalTrades: stats.totalTrades,
+    totalPnl: stats.totalPnl,
+    totalR: stats.totalR,
+    winRate: stats.winRate,
+    profitFactor: stats.profitFactor,
+    expectancy: stats.expectancy,
+    ruleAdherenceRate: stats.ruleAdherenceRate,
+    mostCommonMistake: stats.mostCommonMistake,
+    bestLesson: entry.keyLesson,
+    actionItem: entry.whatDeteriorated,
+  });
+}
+
+// Pull the trader's on-screen edits for ONE entry back over the AI draft. Only
+// keys that were actually rendered for that entry's kind are submitted, so a
+// card can surface just its own fields without wiping the rest.
+function applyEntryOverrides(entry: ExtractedEntry, formData: FormData, index: number): ExtractedEntry {
+  const prefix = `e${index}_`;
+  const patch: Record<string, unknown> = {};
+  const text = (key: string) => {
+    if (formData.has(prefix + key)) patch[key] = toText(formData.get(prefix + key));
+  };
+  const number = (key: string) => {
+    if (formData.has(prefix + key)) patch[key] = toNumber(formData.get(prefix + key));
+  };
+  const bool = (key: string) => {
+    if (formData.has(prefix + key)) patch[key] = boolFromForm(formData.get(prefix + key));
+  };
+
+  switch (entry.kind) {
+    case "TRADE_ENTRY":
+      ["instrument", "direction", "status", "setupName", "entryThesis", "invalidation", "concern", "emotionalState", "riskPosture"].forEach(text);
+      ["confidenceScore", "entryPrice", "stopPrice", "targetPrice", "quantity", "leverage"].forEach(number);
+      break;
+    case "TRADE_EXIT":
+      ["linkTradeId", "instrument", "exitReason", "followedPlan", "emotionalState", "lesson"].forEach(text);
+      ["exitPrice", "realizedPnl"].forEach(number);
+      break;
+    case "ASSET_NOTE":
+      ["assetSymbol", "timeframe", "text"].forEach(text);
+      break;
+    case "JOURNAL":
+      ["mainEmotion", "bestDecision", "worstDecision", "mainMistake", "oneThingDoneWell", "oneThingToAvoidTomorrow"].forEach(text);
+      ["disciplineScore"].forEach(number);
+      ["tradedToday", "followedMaxLoss", "followedMaxTrades"].forEach(bool);
+      break;
+    case "LESSON":
+      ["lessonText", "category"].forEach(text);
+      break;
+    case "WEEKLY_REFLECTION":
+      ["summaryText", "whatImproved", "whatDeteriorated", "keyLesson"].forEach(text);
+      break;
+    case "FREE_NOTE":
+      ["text"].forEach(text);
+      break;
   }
-  const numberKeys = ["entryPrice", "stopPrice", "targetPrice", "exitPrice", "quantity", "leverage", "realizedPnl", "confidenceScore", "disciplineScore"];
-  for (const key of numberKeys) {
-    if (formData.has(key)) overrides[key] = toNumber(formData.get(key));
-  }
-  const boolKeys = ["tradedToday", "followedMaxLoss", "followedMaxTrades"];
-  for (const key of boolKeys) {
-    if (formData.has(key)) overrides[key] = boolFromForm(formData.get(key));
-  }
-  if (formData.has("lessonsText")) {
-    overrides.lessons = String(formData.get("lessonsText") ?? "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-  }
-  return overrides;
+
+  // normalizeEntry re-applies the enum/number discipline to whatever was typed,
+  // so a hand-edited field can never smuggle a bad value into a record.
+  return normalizeEntry({ ...entry, ...patch }) ?? entry;
 }
 
 async function linkSuggestedMistakes(tradeId: string, tags: unknown) {
@@ -1347,26 +1566,6 @@ async function linkSuggestedMistakes(tradeId: string, tags: unknown) {
   const existingIds = new Set(existing.filter((link) => link.tradeId === tradeId).map((link) => link.mistakeTagId));
   for (const mistake of allTags.filter((tag) => tags.map(String).includes(tag.name) && !existingIds.has(tag.id))) {
     await db.create("tradeMistakes", { tradeId, mistakeTagId: mistake.id });
-  }
-}
-
-async function createLessonsFromStructured(structured: StructuredJson, transcriptId: string, tradeId?: string, inheritedTags?: string[]) {
-  const rawLessons = Array.isArray(structured.lessons) ? structured.lessons : structured.lesson ? [structured.lesson] : [];
-  for (const raw of rawLessons) {
-    const rawRecord = asRecord(raw);
-    const lessonText = typeof raw === "string" ? raw : stringFromUnknown(rawRecord?.lessonText);
-    if (!lessonText) continue;
-    await createLesson(
-      {
-        lessonText,
-        category: enumFromText(LessonCategory, rawRecord?.category, LessonCategory.PROCESS),
-        sourceType: LessonSourceType.TRANSCRIPT,
-        linkedTranscriptId: transcriptId,
-        linkedTradeId: tradeId ?? null,
-      },
-      null,
-      inheritedTags,
-    );
   }
 }
 
@@ -1384,41 +1583,44 @@ async function createLesson(
   });
 }
 
-function buildTranscriptSummary(structured: StructuredJson) {
-  return [
-    structured.instrument,
-    structured.direction,
-    structured.setupName,
-    structured.entryThesis ?? structured.exitReason ?? structured.bestDecision,
-  ].filter(Boolean).join(" | ").slice(0, 500) || null;
+// Read a saved draft back through the same tolerant normalizer the model's
+// response goes through, so hand-edited or older JSON can never crash a save.
+function readExtraction(structuredJson: string | null): SegmentedExtraction {
+  if (!structuredJson) return { entries: [], missingInfo: [], overallConfidence: "LOW" };
+  try {
+    return normalizeExtraction(JSON.parse(structuredJson));
+  } catch {
+    return { entries: [], missingInfo: [], overallConfidence: "LOW" };
+  }
 }
 
-function asRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+// The one-line preview on the collapsed inbox card and in search results.
+function buildTranscriptSummary(extraction: SegmentedExtraction) {
+  return extraction.entries
+    .map((entry) => `${entryKindLabels[entry.kind]}: ${entrySummary(entry)}`)
+    .join(" · ")
+    .slice(0, 500) || null;
 }
 
-function stringFromUnknown(value: unknown) {
-  return typeof value === "string" ? value : null;
+function entryKindWord(entry: ExtractedEntry) {
+  return entryKindLabels[entry.kind].toLowerCase();
+}
+
+// "a trade and a lesson", "2 trades, an asset note and a journal entry".
+function describeWritten(entries: ExtractedEntry[]) {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const word = entryKindWord(entry);
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()].map(([word, count]) => (count === 1 ? `1 ${word}` : `${count} ${word}s`));
+  if (parts.length <= 1) return parts[0] ?? "nothing";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 function enumFromText<T extends Record<string, string>>(enumObject: T, value: unknown, fallback: T[keyof T]) {
   const text = String(value ?? "").toUpperCase();
   return Object.values(enumObject).includes(text as T[keyof T]) ? (text as T[keyof T]) : fallback;
-}
-
-function nullableString(value: unknown) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function nullableNumber(value: unknown) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function nullableBool(value: unknown) {
-  return typeof value === "boolean" ? value : null;
 }
 
 function formatMaybe(value: number | null | undefined) {

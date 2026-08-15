@@ -1,0 +1,8 @@
+{
+  "name": "Genuinely ambiguous exit returns a null link, not a guess",
+  "why": "Two open longs match. The model must return null so the review card shows the open-trade picker instead of silently creating a duplicate trade.",
+  "minEntries": 1,
+  "kinds": ["TRADE_EXIT"],
+  "links": [{ "kind": "TRADE_EXIT", "linkedTrade": null }],
+  "forbidKinds": ["TRADE_ENTRY"]
+}

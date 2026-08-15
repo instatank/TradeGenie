@@ -1,0 +1,12 @@
+{
+  "name": "A planned but untaken trade is status IDEA",
+  "why": "IDEA is for 'I'm watching this'; only an actual entry gets status OPEN.",
+  "minEntries": 1,
+  "kinds": ["TRADE_ENTRY"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "SOL" },
+    { "kind": "TRADE_ENTRY", "field": "direction", "equals": "LONG" },
+    { "kind": "TRADE_ENTRY", "field": "status", "equals": "IDEA" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": null }
+  ]
+}

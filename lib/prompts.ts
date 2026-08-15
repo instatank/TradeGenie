@@ -1,137 +1,88 @@
-export type PromptTemplateKey =
-  | "tradeEntry"
-  | "tradeExit"
-  | "eodReview"
-  | "lessonExtraction"
-  | "weeklyReview";
+export type PromptTemplateKey = "capture";
 
-// Bump this when the default templates change in a way that should override
+// Bump this when the default template changes in a way that should override
 // previously-saved settings. getSettings() resets stored templates to these
 // defaults when the saved version is older, so improvements actually ship.
-export const PROMPT_TEMPLATES_VERSION = 3;
+// v4 = the segmented (one note → many entries) capture pipeline.
+export const PROMPT_TEMPLATES_VERSION = 4;
 
+// The one editable template. It describes the ENTRY VOCABULARY; the
+// correctness-critical rules (never invent, enum discipline, linking, the live
+// mistake-tag list) live in the code-built system prompt below so a stale saved
+// template can never break them.
 export const defaultPromptTemplates: Record<PromptTemplateKey, string> = {
-  tradeEntry: `Extract a TRADE ENTRY note. Return JSON with these fields:
-- transcriptType: "TRADE_ENTRY_NOTE"
-- instrument: ticker as stated (e.g. BTC, SOL, ETH), else null
-- direction: LONG | SHORT | UNKNOWN
-- setupName: the named setup if stated, else null
-- entryThesis: 1-2 sentences on why this trade, why now
-- invalidation: where the idea is wrong / the stop logic, else null
-- concern: a stated worry or risk, else null
-- emotionalState: one allowed emotional-state value (see system instructions)
-- riskPosture: REDUCED | NORMAL | AGGRESSIVE | UNKNOWN
-- confidenceScore: integer 1-10 if stated, else null
-- entryGrade: A | B | C | NA
-- entryPrice: the entry price as a number if stated, else null
-- stopPrice: the stop / invalidation price as a number if stated, else null
-- targetPrice: the target / take-profit price as a number if stated, else null
-- quantity: position size in units/contracts as a number if stated, else null
-- leverage: leverage as a number (e.g. 10 for "10x") if stated, else null
-- suggestedMistakeTags: array of exact mistake-tag identifiers (usually empty for a fresh entry)
-- lessons: array of { lessonText, category } with category one of ENTRY_DISCIPLINE | RISK_MANAGEMENT | PSYCHOLOGY | PROCESS | OTHER
-- missingInfo: array of field names the trader did not provide
-- confidence: LOW | MEDIUM | HIGH
+  capture: `Split the note into entries. Each entry carries only its own fields.
 
-Numbers: capture prices/size/leverage only when the trader actually says them. Never invent or estimate a number.
+TRADE_ENTRY — a position taken or a concrete trade idea.
+  instrument, direction (LONG|SHORT|UNKNOWN), status (OPEN if they actually entered, IDEA if they are only planning or watching),
+  setupName, entryThesis (1-2 sentences: why this, why now), invalidation, concern,
+  emotionalState, riskPosture (REDUCED|NORMAL|AGGRESSIVE|UNKNOWN), confidenceScore (1-10),
+  entryPrice, stopPrice, targetPrice, quantity, leverage, suggestedMistakeTags.
 
-Example:
-{"transcriptType":"TRADE_ENTRY_NOTE","instrument":"SOL","direction":"LONG","setupName":"Range reclaim","entryThesis":"Buyers defended the retest of the range low, expecting continuation back to range highs.","invalidation":"A close back inside the range","concern":null,"emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":6,"entryGrade":"NA","entryPrice":142.5,"stopPrice":138,"targetPrice":155,"quantity":null,"leverage":5,"suggestedMistakeTags":[],"lessons":[],"missingInfo":["target"],"confidence":"MEDIUM"}`,
+TRADE_EXIT — closing or reviewing a position. Never use this to open one.
+  linkTradeId (a handle from the open-trades list, or null), instrument,
+  exitPrice, realizedPnl (negative for a loss), exitReason,
+  followedPlan (YES|NO|PARTIAL|NA), emotionalState,
+  lesson (the takeaway for THIS trade), suggestedMistakeTags.
 
-  tradeExit: `Extract a TRADE EXIT review. Return JSON with these fields:
-- transcriptType: "TRADE_EXIT_REVIEW"
-- instrument: ticker if stated, else null
-- exitReason: why the trade was closed (target hit, stopped out, discretionary), else null
-- followedPlan: YES | NO | PARTIAL | NA
-- emotionalState: one allowed emotional-state value (see system instructions)
-- exitPrice: the price the trade was closed at, as a number, if stated, else null
-- realizedPnl: realized profit/loss as a number (negative for a loss) if stated, else null
-- suggestedMistakeTags: array of exact mistake-tag identifiers actually described
-- lesson: the single most important takeaway, else null
-- futureRule: a concrete rule for next time if stated, else null
-- confidence: LOW | MEDIUM | HIGH
+ASSET_NOTE — a thought about an instrument that is NOT a trade: bias, levels, a plan, "watching this".
+  assetSymbol, timeframe (HTF|MTF|LTF|GENERAL), text (the tidied thought, in the trader's own words).
 
-Numbers: capture exit price / realized P&L only when the trader actually says them. Never invent a number.
+JOURNAL — how the day or the session went: mood, discipline, guardrails.
+  mainEmotion, tradedToday, followedMaxLoss, followedMaxTrades, bestDecision, worstDecision,
+  mainMistake, oneThingDoneWell, oneThingToAvoidTomorrow, disciplineScore (1-10).
 
-Example:
-{"transcriptType":"TRADE_EXIT_REVIEW","instrument":"BTC","exitReason":"Closed early out of fear before the target.","followedPlan":"PARTIAL","emotionalState":"ANXIOUS","exitPrice":61200,"realizedPnl":-120,"suggestedMistakeTags":["CUT_WINNER_EARLY"],"lesson":"Let the trade reach its planned target instead of reacting to a wick.","futureRule":"No discretionary exits before target unless the invalidation is hit.","confidence":"HIGH"}`,
+LESSON — a durable, reusable rule they could apply to a future trade.
+  lessonText (one actionable sentence), category (ENTRY_DISCIPLINE|RISK_MANAGEMENT|PSYCHOLOGY|PROCESS|OTHER).
 
-  eodReview: `Extract an END-OF-DAY review. This template also handles pre-session daily check-ins. Return JSON with these fields:
-- transcriptType: "EOD_REVIEW", or "DAILY_CHECKIN" if this is a pre-session plan rather than a recap
-- tradedToday: true | false | null
-- followedMaxLoss: true | false | null
-- followedMaxTrades: true | false | null
-- bestDecision: else null
-- worstDecision: else null
-- mainEmotion: one allowed emotional-state value (see system instructions), else null
-- mainMistake: short description of the day's main mistake, else null
-- oneThingDoneWell: else null
-- oneThingToAvoidTomorrow: else null
-- disciplineScore: integer 1-10 if stated, else null
-- lessons: array of { lessonText, category }
-- confidence: LOW | MEDIUM | HIGH
+WEEKLY_REFLECTION — looking back over a week.
+  summaryText, whatImproved, whatDeteriorated, keyLesson.
 
-Example:
-{"transcriptType":"EOD_REVIEW","tradedToday":true,"followedMaxLoss":true,"followedMaxTrades":false,"bestDecision":"Stood aside during the chop after lunch.","worstDecision":"Took a fourth trade out of boredom.","mainEmotion":"TIRED","mainMistake":"Overtraded a slow session.","oneThingDoneWell":"Respected the daily max loss.","oneThingToAvoidTomorrow":"No trades after the third without an A setup.","disciplineScore":6,"lessons":[{"lessonText":"Stop trading once the third trade closes unless it is an A setup.","category":"PROCESS"}],"confidence":"MEDIUM"}`,
+FREE_NOTE — a thought that fits none of the above. A first-class kind: use it rather than
+forcing the thought into another kind, and never drop the thought instead.
+  text.
 
-  lessonExtraction: `Extract reusable trading LESSONS only. Return JSON with:
-- lessons: array of { lessonText, category, confidence } where category is one of ENTRY_DISCIPLINE | RISK_MANAGEMENT | PSYCHOLOGY | PROCESS | OTHER and confidence is LOW | MEDIUM | HIGH
+Also return missingInfo (field names the trader did not give that would matter) and
+overallConfidence (LOW|MEDIUM|HIGH).
 
-Keep each lessonText a single actionable sentence. Return an empty array if there is no durable, reusable lesson.
-
-Example:
-{"lessons":[{"lessonText":"Wait for the planned entry zone instead of chasing a move that already ran.","category":"ENTRY_DISCIPLINE","confidence":"MEDIUM"}]}`,
-
-  weeklyReview: `Synthesize a WEEKLY trading review. Return JSON with:
-- transcriptType: "WEEKLY_REFLECTION"
-- summaryText: a 2-4 sentence summary of the week
-- whatImproved: else null
-- whatDeteriorated: else null
-- mostExpensiveMistake: else null
-- emotionalPattern: the recurring emotional theme of the week, else null
-- keyLesson: the single most important lesson, else null
-- actionItemForNextWeek: one concrete action, else null
-- lessons: array of { lessonText, category }
-- confidence: LOW | MEDIUM | HIGH
-
-Example:
-{"transcriptType":"WEEKLY_REFLECTION","summaryText":"A flat week dominated by impatience in chop. Process held on planned trades but broke on boredom entries.","whatImproved":"Sizing stayed consistent.","whatDeteriorated":"Discipline late in slow sessions.","mostExpensiveMistake":"Boredom trades in the US afternoon.","emotionalPattern":"Impatience during low-volatility windows.","keyLesson":"Edge only exists on planned setups.","actionItemForNextWeek":"Hard stop after the daily max trades.","lessons":[{"lessonText":"Do not trade low-volatility afternoons without an A setup.","category":"PROCESS"}],"confidence":"MEDIUM"}`,
+Example — "long SOL 142.5, stop 138, range reclaim again. watching ZEC, dead under 38, no trade there. feel calm today.":
+{"entries":[
+ {"kind":"TRADE_ENTRY","confidence":"HIGH","instrument":"SOL","direction":"LONG","status":"OPEN","setupName":"Range reclaim","entryThesis":"Range reclaim setup taken again after the retest held.","invalidation":null,"concern":null,"emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":null,"entryPrice":142.5,"stopPrice":138,"targetPrice":null,"quantity":null,"leverage":null,"suggestedMistakeTags":[]},
+ {"kind":"ASSET_NOTE","confidence":"MEDIUM","assetSymbol":"ZEC","timeframe":"GENERAL","text":"Watching ZEC. Considers the idea dead below 38. No position."},
+ {"kind":"JOURNAL","confidence":"MEDIUM","mainEmotion":"CALM","tradedToday":true,"followedMaxLoss":null,"followedMaxTrades":null,"bestDecision":null,"worstDecision":null,"mainMistake":null,"oneThingDoneWell":null,"oneThingToAvoidTomorrow":null,"disciplineScore":null}
+],"missingInfo":["invalidation"],"overallConfidence":"MEDIUM"}`,
 };
 
-// Used only when the note type is UNKNOWN: classify first, then fill the
-// field group that matches. The schema accepts every field, so the model
-// fills the relevant block and leaves the rest null.
-export const generalExtraction = `Classify this trading voice note, then extract it. Return STRICT JSON only.
-
-First set transcriptType to exactly one of:
-TRADE_ENTRY_NOTE | TRADE_EXIT_REVIEW | DAILY_CHECKIN | EOD_REVIEW | WEEKLY_REFLECTION | GENERAL_LEARNING_NOTE | UNKNOWN
-
-Then fill ONLY the fields that match that type, leaving everything else null:
-- TRADE_ENTRY_NOTE: instrument, direction (LONG|SHORT|UNKNOWN), setupName, entryThesis, invalidation, concern, emotionalState, riskPosture (REDUCED|NORMAL|AGGRESSIVE|UNKNOWN), confidenceScore (1-10), entryGrade (A|B|C|NA), entryPrice, stopPrice, targetPrice, quantity, leverage (numbers, only if stated)
-- TRADE_EXIT_REVIEW: instrument, exitReason, followedPlan (YES|NO|PARTIAL|NA), emotionalState, exitPrice, realizedPnl (numbers, only if stated), lesson, futureRule
-- EOD_REVIEW / DAILY_CHECKIN: tradedToday, followedMaxLoss, followedMaxTrades, bestDecision, worstDecision, mainEmotion, mainMistake, oneThingDoneWell, oneThingToAvoidTomorrow, disciplineScore (1-10)
-- Any type: suggestedMistakeTags (exact identifiers), lessons ([{lessonText, category}]), missingInfo, confidence (LOW|MEDIUM|HIGH)
-
-emotionalState / mainEmotion must be an allowed emotional-state value (see system instructions). Use null for anything not stated; never invent numbers.`;
-
-// Built in code (not user-editable) so the core rules, enum discipline, and the
-// live mistake-tag vocabulary are always enforced regardless of saved templates.
+// Built in code (not user-editable) so the segmentation rules, the "only if
+// actually stated" rule, enum discipline, and the live mistake-tag vocabulary
+// are always enforced regardless of what is saved in settings.
 export function extractionSystemPrompt(mistakeTagReference: string) {
-  return `You extract structured journal data from a discretionary crypto-perpetuals trader's dictated voice notes. These are personal trading notes — never give financial advice or recommendations.
+  return `You turn a discretionary crypto-perpetuals trader's dictated voice notes into structured journal entries. These are personal trading notes — never give financial advice or recommendations.
 
 Context: crypto perps trade 24/7. Expect longs and shorts, leverage, funding rates, stop/invalidation levels, and strong BTC correlation.
 
-Output rules:
-- Return STRICT JSON only. No prose, no markdown, no code fences.
-- Use null for any field the trader did not actually state. Never invent prices, stops, sizes, setup names, or any number that was not spoken.
-- For every enum field, output ONLY a value from its allowed list. If the trader's words do not clearly match one, use UNKNOWN (or NA where that is the listed default).
+SEGMENTATION — the core job:
+- Real dictation rambles and contains several things at once: a trade, a thought about an instrument, a mood note, a lesson. Return ONE entry per distinct thing.
+- Nothing the trader said may be silently dropped. If a thought fits no other kind, emit a FREE_NOTE for it.
+- Do not over-split either: one trade is one entry, even if they describe it across several sentences. Two different instruments taken as two positions are two entries.
+- Do not duplicate the same content across two entries.
+- Never invent an entry the note does not support. An empty entries array is a valid answer for a note that says nothing.
+
+NEVER INVENT:
+- Use null for any field the trader did not actually state. Never invent a price, stop, target, size, leverage, P&L, symbol, or setup name that was not spoken.
+- Prefer an existing symbol, setup, or open trade from the trader context over inventing a new one — but never force a match that isn't really there.
+- For every enum field, output ONLY a value from its allowed list. If their words do not clearly match one, use UNKNOWN (or NA where that is the listed default).
 - Only flag a mistake the trader actually describes doing — never infer or moralize.
 
-Emotional state — map the trader's words onto exactly one of:
+TRADES:
+- status OPEN means they say they entered ("longed it", "I'm in at", "took the trade"). status IDEA means they are planning or watching ("if it reclaims X I'll long it").
+- A TRADE_EXIT must always be about an existing position. Set linkTradeId to the handle of the open trade it closes. If more than one open trade could plausibly match, or none does, set linkTradeId to null — the trader will pick. Never invent a link and never describe an exit as a new trade.
+
+Mind state (emotionalState / mainEmotion) — map their words onto exactly one of:
 - CALM: composed, in control, patient
-- TIRED: exhausted, sleepy, low energy
+- TIRED: exhausted, sleepy, low energy, poor sleep
 - ANXIOUS: nervous, fearful, hesitant, uncertain
-- TILTED: frustrated, angry, revenge-seeking, "on tilt"
+- TILTED: frustrated, angry, annoyed at themselves, revenge-seeking, "on tilt"
 - FOMO: chasing, fear of missing out, jumping in late
 - OVERCONFIDENT: greedy, euphoric, invincible, oversized conviction
 - UNKNOWN: no clear emotional signal
@@ -141,9 +92,5 @@ ${mistakeTagReference}`;
 }
 
 export const promptLabels: Record<PromptTemplateKey, string> = {
-  tradeEntry: "Trade Entry Transcript Extraction",
-  tradeExit: "Trade Exit Review Extraction",
-  eodReview: "EOD Review Extraction",
-  lessonExtraction: "Lesson Extraction",
-  weeklyReview: "Weekly Review Synthesis",
+  capture: "Capture extraction (note → entries)",
 };

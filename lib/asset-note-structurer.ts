@@ -1,7 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { activeModel, describeAiError } from "@/lib/ai-status";
 import { getSettings } from "@/lib/settings-store";
-
-const DEFAULT_MODEL = "claude-sonnet-4-6";
 
 export type StructuredNote = {
   text: string;
@@ -21,8 +20,10 @@ export async function structureAssetNote(rawText: string): Promise<StructuredNot
     try {
       const text = await anthropicStructure(trimmed);
       if (text) return { text, source: "ai" };
-    } catch {
-      // fall through to the local tidy
+    } catch (error) {
+      // Fall through to the local tidy, but leave a trail — this used to fail
+      // completely silently and look identical to "no key configured".
+      console.error("[asset-note] Anthropic tidy failed:", describeAiError(error), error);
     }
   }
   return { text: basicStructure(trimmed), source: "basic" };
@@ -45,7 +46,7 @@ const SYSTEM_PROMPT = [
 async function anthropicStructure(rawText: string): Promise<string> {
   const client = new Anthropic();
   const message = await client.messages.create({
-    model: process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
+    model: activeModel(),
     max_tokens: 1024,
     thinking: { type: "disabled" },
     system: SYSTEM_PROMPT,

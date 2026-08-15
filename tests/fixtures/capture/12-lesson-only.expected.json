@@ -1,0 +1,11 @@
+{
+  "name": "A durable reusable rule is a LESSON",
+  "why": "Distinguishes a standing rule from a passing thought (FREE_NOTE) and from a trade.",
+  "minEntries": 1,
+  "kinds": ["LESSON"],
+  "fields": [
+    { "kind": "LESSON", "field": "lessonText", "present": true },
+    { "kind": "LESSON", "field": "category", "in": ["ENTRY_DISCIPLINE", "RISK_MANAGEMENT", "PSYCHOLOGY", "PROCESS", "OTHER"] }
+  ],
+  "forbidKinds": ["TRADE_ENTRY", "TRADE_EXIT"]
+}

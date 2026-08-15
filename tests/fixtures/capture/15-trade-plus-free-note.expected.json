@@ -1,0 +1,12 @@
+{
+  "name": "A trade plus an unrelated aside keeps both",
+  "why": "The aside is not a lesson and not a journal field; it must survive as a FREE_NOTE rather than being dropped or absorbed into the thesis.",
+  "minEntries": 2,
+  "kinds": ["TRADE_ENTRY", "FREE_NOTE"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "ZEC" },
+    { "kind": "TRADE_ENTRY", "field": "direction", "equals": "SHORT" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": 41.2 },
+    { "kind": "FREE_NOTE", "field": "text", "present": true }
+  ]
+}

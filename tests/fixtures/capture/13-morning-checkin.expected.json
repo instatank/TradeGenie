@@ -1,0 +1,8 @@
+{
+  "name": "Pre-session check-in feeds the daily journal",
+  "why": "A plan for the day, not a recap. Must land as a JOURNAL entry with the mind state captured.",
+  "minEntries": 1,
+  "kinds": ["JOURNAL"],
+  "fields": [{ "kind": "JOURNAL", "field": "mainEmotion", "equals": "ANXIOUS" }],
+  "forbidKinds": ["TRADE_ENTRY", "TRADE_EXIT"]
+}

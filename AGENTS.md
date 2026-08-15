@@ -50,14 +50,18 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `components/OptionField.tsx`: the pill controls with an "or type another…" box (radio / checkbox / select). Server-rendered, zero client JS — a control named `x` posts its typed label in `xCustom`, and typed always beats the tapped chip.
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
-- `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
+- `lib/transcript-processor.ts`: one Claude call per captured note (official SDK, structured outputs) returning an array of typed entries; single-FREE_NOTE fallback when the AI is off, unkeyed, or erroring — the reason always rides along.
+- `lib/ai-status.ts`: turns a thrown Anthropic error into an actionable sentence, and backs the `/settings` "Test AI connection" check. Every AI path reads its model from `activeModel()`.
+- `lib/extraction.ts`: the entry vocabulary — kinds, per-kind fields, the JSON Schema, and the tolerant normalizer used on both the model response and every read of a saved draft.
+- `lib/extraction-context.ts`: the ~300-token trader-context block (open trades, tracked assets, recent instruments, active setups) + open-trade handle resolution.
 - `lib/market-context.ts`: the SignalDesk bridge — fetches the market snapshot for a trade's entry and returns null on any failure. Design record lives in the other repo: `signaldesk/TRADEGENIE_BRIDGE.md`.
+- `scripts/eval-capture.ts` / `tests/fixtures/capture/`: `npm run eval:capture` scores the capture pipeline against 15 realistic messy notes.
 
 ## Product Areas
 
 - `/`: Today — daily-ritual dashboard (check-in / quick log / evening review states, streak, week strip, coach's corner)
 - `/calendar`: day/week/month activity view
-- `/inbox`: Capture — hero paste box + review queue; confirm-first note cards, all other actions behind a "More" fold
+- `/inbox`: Capture — hero paste box + review queue; one note splits into typed entries, one editable/removable card each, all other actions behind a "More" fold
 - `/daily`: two-ritual page — morning check-in (chips + guardrails) and evening review (prompted micro-form)
 - `/trades`: day-grouped journal rows (day P&L headers, direction/status chips, mistake badges); quick symbol/date filter row, advanced filters folded
 - `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
@@ -67,7 +71,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews
 - `/calculator`: pre-trade profitability scratchpad — net-of-fees R, break-even price, required win rate, position size (nothing is saved)
-- `/settings`: AI settings and prompt templates
+- `/settings`: AI status + connection test, custom labels, and the single capture prompt template
 - `/search`: global search — one box over every collection (words = AND substring, `#tags` = exact), type filter tabs, highlighted anchored snippets; empty state doubles as the browsable tag index
 
 ## UX Principles
@@ -92,7 +96,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - double-click row: open trade detail/edit page
   - pencil icon: open detail/edit page
   - bin icon: delete
-- Inbox auto-structures a note on save and shows one editable, type-aware review card; confirming writes the record (with spoken numbers) and stays on the inbox. Default view is "To review".
+- Inbox splits a note into typed entries on save and shows one editable card per entry (each removable before confirming); confirming writes every remaining entry — with spoken numbers — and stays on the inbox. An exit entry only ever updates an existing trade. Default view is "To review".
 - Top nav is lean: primary = Today / Capture / Trades / Review; everything else sits under a "More" dropdown.
 - Preset pill rows are extendable, not closed: type a label into the row's box and it is stored with the record and added to that pill vocabulary for next time (`lib/options.ts`). Review/remove them under Settings → "Your own labels". Fields the maths depends on (direction, status, grade, followed-plan, discipline) are deliberately NOT extendable.
 - Lessons and Import use compact default rows with full details/actions hidden behind expandable controls.
@@ -109,6 +113,7 @@ npm run lint
 npm run typecheck
 npm run build
 npm run seed
+npm run eval:capture   # capture extraction eval (needs ANTHROPIC_API_KEY to be meaningful)
 ```
 
 Before saying work is done, run at least:

@@ -1,0 +1,13 @@
+{
+  "name": "Exit review must link to the open BTC short",
+  "why": "The context block lists the open trades; 'the bitcoin short' has exactly one match. Must update it, never create a second trade.",
+  "minEntries": 1,
+  "kinds": ["TRADE_EXIT"],
+  "fields": [
+    { "kind": "TRADE_EXIT", "field": "exitPrice", "equals": 61200 },
+    { "kind": "TRADE_EXIT", "field": "realizedPnl", "equals": 380 },
+    { "kind": "TRADE_EXIT", "field": "followedPlan", "equals": "YES" }
+  ],
+  "links": [{ "kind": "TRADE_EXIT", "linkedTrade": "BTC SHORT" }],
+  "forbidKinds": ["TRADE_ENTRY"]
+}
