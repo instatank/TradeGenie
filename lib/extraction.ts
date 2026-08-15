@@ -157,10 +157,20 @@ export type SegmentedExtraction = {
  * therefore carries ONLY its own fields instead of the union of all of them —
  * that is what keeps output near ~500 tokens even when a note splits four ways.
  * Structured outputs need every property listed in `required`, so optional
- * fields are nullable rather than absent.
+ * fields are always present — text uses "" and numbers use null when not stated.
  */
 
-const nullableString = { type: ["string", "null"] } as const;
+// Anthropic caps a structured-output schema at 16 parameters carrying a union
+// (`type: [...]` or `anyOf`) — past that, compilation cost is exponential and the
+// request is rejected with a 400. Seven entry variants × their optional fields put
+// us at 29, which is why every capture silently fell back to a plain note.
+//
+// Text fields are therefore plain strings and use "" for "not stated": one fewer
+// union each, and normalizeEntry already turns "" into null via textOrNull(), so
+// nothing downstream changes. Numbers and booleans keep their null — there is no
+// honest empty value for a price, and inventing a sentinel like 0 or -1 would put
+// a number the trader never said into a record. That leaves 12 unions.
+const optionalText = { type: "string" } as const;
 const nullableNumber = { type: ["number", "null"] } as const;
 const nullableBool = { type: ["boolean", "null"] } as const;
 const confidenceField = { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] } as const;
@@ -177,13 +187,13 @@ function entrySchema(kind: EntryKind, properties: Record<string, unknown>) {
 
 const entryVariants = [
   entrySchema(EntryKind.TRADE_ENTRY, {
-    instrument: nullableString,
+    instrument: optionalText,
     direction: { type: "string", enum: [...directions] },
     status: { type: "string", enum: ["OPEN", "IDEA"] },
-    setupName: nullableString,
-    entryThesis: nullableString,
-    invalidation: nullableString,
-    concern: nullableString,
+    setupName: optionalText,
+    entryThesis: optionalText,
+    invalidation: optionalText,
+    concern: optionalText,
     emotionalState: { type: "string", enum: [...mindStateValues] },
     riskPosture: { type: "string", enum: [...riskPostures] },
     confidenceScore: nullableNumber,
@@ -195,14 +205,14 @@ const entryVariants = [
     suggestedMistakeTags: { type: "array", items: { type: "string" } },
   }),
   entrySchema(EntryKind.TRADE_EXIT, {
-    linkTradeId: nullableString,
-    instrument: nullableString,
+    linkTradeId: optionalText,
+    instrument: optionalText,
     exitPrice: nullableNumber,
     realizedPnl: nullableNumber,
-    exitReason: nullableString,
+    exitReason: optionalText,
     followedPlan: { type: "string", enum: [...followedPlanOptions] },
     emotionalState: { type: "string", enum: [...mindStateValues] },
-    lesson: nullableString,
+    lesson: optionalText,
     suggestedMistakeTags: { type: "array", items: { type: "string" } },
   }),
   entrySchema(EntryKind.ASSET_NOTE, {
@@ -215,11 +225,11 @@ const entryVariants = [
     tradedToday: nullableBool,
     followedMaxLoss: nullableBool,
     followedMaxTrades: nullableBool,
-    bestDecision: nullableString,
-    worstDecision: nullableString,
-    mainMistake: nullableString,
-    oneThingDoneWell: nullableString,
-    oneThingToAvoidTomorrow: nullableString,
+    bestDecision: optionalText,
+    worstDecision: optionalText,
+    mainMistake: optionalText,
+    oneThingDoneWell: optionalText,
+    oneThingToAvoidTomorrow: optionalText,
     disciplineScore: nullableNumber,
   }),
   entrySchema(EntryKind.LESSON, {
@@ -228,9 +238,9 @@ const entryVariants = [
   }),
   entrySchema(EntryKind.WEEKLY_REFLECTION, {
     summaryText: { type: "string" },
-    whatImproved: nullableString,
-    whatDeteriorated: nullableString,
-    keyLesson: nullableString,
+    whatImproved: optionalText,
+    whatDeteriorated: optionalText,
+    keyLesson: optionalText,
   }),
   entrySchema(EntryKind.FREE_NOTE, {
     text: { type: "string" },

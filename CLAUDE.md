@@ -100,6 +100,14 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - Spoken **numbers are captured**: entry/stop/target price, quantity, leverage, exit price and
   realized P&L flow through extraction → editable card → trade. Strict "only if actually
   stated, never invent" rule, in the code-built system prompt.
+- **Schema union budget (hard API limit).** Anthropic rejects a structured-output schema with
+  more than **16** union-typed parameters (`type: [...]` or `anyOf`) — exponential compilation
+  cost. Seven entry variants put us at 29, and *every* capture 400'd into the plain-text
+  fallback. Text fields are now plain strings using `""` for "not stated" (`normalizeEntry`
+  turns `""` into null via `textOrNull`, so nothing downstream changed); numbers and booleans
+  keep `null`, because there is no honest empty number and a sentinel would put a figure the
+  trader never said into a record. Now 13. **Adding a nullable number or boolean to an entry
+  kind spends from that budget — count before adding one.**
 - **Eval harness**: `npm run eval:capture` runs `tests/fixtures/capture/*.txt` through the real
   pipeline against a throwaway seeded world and prints a per-fixture diff (kinds produced,
   fields extracted, links resolved). Add a fixture + `.expected.json` sidecar before changing

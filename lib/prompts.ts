@@ -4,7 +4,9 @@ export type PromptTemplateKey = "capture";
 // previously-saved settings. getSettings() resets stored templates to these
 // defaults when the saved version is older, so improvements actually ship.
 // v4 = the segmented (one note → many entries) capture pipeline.
-export const PROMPT_TEMPLATES_VERSION = 4;
+// v5 = "" instead of null for unstated text, so the schema stays under
+//      Anthropic's 16-union limit (see lib/extraction.ts).
+export const PROMPT_TEMPLATES_VERSION = 5;
 
 // The one editable template. It describes the ENTRY VOCABULARY; the
 // correctness-critical rules (never invent, enum discipline, linking, the live
@@ -20,7 +22,7 @@ TRADE_ENTRY — a position taken or a concrete trade idea.
   entryPrice, stopPrice, targetPrice, quantity, leverage, suggestedMistakeTags.
 
 TRADE_EXIT — closing or reviewing a position. Never use this to open one.
-  linkTradeId (a handle from the open-trades list, or null), instrument,
+  linkTradeId (a handle from the open-trades list, or "" if unsure), instrument,
   exitPrice, realizedPnl (negative for a loss), exitReason,
   followedPlan (YES|NO|PARTIAL|NA), emotionalState,
   lesson (the takeaway for THIS trade), suggestedMistakeTags.
@@ -47,9 +49,9 @@ overallConfidence (LOW|MEDIUM|HIGH).
 
 Example — "long SOL 142.5, stop 138, range reclaim again. watching ZEC, dead under 38, no trade there. feel calm today.":
 {"entries":[
- {"kind":"TRADE_ENTRY","confidence":"HIGH","instrument":"SOL","direction":"LONG","status":"OPEN","setupName":"Range reclaim","entryThesis":"Range reclaim setup taken again after the retest held.","invalidation":null,"concern":null,"emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":null,"entryPrice":142.5,"stopPrice":138,"targetPrice":null,"quantity":null,"leverage":null,"suggestedMistakeTags":[]},
+ {"kind":"TRADE_ENTRY","confidence":"HIGH","instrument":"SOL","direction":"LONG","status":"OPEN","setupName":"Range reclaim","entryThesis":"Range reclaim setup taken again after the retest held.","invalidation":"","concern":"","emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":null,"entryPrice":142.5,"stopPrice":138,"targetPrice":null,"quantity":null,"leverage":null,"suggestedMistakeTags":[]},
  {"kind":"ASSET_NOTE","confidence":"MEDIUM","assetSymbol":"ZEC","timeframe":"GENERAL","text":"Watching ZEC. Considers the idea dead below 38. No position."},
- {"kind":"JOURNAL","confidence":"MEDIUM","mainEmotion":"CALM","tradedToday":true,"followedMaxLoss":null,"followedMaxTrades":null,"bestDecision":null,"worstDecision":null,"mainMistake":null,"oneThingDoneWell":null,"oneThingToAvoidTomorrow":null,"disciplineScore":null}
+ {"kind":"JOURNAL","confidence":"MEDIUM","mainEmotion":"CALM","tradedToday":true,"followedMaxLoss":null,"followedMaxTrades":null,"bestDecision":"","worstDecision":"","mainMistake":"","oneThingDoneWell":"","oneThingToAvoidTomorrow":"","disciplineScore":null}
 ],"missingInfo":["invalidation"],"overallConfidence":"MEDIUM"}`,
 };
 
@@ -69,14 +71,14 @@ SEGMENTATION — the core job:
 - Never invent an entry the note does not support. An empty entries array is a valid answer for a note that says nothing.
 
 NEVER INVENT:
-- Use null for any field the trader did not actually state. Never invent a price, stop, target, size, leverage, P&L, symbol, or setup name that was not spoken.
+- Leave a field empty when the trader did not actually state it: an empty string "" for text fields, null for numbers and true/false fields. Never invent a price, stop, target, size, leverage, P&L, symbol, or setup name that was not spoken.
 - Prefer an existing symbol, setup, or open trade from the trader context over inventing a new one — but never force a match that isn't really there.
 - For every enum field, output ONLY a value from its allowed list. If their words do not clearly match one, use UNKNOWN (or NA where that is the listed default).
 - Only flag a mistake the trader actually describes doing — never infer or moralize.
 
 TRADES:
 - status OPEN means they say they entered ("longed it", "I'm in at", "took the trade"). status IDEA means they are planning or watching ("if it reclaims X I'll long it").
-- A TRADE_EXIT must always be about an existing position. Set linkTradeId to the handle of the open trade it closes. If more than one open trade could plausibly match, or none does, set linkTradeId to null — the trader will pick. Never invent a link and never describe an exit as a new trade.
+- A TRADE_EXIT must always be about an existing position. Set linkTradeId to the handle of the open trade it closes. If more than one open trade could plausibly match, or none does, set linkTradeId to "" — the trader will pick. Never invent a link and never describe an exit as a new trade.
 
 Mind state (emotionalState / mainEmotion) — map their words onto exactly one of:
 - CALM: composed, in control, patient
