@@ -116,7 +116,9 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   turns `""` into null via `textOrNull`, so nothing downstream changed); numbers and booleans
   keep `null`, because there is no honest empty number and a sentinel would put a figure the
   trader never said into a record. Now 13. **Adding a nullable number or boolean to an entry
-  kind spends from that budget — count before adding one.**
+  kind spends from that budget — count before adding one.** `npm run check:schema` enforces this
+  offline (and runs as the eval's pre-flight), so it fails locally instead of silently in
+  production the way it did the first time.
 - **Eval harness**: `npm run eval:capture` runs `tests/fixtures/capture/*.txt` through the real
   pipeline against a throwaway seeded world and prints a per-fixture diff (kinds produced,
   fields extracted, links resolved). Add a fixture + `.expected.json` sidecar before changing
@@ -493,4 +495,5 @@ npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
+npm run check:schema   # offline: does the capture schema satisfy the API's limits?
 ```

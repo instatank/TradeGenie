@@ -15,6 +15,7 @@
  * FREE_NOTE stub — the harness says so loudly, because a green run in that mode
  * means nothing about extraction quality.
  */
+import { execFileSync } from "child_process";
 import { mkdtempSync, readFileSync, readdirSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
@@ -58,6 +59,10 @@ async function main() {
   const { extractTags } = await import("../lib/tags");
   const { EntryKind } = await import("../lib/extraction");
   const { activeModel } = await import("../lib/ai-status");
+
+  // Pre-flight: a schema the API would reject makes every fixture "fail" for a
+  // reason that has nothing to do with extraction quality. Catch it first.
+  execFileSync("npx", ["tsx", path.join("scripts", "check-schema.ts")], { stdio: "inherit" });
 
   const tradeIdByLabel = await seedFixtureWorld(db, defaultMistakeTags);
   const usingRealModel = Boolean(process.env.ANTHROPIC_API_KEY);
