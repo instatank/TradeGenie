@@ -57,6 +57,7 @@ async function main() {
   const { structureTranscript } = await import("../lib/transcript-processor");
   const { extractTags } = await import("../lib/tags");
   const { EntryKind } = await import("../lib/extraction");
+  const { activeModel } = await import("../lib/ai-status");
 
   const tradeIdByLabel = await seedFixtureWorld(db, defaultMistakeTags);
   const usingRealModel = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -64,7 +65,7 @@ async function main() {
   console.log("");
   console.log("Capture extraction eval");
   console.log("=".repeat(72));
-  console.log(`Backend : ${usingRealModel ? `Anthropic (${process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5"})` : "OFFLINE FALLBACK — no ANTHROPIC_API_KEY"}`);
+  console.log(`Backend : ${usingRealModel ? `Anthropic (${activeModel()})` : "OFFLINE FALLBACK — no ANTHROPIC_API_KEY"}`);
   if (!usingRealModel) {
     console.log("          The offline fallback returns one FREE_NOTE per note by design.");
     console.log("          These results say nothing about extraction quality — set");

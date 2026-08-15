@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { endOfDay, format, startOfDay } from "date-fns";
+import { checkAiConnection } from "@/lib/ai-status";
 import { conditionTagValues } from "@/lib/constants";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
@@ -934,6 +935,18 @@ export async function saveSettingsAction(formData: FormData) {
   await saveSettings(settings);
   revalidatePath("/settings");
   redirect(withFeedback("/settings", "Settings saved."));
+}
+
+// Makes one tiny real call to Anthropic and reports exactly what came back.
+// This is the answer to "is the AI actually working?" without reading logs.
+export async function testAiConnectionAction() {
+  const result = await checkAiConnection();
+  const target = new URL("/settings", "http://tradeforge.local");
+  target.searchParams.set("aiCheck", result.ok ? "ok" : "fail");
+  target.searchParams.set("aiCheckDetail", result.detail);
+  target.searchParams.set("aiCheckModel", result.model);
+  revalidatePath("/settings");
+  redirect(`${target.pathname}${target.search}`);
 }
 
 export async function generateWeeklyReviewAction(formData: FormData) {

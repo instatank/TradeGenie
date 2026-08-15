@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { activeModel, describeAiError } from "@/lib/ai-status";
 import { db } from "@/lib/data";
 import { buildExtractionContext, resolveTradeHandle } from "@/lib/extraction-context";
 import { normalizeExtraction, segmentedJsonSchema, type SegmentedExtraction } from "@/lib/extraction";
@@ -10,8 +11,12 @@ import { getSettings } from "@/lib/settings-store";
 // scoped, latency-sensitive task sitting inside the <20s paste/save budget.
 // Adaptive still lets the model think when a note genuinely needs untangling.
 // Bump ANTHROPIC_MODEL or EXTRACTION_EFFORT below if accuracy needs more room.
-const DEFAULT_MODEL = "claude-sonnet-5";
 const EXTRACTION_EFFORT = "low";
+
+// max_tokens caps thinking AND the JSON together. The entries themselves are
+// ~500 tokens, but adaptive thinking draws from the same budget, so a tangled
+// note used to truncate mid-JSON and land in the fallback with no explanation.
+const MAX_TOKENS = 8192;
 
 // No prompt caching on purpose: the prompt is ~1.2k tokens, barely over the
 // cacheable minimum, so the write premium would cost more than it saves.
@@ -20,14 +25,20 @@ export type { SegmentedExtraction };
 
 export async function structureTranscript(rawText: string): Promise<SegmentedExtraction> {
   const settings = await getSettings();
-  if (settings.aiEnabled && process.env.ANTHROPIC_API_KEY) {
-    try {
-      return await anthropicExtraction(rawText, settings.promptTemplates.capture);
-    } catch {
-      return mockExtraction(rawText);
-    }
+  if (!settings.aiEnabled) {
+    return mockExtraction(rawText, "AI is switched off in Settings — this note was saved as a plain thought.");
   }
-  return mockExtraction(rawText);
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return mockExtraction(rawText, "No ANTHROPIC_API_KEY is set on the server — this note was saved as a plain thought.");
+  }
+  try {
+    return await anthropicExtraction(rawText, settings.promptTemplates.capture);
+  } catch (error) {
+    // Never swallow this silently again: the server log gets the real error and
+    // the review card gets a sentence explaining why the note wasn't split up.
+    console.error("[capture] Anthropic extraction failed:", error);
+    return mockExtraction(rawText, `AI extraction failed: ${describeAiError(error)}. This note was saved as a plain thought.`);
+  }
 }
 
 // Pull the real mistake-tag vocabulary from the store so the model is told the
@@ -48,8 +59,8 @@ async function anthropicExtraction(rawText: string, template: string): Promise<S
 
   const client = new Anthropic();
   const message = await client.messages.create({
-    model: process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
-    max_tokens: 4096,
+    model: activeModel(),
+    max_tokens: MAX_TOKENS,
     thinking: { type: "adaptive" },
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
@@ -63,6 +74,15 @@ async function anthropicExtraction(rawText: string, template: string): Promise<S
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("");
+
+  // A truncated response is half-written JSON. Say so, rather than letting
+  // JSON.parse throw an opaque SyntaxError.
+  if (message.stop_reason === "max_tokens") {
+    throw new Error(`the note was too long for the ${MAX_TOKENS}-token budget and the reply was cut off`);
+  }
+  if (message.stop_reason === "refusal") {
+    throw new Error("the model declined to process this note");
+  }
   if (!text.trim()) throw new Error("Anthropic returned no content");
 
   const extraction = normalizeExtraction(JSON.parse(text));
@@ -79,16 +99,17 @@ async function anthropicExtraction(rawText: string, template: string): Promise<S
   };
 }
 
-// No-API-key dev fallback. It deliberately does NOT attempt segmentation or
+// Offline fallback. It deliberately does NOT attempt segmentation or
 // classification: pretending to classify produced confident-looking nonsense
 // that was worse than an honest "here is your text, sort it out". One FREE_NOTE,
-// LOW confidence, nothing lost.
-function mockExtraction(rawText: string): SegmentedExtraction {
+// LOW confidence, nothing lost — plus the reason it happened, so a broken key or
+// a wrong model name never again looks the same as "AI is off".
+function mockExtraction(rawText: string, reason: string): SegmentedExtraction {
   const text = rawText.trim();
   if (!text) return { entries: [], missingInfo: [], overallConfidence: "LOW" };
   return {
     entries: [{ kind: "FREE_NOTE", confidence: "LOW", text }],
-    missingInfo: ["AI extraction is off or unavailable — this note was saved as a plain thought."],
+    missingInfo: [reason],
     overallConfidence: "LOW",
   };
 }

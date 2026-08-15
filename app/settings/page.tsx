@@ -1,6 +1,7 @@
-import { Download } from "lucide-react";
-import { saveSettingsAction } from "@/app/actions";
+import { Download, Stethoscope } from "lucide-react";
+import { saveSettingsAction, testAiConnectionAction } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { activeModel } from "@/lib/ai-status";
 import { marketTypes } from "@/lib/constants";
 import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
@@ -10,10 +11,18 @@ import { storageStatus } from "@/lib/store";
 // entry, so there is no per-note-type routing left to configure.
 const promptKeys: PromptTemplateKey[] = ["capture"];
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
   const settings = await getSettings();
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
   const storage = storageStatus();
+  const aiCheck = single(params.aiCheck);
+  const aiCheckDetail = single(params.aiCheckDetail);
+  const aiCheckModel = single(params.aiCheckModel);
 
   return (
     <main className="page-shell max-w-4xl">
@@ -34,16 +43,40 @@ export default async function SettingsPage() {
         </div>
       </section>
 
+      <section className="panel mb-5 space-y-3">
+        <h2 className="font-semibold">AI status</h2>
+        <div className="rounded-lg bg-forge-panel p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-medium">
+                API key:{" "}
+                <span className={hasAnthropicKey ? "text-forge-green" : "text-forge-red"}>
+                  {hasAnthropicKey ? "present" : "not set"}
+                </span>
+                {" · "}AI enabled:{" "}
+                <span className={settings.aiEnabled ? "text-forge-green" : "text-forge-red"}>
+                  {settings.aiEnabled ? "yes" : "no"}
+                </span>
+              </div>
+              <div className="mt-1 text-forge-muted">
+                Model: <code>{activeModel()}</code>. Both must be green or captured notes stay as plain text.
+              </div>
+            </div>
+            <form action={testAiConnectionAction}>
+              <button className="button-secondary" type="submit">
+                <Stethoscope className="h-4 w-4" aria-hidden="true" />
+                Test AI connection
+              </button>
+            </form>
+          </div>
+        </div>
+        {aiCheck ? <AiCheckResult ok={aiCheck === "ok"} detail={aiCheckDetail} model={aiCheckModel} /> : null}
+      </section>
+
       <form action={saveSettingsAction} className="space-y-5">
         <section className="panel space-y-4">
           <h2 className="font-semibold">General</h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-lg bg-forge-panel p-3">
-              <div className="text-sm font-medium">Anthropic API key</div>
-              <div className={`mt-1 text-sm ${hasAnthropicKey ? "text-forge-green" : "text-forge-muted"}`}>
-                {hasAnthropicKey ? "Present" : "Not present (voice notes use the offline fallback)"}
-              </div>
-            </div>
             <label className="flex items-center gap-2 rounded-lg bg-forge-panel p-3 text-sm font-medium">
               <input type="checkbox" name="aiEnabled" defaultChecked={settings.aiEnabled} />
               AI enabled
@@ -74,6 +107,28 @@ export default async function SettingsPage() {
         <button className="button" type="submit">Save settings</button>
       </form>
     </main>
+  );
+}
+
+function single(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+function AiCheckResult({ ok, detail, model }: { ok: boolean; detail: string; model: string }) {
+  return (
+    <div className={`rounded-lg border-l-4 p-3 text-sm ${ok ? "border-forge-green bg-forge-panel" : "border-forge-red bg-forge-panel"}`}>
+      <div className={`font-medium ${ok ? "text-forge-green" : "text-forge-red"}`}>
+        {ok ? "AI is working" : "AI is not working"}
+        {model ? ` — ${model}` : ""}
+      </div>
+      <div className="mt-1 text-forge-muted">{detail}</div>
+      {!ok ? (
+        <div className="mt-2 text-forge-muted">
+          Until this passes, captured notes are saved as a single plain thought instead of being split into
+          trades, lessons and journal entries.
+        </div>
+      ) : null}
+    </div>
   );
 }
 
