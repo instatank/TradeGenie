@@ -16,6 +16,9 @@ const COLLECTIONS: CollectionName[] = [
   "importBatches",
   "screenshots",
   "weeklyReviews",
+  "assets",
+  "assetNotes",
+  "customOptions",
 ];
 
 export const dynamic = "force-dynamic";

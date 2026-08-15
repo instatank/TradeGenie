@@ -7,6 +7,7 @@ import { getStorage } from "firebase-admin/storage";
 import type {
   Asset,
   AssetNote,
+  CustomOption,
   DailyJournal,
   ImportBatch,
   Lesson,
@@ -36,6 +37,7 @@ export type StoreShape = {
   weeklyReviews: WeeklyReview[];
   assets: Asset[];
   assetNotes: AssetNote[];
+  customOptions: CustomOption[];
 };
 
 const emptyStore: StoreShape = {
@@ -52,6 +54,7 @@ const emptyStore: StoreShape = {
   weeklyReviews: [],
   assets: [],
   assetNotes: [],
+  customOptions: [],
 };
 
 const localStorePath = path.join(process.cwd(), "data", "tradeforge-store.json");

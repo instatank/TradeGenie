@@ -46,6 +46,8 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/metrics.ts`: P&L, R, win rate, expectancy, weekly stats, frequency helpers.
 - `lib/calculator.ts`: pre-trade math for `/calculator` — net-of-fees R, solved break-even price, break-even win rate, fee-aware position sizing. Pure functions, no store access.
 - `lib/tags.ts`: THE tag tokenizer — normalize/extract/derive for free-form `#tags`; every tag path goes through it.
+- `lib/options.ts`: THE custom-option registry — the trader's own labels for the preset pills (mood, market conditions, mistakes, lesson categories, asset timeframes, risk posture, trading mode). One normalizer, one `customOptions` collection, one catalog. Custom mistake tags are `mistakeTags` records instead, because trades link to them by id.
+- `components/OptionField.tsx`: the pill controls with an "or type another…" box (radio / checkbox / select). Server-rendered, zero client JS — a control named `x` posts its typed label in `xCustom`, and typed always beats the tapped chip.
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
 - `lib/transcript-processor.ts`: Anthropic-or-mock transcript structuring (Claude via the official SDK with structured outputs; regex mock fallback when no key).
@@ -92,6 +94,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
   - bin icon: delete
 - Inbox auto-structures a note on save and shows one editable, type-aware review card; confirming writes the record (with spoken numbers) and stays on the inbox. Default view is "To review".
 - Top nav is lean: primary = Today / Capture / Trades / Review; everything else sits under a "More" dropdown.
+- Preset pill rows are extendable, not closed: type a label into the row's box and it is stored with the record and added to that pill vocabulary for next time (`lib/options.ts`). Review/remove them under Settings → "Your own labels". Fields the maths depends on (direction, status, grade, followed-plan, discipline) are deliberately NOT extendable.
 - Lessons and Import use compact default rows with full details/actions hidden behind expandable controls.
 - Trade detail starts with a compact summary and organizes editing fields into collapsible sections.
 - Calendar filtering uses `period=day|week|month` and `date=yyyy-MM-dd`.

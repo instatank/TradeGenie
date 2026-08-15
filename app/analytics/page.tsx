@@ -1,8 +1,9 @@
 import { format } from "date-fns";
 import { BinColumns, DisciplineLines, DivergingColumns, EmptyChart, Meter, MoneyBars } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
-import { conditionLabel, humanize, sessionLabels } from "@/lib/constants";
+import { humanize, sessionLabels } from "@/lib/constants";
 import { getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
+import { getOptionCatalog } from "@/lib/options";
 import {
   analyticsLeaks,
   averageProcessScore,
@@ -26,7 +27,7 @@ import {
 // the one thing hurting me" in plain language. Everything deeper — distributions,
 // tilt, sessions, exit quality, the full tables — sits one tap away.
 export default async function AnalyticsPage() {
-  const [trades, setupNameById] = await Promise.all([getTradesWithMistakes(), getSetupNameMap()]);
+  const [trades, setupNameById, options] = await Promise.all([getTradesWithMistakes(), getSetupNameMap(), getOptionCatalog()]);
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const closedWithPnl = closed
     .filter((trade) => getTradePnl(trade) != null)
@@ -40,7 +41,7 @@ export default async function AnalyticsPage() {
 
   const setups = setupPerformance(trades, setupNameById);
   const sessions = sessionPerformance(trades, sessionLabels);
-  const conditions = conditionPerformance(trades, conditionLabel);
+  const conditions = conditionPerformance(trades, options.labeler("condition"));
   const leaks = analyticsLeaks(trades, setups, conditions);
 
   const histogram = rHistogram(trades);

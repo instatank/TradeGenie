@@ -12,12 +12,14 @@ import {
   updateTranscriptAction,
 } from "@/app/actions";
 import { BoolSelect, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { OptionSelectField } from "@/components/OptionField";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { directions, followedPlanOptions, humanize, mindStateOptions, riskPostures, transcriptTypes } from "@/lib/constants";
+import { directions, followedPlanOptions, humanize, transcriptTypes } from "@/lib/constants";
 import { db, getTagVocabulary, getTranscriptsWithLinks } from "@/lib/data";
+import { getOptionCatalog, optionGroups, type OptionCatalog } from "@/lib/options";
 import { getSettings } from "@/lib/settings-store";
 
 const inboxViews = [
@@ -31,12 +33,13 @@ const inboxViews = [
 // card leads each note — every other action is folded behind "More".
 export default async function InboxPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
-  const [settings, transcripts, trades, journals, tagVocabulary] = await Promise.all([
+  const [settings, transcripts, trades, journals, tagVocabulary, options] = await Promise.all([
     getSettings(),
     getTranscriptsWithLinks(),
     db.list("trades"),
     db.list("dailyJournals"),
     getTagVocabulary(),
+    getOptionCatalog(),
   ]);
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const view = params.view ?? "review";
@@ -143,7 +146,7 @@ export default async function InboxPage({ searchParams }: { searchParams?: Promi
                     ) : null}
                     <form action={confirmTranscriptAction} className="mt-3 space-y-3">
                       <input type="hidden" name="id" value={transcript.id} />
-                      <ReviewFields structured={structured} detectedType={detectedType} />
+                      <ReviewFields structured={structured} detectedType={detectedType} options={options} />
                       {getList(structured, "suggestedMistakeTags") ? (
                         <p className="text-xs text-forge-muted">Mistakes detected: {getList(structured, "suggestedMistakeTags")} (saved with this record).</p>
                       ) : null}
@@ -353,7 +356,15 @@ function confirmButtonLabel(type: string) {
 
 // Editable review card. Only the fields relevant to the detected note type are
 // shown; the confirm action reads back exactly the inputs that were rendered.
-function ReviewFields({ structured, detectedType }: { structured: Record<string, unknown> | null; detectedType: string }) {
+function ReviewFields({
+  structured,
+  detectedType,
+  options,
+}: {
+  structured: Record<string, unknown> | null;
+  detectedType: string;
+  options: OptionCatalog;
+}) {
   const v = (key: string) => getText(structured, key);
   const isTrade = detectedType === "TRADE_ENTRY_NOTE" || detectedType === "TRADE_EXIT_REVIEW";
   const isExit = detectedType === "TRADE_EXIT_REVIEW";
@@ -367,8 +378,23 @@ function ReviewFields({ structured, detectedType }: { structured: Record<string,
           <TextField label="Instrument" name="instrument" defaultValue={v("instrument")} />
           <SelectField label="Direction" name="direction" options={directions} defaultValue={v("direction") ?? "UNKNOWN"} />
           <TextField label="Setup" name="setupName" defaultValue={v("setupName")} />
-          <SelectField label="Mind state" name="emotionalState" options={mindStateOptions} defaultValue={v("emotionalState")} includeBlank />
-          {!isExit ? <SelectField label="Risk posture" name="riskPosture" options={riskPostures} defaultValue={v("riskPosture") ?? "NORMAL"} /> : null}
+          <OptionSelectField
+            label="Mind state"
+            name="emotionalState"
+            choices={options.choices("mindState")}
+            defaultValue={v("emotionalState")}
+            includeBlank
+            placeholder={optionGroups.mindState.placeholder}
+          />
+          {!isExit ? (
+            <OptionSelectField
+              label="Risk posture"
+              name="riskPosture"
+              choices={options.choices("riskPosture")}
+              defaultValue={v("riskPosture") ?? "NORMAL"}
+              placeholder={optionGroups.riskPosture.placeholder}
+            />
+          ) : null}
         </div>
         <TextAreaField label="Thesis" name="entryThesis" rows={2} defaultValue={v("entryThesis")} />
         <TextField label="Invalidation" name="invalidation" defaultValue={v("invalidation")} />
@@ -397,7 +423,14 @@ function ReviewFields({ structured, detectedType }: { structured: Record<string,
       <div className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <SelectField label="Type" name="transcriptType" options={transcriptTypes} defaultValue={detectedType} />
-          <SelectField label="Main emotion" name="mainEmotion" options={mindStateOptions} defaultValue={v("mainEmotion")} includeBlank />
+          <OptionSelectField
+            label="Main emotion"
+            name="mainEmotion"
+            choices={options.choices("mindState")}
+            defaultValue={v("mainEmotion")}
+            includeBlank
+            placeholder={optionGroups.mindState.placeholder}
+          />
           <BoolSelect label="Traded today" name="tradedToday" defaultValue={getBool(structured, "tradedToday")} />
           <BoolSelect label="Followed max loss" name="followedMaxLoss" defaultValue={getBool(structured, "followedMaxLoss")} />
           <BoolSelect label="Followed max trades" name="followedMaxTrades" defaultValue={getBool(structured, "followedMaxTrades")} />

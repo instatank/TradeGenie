@@ -65,6 +65,14 @@ export const primaryMistakeTagNames = new Set([
   "OVERTRADED",
 ]);
 
+// A mistake tag the trader invented is by definition one they care about, so it
+// sits with the primary chips in the review panel rather than under "More
+// mistake tags" — the fold exists to hide the nine built-ins nobody taps, not
+// the label you just wrote. Anything not in the shipped set is one of yours.
+export function isPrimaryMistakeTag(name: string) {
+  return primaryMistakeTagNames.has(name) || !defaultMistakeTagNames.has(name);
+}
+
 // Tradezella-style "Condition" tag bucket: the market context a trade was taken in.
 // Lets you later ask "do I only make money on trend days and lose in chop?".
 export const conditionTagOptions = [
@@ -123,3 +131,5 @@ export const defaultMistakeTags = [
   ["IMPULSIVE_EXIT", "Impulsive exit", "Exited reactively instead of following the plan."],
   ["MISSED_TRADE_MANAGEMENT", "Missed trade management", "Did not actively manage the trade when required."],
 ] as const;
+
+export const defaultMistakeTagNames = new Set<string>(defaultMistakeTags.map(([name]) => name));

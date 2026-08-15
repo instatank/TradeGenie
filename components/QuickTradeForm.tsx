@@ -1,7 +1,8 @@
 import { quickLogTradeAction } from "@/app/actions";
 import { BigChoice, ChipRadioGroup } from "@/components/Chips";
+import { OptionChipRadio } from "@/components/OptionField";
 import { TagPicker } from "@/components/TagPicker";
-import { mindStateLabel, mindStateOptions } from "@/lib/constants";
+import { optionGroups, type OptionChoice } from "@/lib/options";
 
 // The 30-second trade log. Symbol + direction + status is a complete entry;
 // everything else is optional and stays out of the way. Chips are styled radio
@@ -10,11 +11,13 @@ import { mindStateLabel, mindStateOptions } from "@/lib/constants";
 export function QuickTradeForm({
   recentSymbols,
   tagVocabulary = [],
+  mindStateChoices,
   redirectTo,
   submitLabel = "Log it",
 }: {
   recentSymbols: string[];
   tagVocabulary?: string[];
+  mindStateChoices: OptionChoice[];
   redirectTo: string;
   submitLabel?: string;
 }) {
@@ -85,10 +88,11 @@ export function QuickTradeForm({
           <MiniNumber label="P&L" name="realizedPnl" />
         </div>
         <div className="mt-3">
-          <ChipRadioGroup
+          <OptionChipRadio
             label="How do you feel right now?"
             name="emotionalState"
-            options={mindStateOptions.map((state) => ({ value: state, label: mindStateLabel(state) }))}
+            choices={mindStateChoices}
+            placeholder={optionGroups.mindState.placeholder}
           />
         </div>
       </details>

@@ -2,20 +2,15 @@ import Link from "next/link";
 import { format, isSameDay, startOfDay } from "date-fns";
 import { Sunrise, Sunset, Trash2 } from "lucide-react";
 import { deleteDailyJournalAction, saveEveningReviewAction, saveMorningCheckinAction } from "@/app/actions";
-import { ChipRadioGroup, ScaleChips, YesNoChips } from "@/components/Chips";
+import { ScaleChips, YesNoChips } from "@/components/Chips";
 import { PageTitle } from "@/components/Fields";
+import { OptionChipRadio } from "@/components/OptionField";
 import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
-import { humanize, mindStateLabel, mindStateOptions } from "@/lib/constants";
+import { humanize } from "@/lib/constants";
 import { db, getTagVocabulary, getTodayJournal } from "@/lib/data";
+import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { getTradePnl } from "@/lib/metrics";
-
-const modeOptions = [
-  { value: "LIVE", label: "Live" },
-  { value: "PAPER", label: "Paper" },
-  { value: "OBSERVE_ONLY", label: "Just watching" },
-  { value: "NO_TRADING", label: "Day off" },
-];
 
 // Two rituals, two small cards. Morning: mood + guardrails, under a minute.
 // Evening: three taps and two lines, 2–4 minutes. Everything else is optional.
@@ -23,8 +18,8 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
   const params = await searchParams;
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
-  const [journal, allTrades, tagVocabulary] = await Promise.all([
-    getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(),
+  const [journal, allTrades, tagVocabulary, options] = await Promise.all([
+    getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(), getOptionCatalog(),
   ]);
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const dayTrades = allTrades
@@ -53,15 +48,22 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
           <span className="text-xs text-forge-muted">· under a minute</span>
         </div>
 
-        <ChipRadioGroup
+        <OptionChipRadio
           label="How are you arriving today?"
           name="currentState"
-          options={mindStateOptions.map((state) => ({ value: state, label: mindStateLabel(state) }))}
+          choices={options.choices("mindState")}
           defaultValue={journal?.currentState}
-          hint="Tilted, tired or FOMO? That's useful to know before the first trade, not after the last one."
+          placeholder={optionGroups.mindState.placeholder}
+          hint="Tilted, tired or FOMO? That's useful to know before the first trade, not after the last one. Missing a mood? Type it in the box — it's a chip from tomorrow on."
         />
 
-        <ChipRadioGroup label="Today I'm trading" name="tradingMode" options={modeOptions} defaultValue={journal?.tradingMode ?? "PAPER"} />
+        <OptionChipRadio
+          label="Today I'm trading"
+          name="tradingMode"
+          choices={options.choices("tradingMode")}
+          defaultValue={journal?.tradingMode ?? "PAPER"}
+          placeholder={optionGroups.tradingMode.placeholder}
+        />
 
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="field">

@@ -6,19 +6,21 @@ import { PageTitle } from "@/components/Fields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { humanize } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
+import { getOptionCatalog } from "@/lib/options";
 import { calculateTotalR, calculateWinRate, getTradePnl } from "@/lib/metrics";
 
 export default async function CalendarPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
   const calendarParams = params.period || params.date ? params : { ...params, period: "month" };
   const range = getCalendarRange(calendarParams);
-  const [trades, transcripts, journals, rawExecutions, lessons, weeklyReviews] = await Promise.all([
+  const [trades, transcripts, journals, rawExecutions, lessons, weeklyReviews, options] = await Promise.all([
     getTradesWithMistakes(),
     db.list("transcripts"),
     db.list("dailyJournals"),
     db.list("rawExecutions"),
     db.list("lessons"),
     db.list("weeklyReviews"),
+    getOptionCatalog(),
   ]);
 
   const rangeTrades = trades.filter((trade) => isWithinCalendarRange(trade.tradeDateTime, range));
@@ -70,7 +72,7 @@ export default async function CalendarPage({ searchParams }: { searchParams?: Pr
         <div className="mt-4 grid gap-3">
           {dayJournals.map((journal) => (
             <Link key={journal.id} href={`/daily?date=${dayValue}`} className="rounded-md bg-forge-panel p-3 text-sm transition hover:bg-forge-line/40">
-              Daily journal · {humanize(journal.tradingMode)} · Discipline {journal.disciplineScore ?? "NA"}
+              Daily journal · {options.label("tradingMode", journal.tradingMode)} · Discipline {journal.disciplineScore ?? "NA"}
             </Link>
           ))}
           {dayTrades.slice(0, 4).map((trade) => (

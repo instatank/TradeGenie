@@ -5,20 +5,23 @@ import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { deleteAssetAction, deleteAssetNoteAction, saveAssetWorkspaceAction } from "@/app/actions";
 import { AssetNoteComposer } from "@/components/AssetNoteComposer";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { OptionSelectField } from "@/components/OptionField";
 import { SaveBar } from "@/components/SaveBar";
 import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
-import { assetTimeframes, humanize, marketTypes } from "@/lib/constants";
+import { humanize, marketTypes } from "@/lib/constants";
 import { getAssetWorkspace, getTagVocabulary } from "@/lib/data";
+import { getOptionCatalog, optionGroups } from "@/lib/options";
 
 // The whole page is ONE form: current view, new thread note, and edits to notes
 // already in the thread. One Save captures all of it — there is no way to save
 // half of what is on screen and lose the rest.
 export default async function AssetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [asset, tagVocabulary] = await Promise.all([getAssetWorkspace(id), getTagVocabulary()]);
+  const [asset, tagVocabulary, options] = await Promise.all([getAssetWorkspace(id), getTagVocabulary(), getOptionCatalog()]);
   if (!asset) notFound();
   const tagNames = tagVocabulary.map((entry) => entry.tag);
+  const timeframeChoices = options.choices("assetTimeframe");
 
   return (
     <main className="page-shell pb-28">
@@ -92,7 +95,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
           {/* The thread — append-only running thought log, newest first. */}
           <div className="space-y-4">
-            <AssetNoteComposer resetKey={`${asset.notes.length}-${asset.notes[0]?.id ?? "none"}`} tagVocabulary={tagNames} />
+            <AssetNoteComposer
+              resetKey={`${asset.notes.length}-${asset.notes[0]?.id ?? "none"}`}
+              tagVocabulary={tagNames}
+              timeframeChoices={timeframeChoices}
+              timeframePlaceholder={optionGroups.assetTimeframe.placeholder}
+            />
 
             <div className="space-y-3">
               {asset.notes.map((note) => (
@@ -102,7 +110,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                       <span>{format(note.createdAt, "EEE dd MMM yyyy · HH:mm")}</span>
                       {note.timeframe ? (
                         <span className="rounded-md bg-forge-panel px-2 py-0.5 text-xs font-medium text-forge-ink">
-                          {note.timeframe}
+                          {options.label("assetTimeframe", note.timeframe)}
                         </span>
                       ) : null}
                     </div>
@@ -117,12 +125,13 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     <div className="mt-3 space-y-3">
                       <TextAreaField label="Note" name={`noteText-${note.id}`} defaultValue={note.text} rows={5} />
                       <div className="flex flex-wrap items-end justify-between gap-3">
-                        <SelectField
+                        <OptionSelectField
                           label="Timeframe"
                           name={`noteTimeframe-${note.id}`}
-                          options={assetTimeframes}
+                          choices={timeframeChoices}
                           includeBlank
                           defaultValue={note.timeframe}
+                          placeholder={optionGroups.assetTimeframe.placeholder}
                         />
                         {/* Deletes this note, but still saves everything else
                             typed on the page first. */}

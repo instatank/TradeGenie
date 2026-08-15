@@ -1,7 +1,9 @@
-import { Download } from "lucide-react";
-import { saveSettingsAction } from "@/app/actions";
+import { Download, X } from "lucide-react";
+import { removeCustomMistakeTagAction, removeCustomOptionAction, saveSettingsAction } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { marketTypes } from "@/lib/constants";
+import { defaultMistakeTagNames, marketTypes } from "@/lib/constants";
+import { db } from "@/lib/data";
+import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
 import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
 import { storageStatus } from "@/lib/store";
@@ -31,6 +33,8 @@ export default async function SettingsPage() {
           </a>
         </div>
       </section>
+
+      <CustomLabelsPanel />
 
       <form action={saveSettingsAction} className="space-y-5">
         <section className="panel space-y-4">
@@ -96,5 +100,96 @@ function StorageBanner({ storage }: { storage: ReturnType<typeof storageStatus> 
         No Firebase credentials detected. Writes go to <code>data/tradeforge-store.json</code> on this machine&apos;s disk. This is fine for local development; on Vercel this file is ephemeral and entries can disappear on every deploy. Set <code>FIREBASE_PROJECT_ID</code>, <code>FIREBASE_CLIENT_EMAIL</code>, <code>FIREBASE_PRIVATE_KEY</code> (and <code>FIREBASE_STORAGE_BUCKET</code>) to switch to durable storage.
       </div>
     </div>
+  );
+}
+
+// Everything the trader has added to a preset-pill list, in one place to review
+// or retire. Adding happens where the work happens (the "type another" box on
+// each picker); this panel exists only so the vocabulary can be pruned without
+// hunting for the form that created it.
+async function CustomLabelsPanel() {
+  const [options, mistakeTags] = await Promise.all([getOptionCatalog(), db.list("mistakeTags")]);
+  const customMistakes = mistakeTags
+    .filter((tag) => !defaultMistakeTagNames.has(tag.name))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const groups = optionGroupKeys
+    .map((key) => ({ key, title: optionGroups[key].title, entries: options.custom(key) }))
+    .filter((group) => group.entries.length);
+  const total = groups.reduce((sum, group) => sum + group.entries.length, 0) + customMistakes.length;
+
+  return (
+    <section className="panel mb-5 space-y-3">
+      <div>
+        <h2 className="font-semibold">Your own labels</h2>
+        <p className="mt-1 text-sm text-forge-muted">
+          The moods, market conditions, mistakes, categories and timeframes you added yourself. Add a new one from any
+          picker&apos;s &ldquo;type another&rdquo; box — this is just where you retire one you no longer use.
+        </p>
+      </div>
+
+      {total === 0 ? (
+        <p className="rounded-lg bg-forge-panel px-3 py-2 text-sm text-forge-muted">
+          Nothing yet. Type a label into any pill row — a mood on the morning check-in, a mistake in a trade review, a
+          market condition on a trade — and it shows up here.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {customMistakes.length ? (
+            <LabelGroup title="Trade review — mistakes">
+              {customMistakes.map((tag) => (
+                <LabelChip key={tag.id} id={tag.id} label={tag.label} action={removeCustomMistakeTagAction} />
+              ))}
+            </LabelGroup>
+          ) : null}
+          {groups.map((group) => (
+            <LabelGroup key={group.key} title={group.title}>
+              {group.entries.map((entry) => (
+                <LabelChip key={entry.id} id={entry.id} label={entry.label} action={removeCustomOptionAction} />
+              ))}
+            </LabelGroup>
+          ))}
+          <p className="text-xs text-forge-muted">
+            Removing a label only takes it out of the pickers. Entries that already carry it keep it — except a mistake
+            tag, which trades link to by id, so removing one un-tags those trades and says how many.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LabelGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-forge-muted">{title}</div>
+      <div className="flex flex-wrap gap-2">{children}</div>
+    </div>
+  );
+}
+
+function LabelChip({
+  id,
+  label,
+  action,
+}: {
+  id: string;
+  label: string;
+  action: (formData: FormData) => Promise<void>;
+}) {
+  return (
+    <form action={action} className="inline-flex">
+      <input type="hidden" name="id" value={id} />
+      <span className="inline-flex items-center gap-1 rounded-full border border-forge-line bg-white py-1 pl-3 pr-1 text-sm">
+        {label}
+        <button
+          type="submit"
+          className="rounded-full p-1 text-forge-muted transition hover:bg-red-50 hover:text-forge-red"
+          title={`Remove ${label}`}
+          aria-label={`Remove ${label}`}
+        >
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </span>
+    </form>
   );
 }

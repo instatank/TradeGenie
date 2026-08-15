@@ -1,4 +1,5 @@
-import { BigChoice, ChipCheckboxGroup, ChipRadioGroup } from "@/components/Chips";
+import { BigChoice, ChipRadioGroup } from "@/components/Chips";
+import { OptionChipCheckbox } from "@/components/OptionField";
 
 export type ReviewMistakeTag = { id: string; label: string; description?: string | null };
 
@@ -79,11 +80,18 @@ export function TradeReviewFields({
         toneByValue={{ A: "green", B: "gold", C: "red" }}
       />
 
-      <ChipCheckboxGroup
+      {/* The execution-mistake vocabulary is the trader's, not ours: anything
+          typed in the box becomes a real mistake tag on save (and a chip from
+          then on), so a habit we never thought of can still be counted. */}
+      <OptionChipCheckbox
         label="Any of these happen? (tap all that apply)"
         name="mistakeTagId"
-        options={mistakeTags.map((tag) => ({ value: tag.id, label: tag.label, hint: tag.description ?? undefined }))}
+        choices={mistakeTags.map((tag) => ({ value: tag.id, label: tag.label, hint: tag.description ?? undefined }))}
         selected={selectedMistakes}
+        placeholder="add your own, e.g. moved target…"
+        hint={compact
+          ? "Not on the list? Type it — it becomes a chip from next time."
+          : "Not on the list? Type it — commas separate several. It becomes a chip here from next time, and counts in your analytics like any other."}
       />
 
       <label className="field">

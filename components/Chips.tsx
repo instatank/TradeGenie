@@ -8,7 +8,7 @@ export type ChipOption = {
   hint?: string;
 };
 
-const toneChecked: Record<string, string> = {
+export const toneChecked: Record<string, string> = {
   neutral: "peer-checked:border-forge-ink peer-checked:bg-forge-ink peer-checked:text-white",
   green: "peer-checked:border-forge-green peer-checked:bg-forge-green peer-checked:text-white",
   red: "peer-checked:border-forge-red peer-checked:bg-forge-red peer-checked:text-white",
@@ -16,7 +16,7 @@ const toneChecked: Record<string, string> = {
   gold: "peer-checked:border-forge-gold peer-checked:bg-forge-gold peer-checked:text-white",
 };
 
-const chipBase =
+export const chipBase =
   "cursor-pointer select-none rounded-full border border-forge-line bg-white px-3 py-1.5 text-sm text-forge-ink transition hover:border-forge-muted";
 
 export function ChipRadioGroup({

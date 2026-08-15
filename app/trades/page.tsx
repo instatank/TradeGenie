@@ -7,8 +7,9 @@ import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginat
 import { TagPills } from "@/components/TagPills";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, marketTypes, primaryMistakeTagNames, tradeStatuses } from "@/lib/constants";
+import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, isPrimaryMistakeTag, marketTypes, tradeStatuses } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
+import { getOptionCatalog } from "@/lib/options";
 import { calculateTotalR, calculateWinRate, getTradePnl, tradeNeedsReview } from "@/lib/metrics";
 
 const tradeViews = [
@@ -22,7 +23,12 @@ const tradeViews = [
 // day with the day's P&L, one clean row per trade, tap anywhere to open it.
 export default async function TradesPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
-  const [mistakeTags, allTrades] = await Promise.all([db.list("mistakeTags"), getTradesWithMistakes()]);
+  const [mistakeTags, allTrades, options] = await Promise.all([
+    db.list("mistakeTags"), getTradesWithMistakes(), getOptionCatalog(),
+  ]);
+  // Filtering has to reach every mind state ever stored, so the filter list is
+  // the old full enum plus whatever the trader has added since.
+  const mindStateFilters = [...new Set([...emotionalStates, ...options.choices("mindState").map((choice) => choice.value)])];
   const from = params.from ? new Date(params.from) : null;
   const to = params.to ? new Date(`${params.to}T23:59:59`) : null;
   const view = params.view ?? "all";
@@ -40,7 +46,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
     .filter((trade) => !pickEnum(tradeStatuses, params.status) || trade.status === params.status)
     .filter((trade) => !pickEnum(entryGrades, params.entryGrade) || trade.entryGrade === params.entryGrade)
     .filter((trade) => !pickEnum(followedPlanOptions, params.followedPlan) || trade.followedPlan === params.followedPlan)
-    .filter((trade) => !pickEnum(emotionalStates, params.emotionalState) || trade.emotionalState === params.emotionalState)
+    .filter((trade) => !pickEnum(mindStateFilters, params.emotionalState) || trade.emotionalState === params.emotionalState)
     .filter((trade) => !from || trade.tradeDateTime >= from)
     .filter((trade) => !to || trade.tradeDateTime <= to)
     .filter((trade) => !params.mistakeTagId || trade.mistakeTags.some((link) => link.mistakeTagId === params.mistakeTagId))
@@ -56,7 +62,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
   // The nine chips shown in the inline review, so a trade can be reviewed
   // without ever leaving the list.
   const primaryTags = mistakeTags
-    .filter((tag) => primaryMistakeTagNames.has(tag.name))
+    .filter((tag) => isPrimaryMistakeTag(tag.name))
     .map((tag) => ({ id: tag.id, label: tag.label, description: tag.description }));
   const openRowId = params.open ?? null;
 
@@ -95,7 +101,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
             <SelectField label="Status" name="status" options={tradeStatuses} includeBlank defaultValue={params.status} />
             <SelectField label="Grade" name="entryGrade" options={entryGrades} includeBlank defaultValue={params.entryGrade} />
             <SelectField label="Followed plan" name="followedPlan" options={followedPlanOptions} includeBlank defaultValue={params.followedPlan} />
-            <SelectField label="Mind state" name="emotionalState" options={emotionalStates} includeBlank defaultValue={params.emotionalState} />
+            <SelectField label="Mind state" name="emotionalState" options={mindStateFilters} includeBlank defaultValue={params.emotionalState} />
             <label className="field">
               <span className="label">Mistake tag</span>
               <select name="mistakeTagId" defaultValue={params.mistakeTagId ?? ""} className="input">
@@ -160,6 +166,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
                   key={trade.id}
                   trade={trade}
                   primaryTags={primaryTags}
+                  mindStateLabel={options.label("mindState", trade.emotionalState)}
                   open={openRowId === trade.id}
                   backTo={rowUrl(params, trade.id)}
                 />
@@ -188,11 +195,13 @@ type ReviewTag = { id: string; label: string; description: string | null };
 function TradeRow({
   trade,
   primaryTags,
+  mindStateLabel,
   open,
   backTo,
 }: {
   trade: TradeRowData;
   primaryTags: ReviewTag[];
+  mindStateLabel: string;
   open: boolean;
   backTo: string;
 }) {
@@ -247,7 +256,7 @@ function TradeRow({
           <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
         </Link>
       </summary>
-      <TradePreview trade={trade} pnl={pnl} needsReview={needsReview} primaryTags={primaryTags} backTo={backTo} />
+      <TradePreview trade={trade} pnl={pnl} needsReview={needsReview} primaryTags={primaryTags} mindStateLabel={mindStateLabel} backTo={backTo} />
     </details>
   );
 }
@@ -260,12 +269,14 @@ function TradePreview({
   pnl,
   needsReview,
   primaryTags,
+  mindStateLabel,
   backTo,
 }: {
   trade: TradeRowData;
   pnl: number | null;
   needsReview: boolean;
   primaryTags: ReviewTag[];
+  mindStateLabel: string;
   backTo: string;
 }) {
   const notes = [
@@ -313,7 +324,7 @@ function TradePreview({
           {!notes.length ? <p className="text-sm text-forge-muted">No notes on this trade yet — open it to add the story.</p> : null}
           <div className="flex flex-wrap gap-1.5 pt-1">
             {trade.setupName ? <InfoChip label={`Setup: ${trade.setupName}`} /> : null}
-            {trade.emotionalState && trade.emotionalState !== "UNKNOWN" ? <InfoChip label={`Mind: ${humanize(trade.emotionalState)}`} /> : null}
+            {trade.emotionalState && trade.emotionalState !== "UNKNOWN" ? <InfoChip label={`Mind: ${mindStateLabel}`} /> : null}
             {trade.mistakeTags.map((link) => (
               <span key={link.id} className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red">{link.mistakeTag.label}</span>
             ))}

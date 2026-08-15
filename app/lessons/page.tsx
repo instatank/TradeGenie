@@ -4,12 +4,14 @@ import { Pencil, Pin, Trash2 } from "lucide-react";
 import { addManualLessonAction, deleteLessonAction, toggleLessonActiveAction, toggleLessonPinAction, updateLessonAction } from "@/app/actions";
 import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle, SelectField, TextAreaField } from "@/components/Fields";
+import { OptionSelectField } from "@/components/OptionField";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { coreLessonCategories, humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
+import { humanize, lessonCategories, lessonSourceTypes } from "@/lib/constants";
 import { db, getTagVocabulary } from "@/lib/data";
+import { getOptionCatalog, optionGroups } from "@/lib/options";
 import type { Lesson } from "@/lib/types";
 
 const lessonViews = [
@@ -28,14 +30,18 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
   const page = normalizePage(params.page);
   const pageSize = normalizePageSize(params.pageSize, [10, 25, 50], 10);
   const calendarRange = getCalendarRange(params);
-  const [allLessons, trades, transcripts, tagVocabulary] = await Promise.all([
-    db.list("lessons"), db.list("trades"), db.list("transcripts"), getTagVocabulary(),
+  const [allLessons, trades, transcripts, tagVocabulary, options] = await Promise.all([
+    db.list("lessons"), db.list("trades"), db.list("transcripts"), getTagVocabulary(), getOptionCatalog(),
   ]);
+  const categoryChoices = options.choices("lessonCategory");
+  // Filtering has to reach every category ever stored — including the three old
+  // ones we stopped offering — so it lists more than the picker does.
+  const filterCategories = [...new Set([...lessonCategories, ...categoryChoices.map((choice) => choice.value)])];
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const lessons = allLessons
     .filter((lesson) => applyLessonView(lesson, view))
     .filter((lesson) => isWithinCalendarRange(lesson.createdAt, calendarRange))
-    .filter((lesson) => !pickEnum(lessonCategories, params.category) || lesson.category === params.category)
+    .filter((lesson) => !pickEnum(filterCategories, params.category) || lesson.category === params.category)
     .filter((lesson) => !pickEnum(lessonSourceTypes, params.sourceType) || lesson.sourceType === params.sourceType)
     .sort((a, b) => compareLessons(a, b, sort))
     .map((lesson) => ({
@@ -55,7 +61,13 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
           <form action={addManualLessonAction} className="panel space-y-4">
             <h2 className="font-semibold">Add manual lesson</h2>
             <TextAreaField label="Lesson" name="lessonText" required rows={4} />
-            <SelectField label="Category" name="category" options={coreLessonCategories} defaultValue="PROCESS" />
+            <OptionSelectField
+              label="Category"
+              name="category"
+              choices={categoryChoices}
+              defaultValue="PROCESS"
+              placeholder={optionGroups.lessonCategory.placeholder}
+            />
             <TagPicker vocabulary={tagNames} />
             <button className="button" type="submit">Add lesson</button>
           </form>
@@ -67,7 +79,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
             </summary>
             <form className="mt-4 space-y-3">
               <input type="hidden" name="view" value={view} />
-              <SelectField label="Category" name="category" options={coreLessonCategories} includeBlank defaultValue={params.category} />
+              <SelectField label="Category" name="category" options={filterCategories} includeBlank defaultValue={params.category} />
               <SelectField label="Source type" name="sourceType" options={lessonSourceTypes} includeBlank defaultValue={params.sourceType} />
               <label className="field">
                 <span className="label">Sort</span>
@@ -101,7 +113,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                 <div className="min-w-0">
                   <p className="truncate font-medium">{lesson.lessonText}</p>
                   <p className="mt-1 text-sm text-forge-muted">
-                    {humanize(lesson.category)} · {humanize(lesson.sourceType)}
+                    {options.label("lessonCategory", lesson.category)} · {humanize(lesson.sourceType)}
                   </p>
                 </div>
                 <div className="text-sm text-forge-muted sm:text-right">
@@ -113,7 +125,7 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                 <div>
                   <p className="text-base font-medium">{lesson.lessonText}</p>
                   <p className="mt-2 text-sm text-forge-muted">
-                    {humanize(lesson.category)} · {humanize(lesson.sourceType)} · {format(lesson.createdAt, "dd MMM yyyy")}
+                    {options.label("lessonCategory", lesson.category)} · {humanize(lesson.sourceType)} · {format(lesson.createdAt, "dd MMM yyyy")}
                   </p>
                   <TagPills tags={lesson.tags} className="mt-2" />
                   <div className="mt-2 flex flex-wrap gap-2 text-sm">
@@ -151,7 +163,13 @@ export default async function LessonsPage({ searchParams }: { searchParams?: Pro
                   <input type="hidden" name="id" value={lesson.id} />
                   <TextAreaField label="Lesson" name="lessonText" defaultValue={lesson.lessonText} rows={3} />
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <SelectField label="Category" name="category" options={lessonCategories} defaultValue={lesson.category} />
+                    <OptionSelectField
+                      label="Category"
+                      name="category"
+                      choices={categoryChoices}
+                      defaultValue={lesson.category}
+                      placeholder={optionGroups.lessonCategory.placeholder}
+                    />
                     <TagPicker selected={lesson.tags ?? []} vocabulary={tagNames} />
                   </div>
                   <button className="button-secondary" type="submit">Save</button>

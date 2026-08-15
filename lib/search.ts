@@ -1,6 +1,7 @@
 import { format } from "date-fns";
-import { conditionLabel, humanize } from "@/lib/constants";
+import { humanize } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
+import { getOptionCatalog } from "@/lib/options";
 import { normalizeTag } from "@/lib/tags";
 
 // One unified search index over every collection. Each record becomes a flat
@@ -65,7 +66,7 @@ export const searchKindOrder: SearchKind[] = [
 ];
 
 export async function buildSearchIndex(): Promise<SearchDoc[]> {
-  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, weeklyReviews, executions] =
+  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, weeklyReviews, executions, options] =
     await Promise.all([
       getTradesWithMistakes(),
       db.list("transcripts"),
@@ -76,6 +77,7 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
       db.list("setups"),
       db.list("weeklyReviews"),
       db.list("rawExecutions"),
+      getOptionCatalog(),
     ]);
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
 
@@ -101,8 +103,8 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
         ["Lesson", trade.lesson],
         ["Notes", trade.notes],
         ["Mistakes", trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")],
-        ["Conditions", (trade.conditions ?? []).map(conditionLabel).join(", ")],
-        ["Mind state", trade.emotionalState ? humanize(trade.emotionalState) : null],
+        ["Conditions", (trade.conditions ?? []).map(options.labeler("condition")).join(", ")],
+        ["Mind state", options.label("mindState", trade.emotionalState)],
       ]),
     });
   }
@@ -130,7 +132,7 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
       id: lesson.id,
       href: `/lessons?view=all#lesson-${lesson.id}`,
       title: lesson.lessonText.length > 90 ? `${lesson.lessonText.slice(0, 90)}…` : lesson.lessonText,
-      subtitle: `${humanize(lesson.category)} · ${humanize(lesson.sourceType)}${lesson.isActive ? "" : " · Inactive"}`,
+      subtitle: `${options.label("lessonCategory", lesson.category)} · ${humanize(lesson.sourceType)}${lesson.isActive ? "" : " · Inactive"}`,
       date: lesson.createdAt,
       tags: lesson.tags ?? [],
       fields: fields([["Lesson", lesson.lessonText]]),
@@ -163,7 +165,7 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
       id: note.id,
       href: `/assets/${note.assetId}#note-${note.id}`,
       title: `${asset?.symbol ?? "Asset"} thread note`,
-      subtitle: note.timeframe ?? "",
+      subtitle: note.timeframe ? options.label("assetTimeframe", note.timeframe) : "",
       date: note.createdAt,
       tags: note.tags ?? [],
       fields: fields([["Note", note.text]]),
@@ -176,7 +178,7 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
       id: journal.id,
       href: `/daily?date=${format(journal.date, "yyyy-MM-dd")}`,
       title: `Daily journal · ${format(journal.date, "dd MMM yyyy")}`,
-      subtitle: humanize(journal.tradingMode),
+      subtitle: options.label("tradingMode", journal.tradingMode),
       date: journal.date,
       tags: journal.tags ?? [],
       fields: fields([

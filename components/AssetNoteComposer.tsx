@@ -4,13 +4,25 @@ import { useRef, useState, useTransition } from "react";
 import { Sparkles, Undo2 } from "lucide-react";
 import { structureAssetNoteDraftAction } from "@/app/actions";
 import { TagPicker } from "@/components/TagPicker";
-import { assetTimeframes, humanize } from "@/lib/constants";
+import type { OptionChoice } from "@/lib/options";
 
 // The thread composer. It is NOT its own form any more — it lives inside the
 // asset page's single form, so whatever is typed here is captured by the same
 // Save that stores the current view and any note edits. A half-written note can
 // no longer be lost by pressing the "other" button.
-export function AssetNoteComposer({ resetKey, tagVocabulary = [] }: { resetKey: string | number; tagVocabulary?: string[] }) {
+export function AssetNoteComposer({
+  resetKey,
+  tagVocabulary = [],
+  timeframeChoices,
+  timeframePlaceholder,
+}: {
+  resetKey: string | number;
+  tagVocabulary?: string[];
+  // Passed in rather than imported: lib/options reaches the Firestore adapter,
+  // so this client component may only take the option *type* from it.
+  timeframeChoices: OptionChoice[];
+  timeframePlaceholder: string;
+}) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [pending, startTransition] = useTransition();
   const [original, setOriginal] = useState<string | null>(null);
@@ -77,17 +89,27 @@ export function AssetNoteComposer({ resetKey, tagVocabulary = [] }: { resetKey: 
       {error ? <p className="text-sm text-forge-red">{error}</p> : null}
 
       <div className="grid gap-3 sm:grid-cols-[200px_1fr] sm:items-end">
-        <label className="field">
+        <div className="field">
           <span className="label">Timeframe (optional)</span>
-          <select name="noteTimeframe" defaultValue="" className="input">
-            <option value="">None</option>
-            {assetTimeframes.map((option) => (
-              <option key={option} value={option}>
-                {humanize(option)}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <select name="noteTimeframe" defaultValue="" className="input min-w-28 flex-1">
+              <option value="">None</option>
+              {timeframeChoices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            {/* Your own timeframes (4H, Daily, weekly-close…) — typed once, a
+                dropdown entry from then on. */}
+            <input
+              name="noteTimeframeCustom"
+              placeholder={timeframePlaceholder}
+              aria-label="Add your own timeframe"
+              className="input w-36 border-dashed border-forge-blue/50 text-sm placeholder:text-forge-blue/70 focus:border-forge-blue"
+            />
+          </div>
+        </div>
         <button
           type="button"
           onClick={handleStructure}

@@ -334,6 +334,48 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - Deliberately NOT done: saving scenarios, prefilling from an existing trade, and writing a
     planned-R back onto a trade. All three turn a scratchpad into a record with a migration.
 
+- **Custom pill labels — the preset vocabularies are the trader's too**
+  (`lib/options.ts` + `components/OptionField.tsx`). Every preset-pill row that
+  used to be a closed list now carries an **"or type another…" box**, the same
+  shape as the symbol row on the quick trade log. Typing a label saves it with the
+  record *and* keeps it: it's a chip/dropdown entry from then on. Zero client JS —
+  the typed value rides along in the same form, exactly like a `#hashtag` typed
+  into a thesis becomes a tag. (`TagPicker` and the calculator remain the only
+  client-JS form controls.)
+  - **`lib/options.ts` is THE registry**: one normalizer (`normalizeOptionValue`,
+    "Cut winner early!" → `CUT_WINNER_EARLY`), one storage collection
+    (`customOptions`), one catalog (`getOptionCatalog()` → `choices` / `label` /
+    `labeler` / `allows` / `resolve` / `resolveMany`). Same reasoning as the one
+    tag tokenizer: normalizing in one place is what stops "Chased breakout",
+    "chased breakout" and "Chased  Breakout" becoming three pills. The typed
+    **label is stored verbatim** and shown; `humanize()` is only the fallback.
+  - **Groups**: mind state / mood, market conditions, lesson categories, asset-note
+    timeframes, risk posture, trading mode — plus **mistake tags**, which are the
+    one exception: they stay `mistakeTags` records (a trade links to one by id),
+    registered by `registerCustomMistakeTags()`. A mistake you invent is *primary*
+    by definition (`isPrimaryMistakeTag`), so it sits with the review chips rather
+    than under "More mistake tags".
+  - **Deliberately NOT extendable**: direction, trade status, A/B/C grade,
+    followed-plan, discipline 1–10, note type, market type. Those aren't
+    preferences — P&L, R, win rate and the review nudges key off them, so a custom
+    value there would quietly break the maths rather than personalize anything.
+  - **Rules that hold everywhere**: typed always beats the tapped chip (the
+    `instrument`/`instrumentChip` rule); a control named `x` posts its typed label
+    in `xCustom`; re-typing an existing label in any casing selects it instead of
+    duplicating it; junk (`" !! "`) registers nothing. `saveTradeAction`'s
+    field-presence rule counts `x` **or** `xCustom` as "was on screen".
+  - **The vocabulary only grows from the trader's own typing** — never from AI
+    output. The inbox review card resolves mind state / risk posture from the form
+    box; an out-of-vocabulary value in an AI draft still falls back to `UNKNOWN`.
+    (Same line we drew for tags: no AI-proposed vocabulary.)
+  - **/settings → "Your own labels"** lists everything added, with a remove ✕.
+    Removing takes a label out of the pickers only; records already carrying the
+    value keep it and fall back to the humanized form. The exception is a mistake
+    tag, which trades link to by id — removing one un-tags those trades and says
+    how many, rather than leaving a dangling link the analytics silently drop.
+  - Fixed along the way: `/api/export` was missing `assets`, `assetNotes` (and now
+    `customOptions`) — the "one JSON backup" wasn't backing up the asset tracker.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

@@ -3,22 +3,15 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { ArrowLeft, ClipboardCheck, Trash2 } from "lucide-react";
 import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction, saveTradeAction } from "@/app/actions";
-import { CheckboxGroup, PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
+import { OptionChipCheckbox, OptionSelectField } from "@/components/OptionField";
 import { SaveBar } from "@/components/SaveBar";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
-import {
-  conditionTagOptions,
-  directions,
-  humanize,
-  lessonCategories,
-  marketTypes,
-  mindStateOptions,
-  primaryMistakeTagNames,
-  riskPostures,
-} from "@/lib/constants";
+import { directions, humanize, isPrimaryMistakeTag, marketTypes } from "@/lib/constants";
 import { db, getActiveSetups, getTagVocabulary, getTradeDetail } from "@/lib/data";
+import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metrics";
 import type { MarketContext } from "@/lib/market-context";
 
@@ -27,12 +20,13 @@ import type { MarketContext } from "@/lib/market-context";
 // press of Save captures whatever you touched, wherever you touched it.
 export default async function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [trade, mistakeTags, unlinkedExecutions, setups, tagVocabulary] = await Promise.all([
+  const [trade, mistakeTags, unlinkedExecutions, setups, tagVocabulary, options] = await Promise.all([
     getTradeDetail(id),
     db.list("mistakeTags"),
     db.list("rawExecutions"),
     getActiveSetups(),
     getTagVocabulary(),
+    getOptionCatalog(),
   ]);
   if (!trade) throw new Error("Trade not found");
   const sortedMistakeTags = mistakeTags.sort((a, b) => a.label.localeCompare(b.label));
@@ -43,8 +37,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
     .sort((a, b) => b.executionDateTime.getTime() - a.executionDateTime.getTime())
     .slice(0, 25);
   const selectedMistakes = trade.mistakeTags.map((link) => link.mistakeTagId);
-  const primaryTags = sortedMistakeTags.filter((tag) => primaryMistakeTagNames.has(tag.name));
-  const otherTags = sortedMistakeTags.filter((tag) => !primaryMistakeTagNames.has(tag.name));
+  const primaryTags = sortedMistakeTags.filter((tag) => isPrimaryMistakeTag(tag.name));
+  const otherTags = sortedMistakeTags.filter((tag) => !isPrimaryMistakeTag(tag.name));
   const needsReview = tradeNeedsReview(trade);
 
   return (
@@ -137,12 +131,32 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           <div className="grid gap-4 sm:grid-cols-2">
             <TextAreaField label="Invalidation" name="invalidation" defaultValue={trade.invalidation} rows={3} />
             <TextAreaField label="Concern" name="concern" defaultValue={trade.concern} rows={3} />
-            <SelectField label="Mind state" name="emotionalState" options={mindStateOptions} includeBlank defaultValue={trade.emotionalState} />
-            <SelectField label="Risk posture" name="riskPosture" options={riskPostures} includeBlank defaultValue={trade.riskPosture} />
+            <OptionSelectField
+              label="Mind state"
+              name="emotionalState"
+              choices={options.choices("mindState")}
+              includeBlank
+              defaultValue={trade.emotionalState}
+              placeholder={optionGroups.mindState.placeholder}
+            />
+            <OptionSelectField
+              label="Risk posture"
+              name="riskPosture"
+              choices={options.choices("riskPosture")}
+              includeBlank
+              defaultValue={trade.riskPosture}
+              placeholder={optionGroups.riskPosture.placeholder}
+            />
             <TextField label="Confidence score" name="confidenceScore" type="number" defaultValue={trade.confidenceScore} />
           </div>
           <input type="hidden" name="hasConditions" value="1" />
-          <CheckboxGroup label="Market conditions" name="conditions" options={conditionTagOptions} selected={trade.conditions ?? []} />
+          <OptionChipCheckbox
+            label="Market conditions"
+            name="conditions"
+            choices={options.choices("condition")}
+            selected={trade.conditions ?? []}
+            placeholder={optionGroups.condition.placeholder}
+          />
           <TextAreaField label="Free-form notes" name="notes" defaultValue={trade.notes} rows={3} />
         </details>
 
@@ -184,7 +198,7 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
         {otherTags.length ? (
           <details className="panel space-y-4">
             <summary className="cursor-pointer font-semibold">More mistake tags</summary>
-            <p className="text-xs text-forge-muted">The nine you tag most are chips in the review panel above; the rest live here.</p>
+            <p className="text-xs text-forge-muted">The nine you tag most — plus every one you added yourself — are chips in the review panel above; the rest live here.</p>
             <input type="hidden" name="shownMistakeTagIds" value={otherTags.map((tag) => tag.id).join(",")} />
             <MistakeTagGrid tags={otherTags} selected={new Set(selectedMistakes)} />
           </details>
@@ -214,7 +228,13 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <form action={createLessonFromTradeAction} className="mt-3 space-y-3">
               <input type="hidden" name="tradeId" value={trade.id} />
               <TextAreaField label="Lesson" name="lessonText" rows={3} />
-              <SelectField label="Category" name="category" options={lessonCategories} defaultValue="PROCESS" />
+              <OptionSelectField
+                label="Category"
+                name="category"
+                choices={options.choices("lessonCategory")}
+                defaultValue="PROCESS"
+                placeholder={optionGroups.lessonCategory.placeholder}
+              />
               <button className="button-secondary" type="submit">Add lesson</button>
             </form>
           </details>

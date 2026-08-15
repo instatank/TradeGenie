@@ -4,8 +4,9 @@ import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic,
 import { DisciplineLines, DivergingColumns, EquityCurve, HBarList, MoneyBars } from "@/components/Charts";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
-import { conditionLabel, humanize } from "@/lib/constants";
+import { humanize } from "@/lib/constants";
 import { db, getResurfacedLessons, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
+import { getOptionCatalog } from "@/lib/options";
 import {
   analyticsLeaks,
   calculateRuleAdherenceRate,
@@ -25,7 +26,7 @@ import {
 export default async function TodayPage() {
   const now = new Date();
   const today = startOfDay(now);
-  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary] = await Promise.all([
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
     db.list("transcripts"),
@@ -34,6 +35,7 @@ export default async function TodayPage() {
     getSetupNameMap(),
     getTodayJournal(now),
     getTagVocabulary(),
+    getOptionCatalog(),
   ]);
 
   // Streak counts showing up in any form — never profitability.
@@ -126,7 +128,7 @@ export default async function TodayPage() {
   let mistakeCosts = mistakeCostLedger(trades.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo)).slice(0, 5);
   if (!mistakeCosts.length) mistakeCosts = mistakeCostLedger(trades).slice(0, 5);
 
-  const insight = analyticsLeaks(trades, setupPerformance(trades, setupNames), conditionPerformance(trades, conditionLabel))[0];
+  const insight = analyticsLeaks(trades, setupPerformance(trades, setupNames), conditionPerformance(trades, options.labeler("condition")))[0];
   const tip = tipOfTheDay(now);
   const recentSymbols = [...new Set(trades
     .slice()
@@ -155,7 +157,7 @@ export default async function TodayPage() {
           done={morning}
           icon={<Sunrise className="h-4 w-4" aria-hidden="true" />}
           title="Morning check-in"
-          detail={morning ? summarizeMorning(todayJournal?.currentState, todayJournal?.maxTradesForDay, todayJournal?.maxLossForDay) : "Mood + guardrails. Under a minute."}
+          detail={morning ? summarizeMorning(options.label("mindState", todayJournal?.currentState), todayJournal?.maxTradesForDay, todayJournal?.maxLossForDay) : "Mood + guardrails. Under a minute."}
           href="/daily"
           cta={morning ? "Edit" : "Check in"}
         />
@@ -189,7 +191,12 @@ export default async function TodayPage() {
               <h2 className="font-semibold">Log a trade</h2>
               <span className="text-xs text-forge-muted">~30 seconds · symbol + direction is enough</span>
             </div>
-            <QuickTradeForm recentSymbols={recentSymbols} tagVocabulary={tagVocabulary.map((entry) => entry.tag)} redirectTo="/" />
+            <QuickTradeForm
+              recentSymbols={recentSymbols}
+              tagVocabulary={tagVocabulary.map((entry) => entry.tag)}
+              mindStateChoices={options.choices("mindState")}
+              redirectTo="/"
+            />
           </div>
 
           <div className="panel">
@@ -395,9 +402,9 @@ function Stat({ label, value, sub, tone }: { label: string; value: string; sub?:
   );
 }
 
-function summarizeMorning(state?: string | null, maxTrades?: number | null, maxLoss?: string | null) {
+function summarizeMorning(stateLabel: string, maxTrades?: number | null, maxLoss?: string | null) {
   const parts = [
-    state ? `Feeling ${humanize(state).toLowerCase()}` : null,
+    stateLabel === "None" ? null : `Feeling ${stateLabel.toLowerCase()}`,
     maxTrades != null ? `max ${maxTrades} trades` : null,
     maxLoss ? `max loss ${maxLoss}` : null,
   ].filter(Boolean);

@@ -53,6 +53,28 @@ export type AssetTimeframe = ValueOf<typeof AssetTimeframe>;
 
 type ValueOf<T> = T[keyof T];
 
+// A field whose pill vocabulary the trader can extend from any picker that
+// shows it (see lib/options.ts). The built-in values still autocomplete and
+// still compare as literals; a custom value is just another string. Used
+// instead of the bare enum on every field that has an "or type another…" box.
+export type Extendable<T extends string> = T | (string & {});
+
+// One label the trader invented for a preset-pill field — the same idea as a
+// custom tag, but for the closed-vocabulary chips (mind state, market
+// conditions, lesson categories, …). `value` is the stored, normalized form;
+// `label` is exactly what was typed, so pills read the way they were written.
+// Custom mistake tags are NOT stored here: they are real `mistakeTags` records,
+// because trades link to a mistake tag by id.
+export type CustomOption = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  group: string;
+  value: string;
+  label: string;
+  description: string | null;
+};
+
 // Free-form tags (lowercase, normalized by lib/tags.ts) live directly on each
 // record as `tags?: string[]` — derived at save time from inline #hashtags in
 // the record's text plus the optional Tags input. Optional so old records need
@@ -79,11 +101,11 @@ export type DailyJournal = {
   date: Date;
   createdAt: Date;
   updatedAt: Date;
-  tradingMode: TradingMode;
+  tradingMode: Extendable<TradingMode>;
   marketsWatched: string | null;
   maxLossForDay: string | null;
   maxTradesForDay: number | null;
-  currentState: CurrentState | null;
+  currentState: Extendable<CurrentState> | null;
   learningFocus: string | null;
   reasonNotToTrade: string | null;
   tradedToday: boolean | null;
@@ -116,8 +138,8 @@ export type Trade = {
   concern: string | null;
   premortem?: string | null;
   conditions?: string[];
-  emotionalState: EmotionalState | null;
-  riskPosture: RiskPosture | null;
+  emotionalState: Extendable<EmotionalState> | null;
+  riskPosture: Extendable<RiskPosture> | null;
   confidenceScore: number | null;
   entryGrade: EntryGrade;
   exitReason: string | null;
@@ -171,7 +193,7 @@ export type Lesson = {
   updatedAt: Date;
   lessonText: string;
   sourceType: LessonSourceType;
-  category: LessonCategory;
+  category: Extendable<LessonCategory>;
   linkedTradeId: string | null;
   linkedTranscriptId: string | null;
   isActive: boolean;
@@ -202,7 +224,7 @@ export type AssetNote = {
   createdAt: Date;
   updatedAt: Date;
   assetId: string;
-  timeframe: AssetTimeframe | null;
+  timeframe: Extendable<AssetTimeframe> | null;
   text: string;
   tags?: string[];
 };

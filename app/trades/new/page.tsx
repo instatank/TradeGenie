@@ -3,11 +3,14 @@ import { Lightbulb, Mic } from "lucide-react";
 import { PageTitle } from "@/components/Fields";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { db, getResurfacedLessons, getTagVocabulary } from "@/lib/data";
+import { getOptionCatalog } from "@/lib/options";
 
 // One clean card. Symbol + direction is a complete log; the trade's own page
 // holds every detail (prices, screenshots, playbook, conditions) after saving.
 export default async function NewTradePage() {
-  const [trades, lessons, tagVocabulary] = await Promise.all([db.list("trades"), getResurfacedLessons(1), getTagVocabulary()]);
+  const [trades, lessons, tagVocabulary, options] = await Promise.all([
+    db.list("trades"), getResurfacedLessons(1), getTagVocabulary(), getOptionCatalog(),
+  ]);
   const recentSymbols = [...new Set(trades
     .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
     .map((trade) => trade.instrument))].slice(0, 5);
@@ -24,7 +27,13 @@ export default async function NewTradePage() {
       ) : null}
 
       <div className="panel">
-        <QuickTradeForm recentSymbols={recentSymbols} tagVocabulary={tagVocabulary.map((entry) => entry.tag)} redirectTo="/trades" submitLabel="Log trade" />
+        <QuickTradeForm
+          recentSymbols={recentSymbols}
+          tagVocabulary={tagVocabulary.map((entry) => entry.tag)}
+          mindStateChoices={options.choices("mindState")}
+          redirectTo="/trades"
+          submitLabel="Log trade"
+        />
       </div>
 
       <Link href="/inbox" className="mt-4 flex items-start gap-2 rounded-lg border border-dashed border-forge-line bg-white p-3 text-sm text-forge-muted transition hover:border-forge-blue">

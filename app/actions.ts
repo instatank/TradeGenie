@@ -4,8 +4,16 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { endOfDay, format, startOfDay } from "date-fns";
-import { conditionTagValues } from "@/lib/constants";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
+import { defaultMistakeTagNames } from "@/lib/constants";
+import {
+  getOptionCatalog,
+  registerCustomMistakeTags,
+  removeCustomOption,
+  splitCustomLabels,
+  type OptionCatalog,
+  type OptionGroupKey,
+} from "@/lib/options";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { structureAssetNote } from "@/lib/asset-note-structurer";
@@ -17,8 +25,6 @@ import { deriveTags, mergeTags } from "@/lib/tags";
 import { structureTranscript } from "@/lib/transcript-processor";
 import {
   AiConfidence,
-  AssetTimeframe,
-  CurrentState,
   Direction,
   EmotionalState,
   EntryGrade,
@@ -68,6 +74,14 @@ function enumValue<T extends Record<string, string>>(enumObject: T, value: FormD
 function optionalEnum<T extends Record<string, string>>(enumObject: T, value: FormDataEntryValue | null) {
   const text = typeof value === "string" ? value : "";
   return Object.values(enumObject).includes(text as T[keyof T]) ? (text as T[keyof T]) : null;
+}
+
+// Same job as optionalEnum, but for a field whose vocabulary the trader can
+// extend: a value counts if it is a built-in OR one of their own labels.
+// Anything else (a stale param, an AI answer outside the list) becomes null.
+function extendedValue(catalog: OptionCatalog, group: OptionGroupKey, value: unknown) {
+  const text = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return catalog.allows(group, text) ? text : null;
 }
 
 function boolFromForm(value: FormDataEntryValue | null) {
@@ -171,12 +185,18 @@ export async function confirmTranscriptAction(formData: FormData) {
   // confirmed record reflects what they actually see and corrected on screen.
   const draft = transcript.structuredJson ? JSON.parse(transcript.structuredJson) as StructuredJson : {};
   const structured: StructuredJson = { ...draft, ...readReviewOverrides(formData) };
+  // The vocabulary stays the trader's: a mind state / risk posture only enters
+  // it from the review card's own "type another" box, never from AI output.
+  const options = await getOptionCatalog();
+  for (const [key, group] of [["emotionalState", "mindState"], ["riskPosture", "riskPosture"], ["mainEmotion", "mindState"]] as const) {
+    if (formData.has(key)) structured[key] = await options.resolve(group, formData, key);
+  }
   const type = transcriptType(structured.transcriptType ?? transcript.transcriptType);
   let linkedTradeId = transcript.linkedTradeId;
   let linkedDailyJournalId = transcript.linkedDailyJournalId;
 
   if (type === "TRADE_ENTRY_NOTE" || (structured.instrument && !linkedTradeId && type !== "EOD_REVIEW")) {
-    const trade = await createTradeFromStructured(transcript.transcriptDateTime, structured, transcript.tags);
+    const trade = await createTradeFromStructured(transcript.transcriptDateTime, structured, options, transcript.tags);
     linkedTradeId = trade.id;
     await linkSuggestedMistakes(trade.id, structured.suggestedMistakeTags);
   }
@@ -189,7 +209,7 @@ export async function confirmTranscriptAction(formData: FormData) {
       status: TradeStatus.CLOSED,
       exitReason: nullableString(structured.exitReason),
       followedPlan: enumFromText(FollowedPlan, structured.followedPlan, FollowedPlan.NA),
-      emotionalState: enumFromText(EmotionalState, structured.emotionalState, EmotionalState.UNKNOWN),
+      emotionalState: extendedValue(options, "mindState", structured.emotionalState) ?? EmotionalState.UNKNOWN,
       lesson: nullableString(structured.lesson),
       ...(exitPrice != null ? { exitPrice } : {}),
       ...(realizedPnl != null ? { realizedPnl, netPnl: calculateNetPnl(realizedPnl, existingTrade?.fees, existingTrade?.funding) } : {}),
@@ -333,14 +353,14 @@ export async function extractLessonsAction(formData: FormData) {
 
 export async function saveDailyJournalAction(formData: FormData) {
   const date = startOfDay(dateFromForm(formData.get("date")));
-  const existing = await getTodayJournal(date);
+  const [existing, options] = await Promise.all([getTodayJournal(date), getOptionCatalog()]);
   const payload = {
     date,
-    tradingMode: enumValue(TradingMode, formData.get("tradingMode"), TradingMode.PAPER),
+    tradingMode: (await options.resolve("tradingMode", formData, "tradingMode")) ?? TradingMode.PAPER,
     marketsWatched: toText(formData.get("marketsWatched")),
     maxLossForDay: toText(formData.get("maxLossForDay")),
     maxTradesForDay: toNumber(formData.get("maxTradesForDay")),
-    currentState: optionalEnum(CurrentState, formData.get("currentState")),
+    currentState: await options.resolve("mindState", formData, "currentState"),
     learningFocus: toText(formData.get("learningFocus")),
     reasonNotToTrade: toText(formData.get("reasonNotToTrade")),
     tradedToday: boolFromForm(formData.get("tradedToday")),
@@ -391,6 +411,7 @@ export async function deleteDailyJournalAction(formData: FormData) {
 
 export async function createTradeAction(formData: FormData) {
   const numeric = objectiveNumbers(formData);
+  const options = await getOptionCatalog();
   const now = new Date();
   const instrument = String(formData.get("instrument") ?? "").trim().toUpperCase();
   // Started here so it overlaps the rest of the work; awaited at the write.
@@ -415,9 +436,9 @@ export async function createTradeAction(formData: FormData) {
     tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
     setupName: toText(formData.get("setupName")),
     setupId: toText(formData.get("setupId")),
-    conditions: cleanConditions(formData.getAll("conditions")),
-    emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
-    riskPosture: optionalEnum(RiskPosture, formData.get("riskPosture")),
+    conditions: await options.resolveMany("condition", formData, "conditions"),
+    emotionalState: await options.resolve("mindState", formData, "emotionalState"),
+    riskPosture: await options.resolve("riskPosture", formData, "riskPosture"),
     confidenceScore: toNumber(formData.get("confidenceScore")),
     entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), EntryGrade.NA),
     exitReason: null,
@@ -444,7 +465,7 @@ export async function quickLogTradeAction(formData: FormData) {
   // Kicked off before the settings read so the two overlap: the quick log has
   // a 30-second budget and this must not add to it. Capped at 2s, never throws.
   const marketContext = captureMarketContext(instrument, now);
-  const settings = await getSettings();
+  const [settings, options] = await Promise.all([getSettings(), getOptionCatalog()]);
   const direction = enumValue(Direction, formData.get("direction"), Direction.UNKNOWN);
   const status = enumValue(TradeStatus, formData.get("status"), TradeStatus.OPEN);
   const entryPrice = toNumber(formData.get("entryPrice"));
@@ -468,7 +489,7 @@ export async function quickLogTradeAction(formData: FormData) {
     conditions: [],
     invalidation: null,
     concern: null,
-    emotionalState: optionalEnum(EmotionalState, formData.get("emotionalState")),
+    emotionalState: await options.resolve("mindState", formData, "emotionalState"),
     riskPosture: null,
     confidenceScore: null,
     entryGrade: EntryGrade.NA,
@@ -510,9 +531,13 @@ export async function quickLogTradeAction(formData: FormData) {
 // always captures every change on the page it was pressed from.
 export async function saveTradeAction(formData: FormData) {
   const id = String(formData.get("id"));
-  const trade = await db.get("trades", id);
+  const [trade, options] = await Promise.all([db.get("trades", id), getOptionCatalog()]);
   if (!trade) return;
   const present = (key: string) => formData.has(key);
+  // An extendable field counts as "on screen" if either its chips/select or its
+  // "type another" box was rendered — a surface that shows only the box must
+  // still be able to set the field.
+  const presentOption = (key: string) => formData.has(key) || formData.has(`${key}Custom`);
   const text = (key: string, fallback: string | null | undefined) => (present(key) ? toText(formData.get(key)) : fallback ?? null);
   const num = (key: string, fallback: number | null | undefined) => (present(key) ? toNumber(formData.get(key)) : fallback ?? null);
 
@@ -547,15 +572,15 @@ export async function saveTradeAction(formData: FormData) {
     status,
     setupName: text("setupName", trade.setupName),
     setupId: text("setupId", trade.setupId),
-    conditions: present("hasConditions") ? cleanConditions(formData.getAll("conditions")) : trade.conditions,
+    conditions: present("hasConditions") ? await options.resolveMany("condition", formData, "conditions") : trade.conditions,
     ...texts,
     // The full editor ships a prefilled Tags input, so it can remove a tag;
     // partial surfaces (inline review) can only grow the tag set.
     tags: present("tags")
       ? deriveTags(Object.values(texts), toText(formData.get("tags")))
       : mergeTags(trade.tags, deriveTags(Object.values(texts))),
-    emotionalState: present("emotionalState") ? optionalEnum(EmotionalState, formData.get("emotionalState")) : trade.emotionalState,
-    riskPosture: present("riskPosture") ? optionalEnum(RiskPosture, formData.get("riskPosture")) : trade.riskPosture,
+    emotionalState: presentOption("emotionalState") ? await options.resolve("mindState", formData, "emotionalState") : trade.emotionalState,
+    riskPosture: presentOption("riskPosture") ? await options.resolve("riskPosture", formData, "riskPosture") : trade.riskPosture,
     confidenceScore: num("confidenceScore", trade.confidenceScore),
     entryGrade: present("entryGrade") ? enumValue(EntryGrade, formData.get("entryGrade"), trade.entryGrade) : trade.entryGrade,
     followedPlan: present("followedPlan")
@@ -587,6 +612,20 @@ export async function saveTradeAction(formData: FormData) {
     await db.deleteWhere("tradeMistakes", (link) => link.tradeId === id && shown.has(link.mistakeTagId));
     for (const mistakeTagId of picked) {
       await db.create("tradeMistakes", { tradeId: id, mistakeTagId });
+    }
+  }
+
+  // A mistake typed into the review's "add your own" box becomes a real mistake
+  // tag — a chip from now on, and countable in analytics like any other. Linked
+  // after the replace above so it can't be wiped by the same save.
+  const invented = await registerCustomMistakeTags(splitCustomLabels(formData.get("mistakeTagIdCustom")));
+  if (invented.length) {
+    const links = await db.list("tradeMistakes");
+    const linked = new Set(links.filter((link) => link.tradeId === id).map((link) => link.mistakeTagId));
+    for (const tag of invented) {
+      if (linked.has(tag.id)) continue;
+      await db.create("tradeMistakes", { tradeId: id, mistakeTagId: tag.id });
+      linked.add(tag.id);
     }
   }
 
@@ -623,10 +662,10 @@ export async function saveTradeAction(formData: FormData) {
 // journal), so finishing the evening never wipes the morning and vice versa.
 export async function saveMorningCheckinAction(formData: FormData) {
   const date = startOfDay(dateFromForm(formData.get("date")));
-  const existing = await getTodayJournal(date);
+  const [existing, options] = await Promise.all([getTodayJournal(date), getOptionCatalog()]);
   const payload = {
-    tradingMode: enumValue(TradingMode, formData.get("tradingMode"), existing?.tradingMode ?? TradingMode.PAPER),
-    currentState: optionalEnum(CurrentState, formData.get("currentState")) ?? existing?.currentState ?? null,
+    tradingMode: (await options.resolve("tradingMode", formData, "tradingMode")) ?? existing?.tradingMode ?? TradingMode.PAPER,
+    currentState: (await options.resolve("mindState", formData, "currentState")) ?? existing?.currentState ?? null,
     maxLossForDay: toText(formData.get("maxLossForDay")),
     maxTradesForDay: toNumber(formData.get("maxTradesForDay")),
     learningFocus: toText(formData.get("learningFocus")),
@@ -751,9 +790,10 @@ export async function createLessonFromTradeAction(formData: FormData) {
   const tradeId = String(formData.get("tradeId"));
   const lessonText = toText(formData.get("lessonText"));
   if (!lessonText) return;
+  const options = await getOptionCatalog();
   await createLesson({
     lessonText,
-    category: enumValue(LessonCategory, formData.get("category"), LessonCategory.PROCESS),
+    category: (await options.resolve("lessonCategory", formData, "category")) ?? LessonCategory.PROCESS,
     sourceType: LessonSourceType.TRADE,
     linkedTradeId: tradeId,
     linkedTranscriptId: null,
@@ -766,9 +806,10 @@ export async function createLessonFromTradeAction(formData: FormData) {
 export async function addManualLessonAction(formData: FormData) {
   const lessonText = toText(formData.get("lessonText"));
   if (!lessonText) return;
+  const options = await getOptionCatalog();
   await createLesson({
     lessonText,
-    category: enumValue(LessonCategory, formData.get("category"), LessonCategory.PROCESS),
+    category: (await options.resolve("lessonCategory", formData, "category")) ?? LessonCategory.PROCESS,
     sourceType: LessonSourceType.MANUAL,
     linkedTradeId: null,
     linkedTranscriptId: null,
@@ -789,9 +830,10 @@ export async function updateLessonAction(formData: FormData) {
   const id = String(formData.get("id"));
   const lessonText = toText(formData.get("lessonText"));
   if (!lessonText) return;
+  const options = await getOptionCatalog();
   await db.update("lessons", id, {
     lessonText,
-    category: enumValue(LessonCategory, formData.get("category"), LessonCategory.PROCESS),
+    category: (await options.resolve("lessonCategory", formData, "category")) ?? LessonCategory.PROCESS,
     tags: deriveTags([lessonText], toText(formData.get("tags"))),
     updatedAt: new Date(),
   });
@@ -855,6 +897,39 @@ export async function deleteImportBatchAction(formData: FormData) {
   await db.deleteWhere("rawExecutions", (execution) => execution.importBatchId === id);
   revalidatePath("/import");
   await redirectBackWithFeedback("Import batch deleted.", "/import");
+}
+
+// Housekeeping for the labels the trader invented. Removing one takes it out of
+// the pickers only — records that already carry the value keep it and fall back
+// to the humanized form, so nothing in the journal is rewritten behind them.
+export async function removeCustomOptionAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const option = (await db.list("customOptions")).find((entry) => entry.id === id);
+  if (!option) return;
+  await removeCustomOption(id);
+  revalidatePath("/settings");
+  await redirectBackWithFeedback(`Removed “${option.label}” from the pickers. Entries already using it are untouched.`, "/settings");
+}
+
+// A custom mistake tag is a real record that trades link to by id, so removing
+// it does have to unlink those trades — say how many, rather than leaving a
+// dangling reference the analytics quietly drop. Built-in tags can't be removed.
+export async function removeCustomMistakeTagAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const tag = await db.get("mistakeTags", id);
+  if (!tag || defaultMistakeTagNames.has(tag.name)) return;
+  const links = (await db.list("tradeMistakes")).filter((link) => link.mistakeTagId === id);
+  await db.deleteWhere("tradeMistakes", (link) => link.mistakeTagId === id);
+  await db.deleteWhere("mistakeTags", (entry) => entry.id === id);
+  revalidatePath("/settings");
+  revalidatePath("/trades");
+  revalidatePath("/analytics");
+  await redirectBackWithFeedback(
+    links.length
+      ? `Removed “${tag.label}” and un-tagged ${links.length} trade${links.length === 1 ? "" : "s"}.`
+      : `Removed “${tag.label}”.`,
+    "/settings",
+  );
 }
 
 export async function saveSettingsAction(formData: FormData) {
@@ -973,11 +1048,6 @@ function sameTags(a: string[], b: string[] | undefined) {
   return a.length === other.length && a.every((tag, index) => tag === other[index]);
 }
 
-function cleanConditions(values: FormDataEntryValue[]) {
-  const allowed = new Set(conditionTagValues);
-  return values.map(String).filter((value) => allowed.has(value));
-}
-
 export async function createAssetAction(formData: FormData) {
   const symbol = String(formData.get("symbol") ?? "").trim().toUpperCase();
   if (!symbol) {
@@ -1009,7 +1079,7 @@ export async function createAssetAction(formData: FormData) {
 // there is no other button.
 async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
   const assetId = String(formData.get("assetId"));
-  const asset = await db.get("assets", assetId);
+  const [asset, options] = await Promise.all([db.get("assets", assetId), getOptionCatalog()]);
   if (!asset) return { assetId, viewSaved: false, noteAdded: false, notesEdited: 0 };
   const now = new Date();
   let viewSaved = false;
@@ -1040,7 +1110,7 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
     if (!formData.has(key)) continue;
     const text = toText(formData.get(key));
     if (!text) continue;
-    const timeframe = optionalEnum(AssetTimeframe, formData.get(`noteTimeframe-${note.id}`));
+    const timeframe = await options.resolve("assetTimeframe", formData, `noteTimeframe-${note.id}`);
     const tags = deriveTags([text], toText(formData.get(`noteTags-${note.id}`)));
     if (text === note.text && timeframe === (note.timeframe ?? null) && sameTags(tags, note.tags)) continue;
     await db.update("assetNotes", note.id, { text, timeframe, tags, updatedAt: now });
@@ -1054,7 +1124,7 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
       createdAt: now,
       updatedAt: now,
       assetId,
-      timeframe: optionalEnum(AssetTimeframe, formData.get("noteTimeframe")),
+      timeframe: await options.resolve("assetTimeframe", formData, "noteTimeframe"),
       text: newNote,
       tags: deriveTags([newNote], toText(formData.get("noteTags"))),
     });
@@ -1178,7 +1248,12 @@ export async function toggleLessonPinAction(formData: FormData) {
   await redirectBackWithFeedback(isPinned ? "Lesson unpinned." : "Lesson pinned.", "/lessons");
 }
 
-async function createTradeFromStructured(tradeDateTime: Date, structured: StructuredJson, sourceTags?: string[]) {
+async function createTradeFromStructured(
+  tradeDateTime: Date,
+  structured: StructuredJson,
+  options: OptionCatalog,
+  sourceTags?: string[],
+) {
   // Carry the spoken numbers through to the trade so the trader doesn't have to
   // re-type prices/size on the trade page. Derived fields are computed here.
   const direction = enumFromText(Direction, structured.direction, Direction.UNKNOWN);
@@ -1212,8 +1287,8 @@ async function createTradeFromStructured(tradeDateTime: Date, structured: Struct
       nullableString(structured.concern),
       nullableString(structured.exitReason),
     ])),
-    emotionalState: enumFromText(EmotionalState, structured.emotionalState, EmotionalState.UNKNOWN),
-    riskPosture: enumFromText(RiskPosture, structured.riskPosture, RiskPosture.UNKNOWN),
+    emotionalState: extendedValue(options, "mindState", structured.emotionalState) ?? EmotionalState.UNKNOWN,
+    riskPosture: extendedValue(options, "riskPosture", structured.riskPosture) ?? RiskPosture.UNKNOWN,
     confidenceScore: nullableNumber(structured.confidenceScore),
     entryGrade: enumFromText(EntryGrade, structured.entryGrade, EntryGrade.NA),
     exitReason: hasExit ? nullableString(structured.exitReason) : null,
