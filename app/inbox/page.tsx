@@ -457,6 +457,12 @@ function EntryFields({ entry, n, openTrades }: { entry: ExtractedEntry; n: (fiel
             <TextField label="Leverage" name={n("leverage")} type="number" defaultValue={entry.leverage} />
             <TextField label="Conviction (1-10)" name={n("confidenceScore")} type="number" defaultValue={entry.confidenceScore} />
           </div>
+          <TextAreaField
+            label="Notes — everything else you said about this trade"
+            name={n("notes")}
+            rows={3}
+            defaultValue={entry.notes}
+          />
           <MistakeHint tags={entry.suggestedMistakeTags} />
         </div>
       );
@@ -483,6 +489,12 @@ function EntryFields({ entry, n, openTrades }: { entry: ExtractedEntry; n: (fiel
           </div>
           <TextAreaField label="Exit reason" name={n("exitReason")} rows={2} defaultValue={entry.exitReason} />
           <TextField label="Takeaway for this trade" name={n("lesson")} defaultValue={entry.lesson} />
+          <TextAreaField
+            label="Notes — everything else you said (added to the trade's notes)"
+            name={n("notes")}
+            rows={3}
+            defaultValue={entry.notes}
+          />
           <MistakeHint tags={entry.suggestedMistakeTags} />
         </div>
       );

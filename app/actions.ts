@@ -268,6 +268,9 @@ export async function confirmTranscriptAction(formData: FormData) {
           emotionalState:
             extendedValue(options, "mindState", entry.emotionalState) ?? existing.emotionalState ?? EmotionalState.UNKNOWN,
           lesson: entry.lesson ?? existing.lesson,
+          // Append rather than replace: the entry note's commentary is already in
+          // there, and an exit shouldn't erase what was said when the trade was put on.
+          notes: appendNotes(existing.notes, entry.notes),
           // Partial save (no Tags input on a review card): tags only grow.
           tags: mergeTags(existing.tags, [...(transcript.tags ?? []), ...deriveTags(entryTexts(entry))]),
           ...(entry.exitPrice != null ? { exitPrice: entry.exitPrice } : {}),
@@ -1386,7 +1389,9 @@ async function createTradeFromEntry(
     exitReason: null,
     followedPlan: null,
     lesson: null,
-    notes: null,
+    // The spoken commentary that isn't a field — chart timeframe, expected
+    // duration, market read. Lands in the trade's own "Free-form notes".
+    notes: entry.notes,
     entryPrice: entry.entryPrice,
     stopPrice: entry.stopPrice,
     targetPrice: entry.targetPrice,
@@ -1528,11 +1533,11 @@ function applyEntryOverrides(entry: ExtractedEntry, formData: FormData, index: n
 
   switch (entry.kind) {
     case "TRADE_ENTRY":
-      ["instrument", "direction", "status", "setupName", "entryThesis", "invalidation", "concern", "emotionalState", "riskPosture"].forEach(text);
+      ["instrument", "direction", "status", "setupName", "entryThesis", "invalidation", "concern", "notes", "emotionalState", "riskPosture"].forEach(text);
       ["confidenceScore", "entryPrice", "stopPrice", "targetPrice", "quantity", "leverage"].forEach(number);
       break;
     case "TRADE_EXIT":
-      ["linkTradeId", "instrument", "exitReason", "followedPlan", "emotionalState", "lesson"].forEach(text);
+      ["linkTradeId", "instrument", "exitReason", "followedPlan", "emotionalState", "lesson", "notes"].forEach(text);
       ["exitPrice", "realizedPnl"].forEach(number);
       break;
     case "ASSET_NOTE":
@@ -1557,6 +1562,18 @@ function applyEntryOverrides(entry: ExtractedEntry, formData: FormData, index: n
   // normalizeEntry re-applies the enum/number discipline to whatever was typed,
   // so a hand-edited field can never smuggle a bad value into a record.
   return normalizeEntry({ ...entry, ...patch }) ?? entry;
+}
+
+// An exit's commentary is added to whatever the entry note already said, never
+// over it. Skips the append when the same text is already present, so
+// re-confirming a note can't stack duplicates.
+function appendNotes(existing: string | null | undefined, addition: string | null): string | null {
+  const previous = (existing ?? "").trim();
+  const next = (addition ?? "").trim();
+  if (!next) return previous || null;
+  if (!previous) return next;
+  if (previous.includes(next)) return previous;
+  return `${previous}\n\n${next}`;
 }
 
 async function linkSuggestedMistakes(tradeId: string, tags: unknown) {

@@ -100,6 +100,15 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - Spoken **numbers are captured**: entry/stop/target price, quantity, leverage, exit price and
   realized P&L flow through extraction → editable card → trade. Strict "only if actually
   stated, never invent" rule, in the code-built system prompt.
+- **Fields vs notes — a note is half data, half thinking out loud.** Fields take only the hard
+  data (symbol, direction, prices, size, setup). Everything else said *about that same trade* —
+  the chart timeframe, how long they expect it to run, their market read, pattern names, their
+  own shorthand — goes to `notes` on the `TRADE_ENTRY`/`TRADE_EXIT` entry, in their words, and
+  lands in the trade's existing "Free-form notes". It is explicitly **not** spun off into a
+  separate `FREE_NOTE`: that kind is only for a thought belonging to no entry at all. An exit's
+  notes **append** (`appendNotes`) so closing a trade never erases what was said opening it.
+  `entryThesis` stays the short why-this-why-now; the rest of the reasoning is notes.
+  Fixture `16-facts-and-commentary` is the owner's real note and guards this.
 - **Schema union budget (hard API limit).** Anthropic rejects a structured-output schema with
   more than **16** union-typed parameters (`type: [...]` or `anyOf`) — exponential compilation
   cost. Seven entry variants put us at 29, and *every* capture 400'd into the plain-text

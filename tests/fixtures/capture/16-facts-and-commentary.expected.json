@@ -1,0 +1,20 @@
+{
+  "name": "Hard data fills fields; the rest of the talk rides along as notes",
+  "why": "The owner's real note. Half of it is data (symbol, direction, three prices, setup) and half is thinking out loud (15-minute chart, 48-72h horizon, SFB in recent candles). The commentary must survive on the trade's own notes — not be dropped, not be crammed into the thesis, and NOT split off into a separate FREE_NOTE, because it is about this trade.",
+  "minEntries": 1,
+  "kinds": ["TRADE_ENTRY"],
+  "forbidKinds": ["FREE_NOTE", "ASSET_NOTE"],
+  "fields": [
+    { "kind": "TRADE_ENTRY", "field": "instrument", "equals": "BTC" },
+    { "kind": "TRADE_ENTRY", "field": "direction", "equals": "LONG" },
+    { "kind": "TRADE_ENTRY", "field": "status", "equals": "OPEN" },
+    { "kind": "TRADE_ENTRY", "field": "entryPrice", "equals": 63100 },
+    { "kind": "TRADE_ENTRY", "field": "stopPrice", "equals": 62550 },
+    { "kind": "TRADE_ENTRY", "field": "targetPrice", "equals": 63700 },
+    { "kind": "TRADE_ENTRY", "field": "setupName", "present": true },
+    { "kind": "TRADE_ENTRY", "field": "entryThesis", "present": true },
+    { "kind": "TRADE_ENTRY", "field": "notes", "present": true },
+    { "kind": "TRADE_ENTRY", "field": "quantity", "equals": null },
+    { "kind": "TRADE_ENTRY", "field": "leverage", "equals": null }
+  ]
+}

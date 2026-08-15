@@ -71,6 +71,10 @@ export type TradeEntryEntry = BaseEntry & {
   entryThesis: string | null;
   invalidation: string | null;
   concern: string | null;
+  // Everything the trader said about this trade that isn't a field: chart
+  // timeframe, expected duration, market read, their own jargon. Kept in their
+  // words rather than forced into a field or split off into a loose thought.
+  notes: string | null;
   emotionalState: string;
   riskPosture: string;
   confidenceScore: number | null;
@@ -92,6 +96,8 @@ export type TradeExitEntry = BaseEntry & {
   followedPlan: string;
   emotionalState: string;
   lesson: string | null;
+  // Same idea as TRADE_ENTRY.notes — the running commentary on how it played out.
+  notes: string | null;
   suggestedMistakeTags: string[];
 };
 
@@ -194,6 +200,7 @@ const entryVariants = [
     entryThesis: optionalText,
     invalidation: optionalText,
     concern: optionalText,
+    notes: optionalText,
     emotionalState: { type: "string", enum: [...mindStateValues] },
     riskPosture: { type: "string", enum: [...riskPostures] },
     confidenceScore: nullableNumber,
@@ -213,6 +220,7 @@ const entryVariants = [
     followedPlan: { type: "string", enum: [...followedPlanOptions] },
     emotionalState: { type: "string", enum: [...mindStateValues] },
     lesson: optionalText,
+    notes: optionalText,
     suggestedMistakeTags: { type: "array", items: { type: "string" } },
   }),
   entrySchema(EntryKind.ASSET_NOTE, {
@@ -294,6 +302,7 @@ export function normalizeEntry(value: unknown): ExtractedEntry | null {
         entryThesis: textOrNull(raw.entryThesis),
         invalidation: textOrNull(raw.invalidation),
         concern: textOrNull(raw.concern),
+        notes: textOrNull(raw.notes),
         emotionalState: oneOf(raw.emotionalState, mindStateValues, "UNKNOWN"),
         riskPosture: oneOf(raw.riskPosture, riskPostures, "UNKNOWN"),
         confidenceScore: numberOrNull(raw.confidenceScore),
@@ -316,6 +325,7 @@ export function normalizeEntry(value: unknown): ExtractedEntry | null {
         followedPlan: oneOf(raw.followedPlan, followedPlanOptions, "NA"),
         emotionalState: oneOf(raw.emotionalState, mindStateValues, "UNKNOWN"),
         lesson: textOrNull(raw.lesson),
+        notes: textOrNull(raw.notes),
         suggestedMistakeTags: stringList(raw.suggestedMistakeTags),
       };
     case "ASSET_NOTE": {
@@ -369,9 +379,9 @@ export function normalizeEntry(value: unknown): ExtractedEntry | null {
 export function entryTexts(entry: ExtractedEntry): Array<string | null> {
   switch (entry.kind) {
     case "TRADE_ENTRY":
-      return [entry.entryThesis, entry.invalidation, entry.concern, entry.setupName];
+      return [entry.entryThesis, entry.invalidation, entry.concern, entry.setupName, entry.notes];
     case "TRADE_EXIT":
-      return [entry.exitReason, entry.lesson];
+      return [entry.exitReason, entry.lesson, entry.notes];
     case "ASSET_NOTE":
       return [entry.text];
     case "JOURNAL":
