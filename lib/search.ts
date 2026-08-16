@@ -236,13 +236,14 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
     });
   }
 
-  // Thoughts that belong to no other collection. They have no page of their own,
-  // so a result links back to the captured note it was confirmed from.
+  // Thoughts that belong to no other collection. They do have a home now — the
+  // day's review lists every free note filed to that day, hand-typed or lifted
+  // out of a captured note — so a result links there rather than to the inbox.
   for (const note of freeNotes) {
     docs.push({
       kind: "freeNote",
       id: note.id,
-      href: note.linkedTranscriptId ? `/inbox?view=all#note-${note.linkedTranscriptId}` : "/inbox?view=all",
+      href: `/daily?date=${format(note.createdAt, "yyyy-MM-dd")}#note-${note.id}`,
       title: note.text.length > 90 ? `${note.text.slice(0, 90)}…` : note.text,
       subtitle: format(note.createdAt, "dd MMM yyyy"),
       date: note.createdAt,

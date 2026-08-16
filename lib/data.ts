@@ -190,6 +190,16 @@ export async function getTodayJournal(date: Date) {
   return journals.find((journal) => startOfDay(journal.date).getTime() === day) ?? null;
 }
 
+// The day's loose thoughts, newest last so the list reads like a running log.
+// Filed by createdAt — a free note has no other date of its own.
+export async function getFreeNotesForDay(date: Date) {
+  const notes = await listRecords("freeNotes");
+  const day = startOfDay(date).getTime();
+  return notes
+    .filter((note) => startOfDay(note.createdAt).getTime() === day)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+}
+
 export async function getClosedTradesInRange(start: Date, end: Date): Promise<TradeWithMistakes[]> {
   const trades = await getTradesWithMistakes();
   return trades.filter((trade) => trade.status === "CLOSED" && trade.tradeDateTime >= start && trade.tradeDateTime <= endOfDay(end));

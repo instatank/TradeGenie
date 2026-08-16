@@ -310,7 +310,8 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     `/playbook` add + edit, and the `/daily` evening review. **Deliberately not** on the
     `/daily` morning form — morning and evening are two separate forms, so a second tags
     field there would be a fresh way to lose a tag by saving the other ritual.
-  - It's the one form control in the app that ships client JS; inventing a tag can't be done
+  - It was the first form control in the app to ship client JS (the calculator and the
+    Today quick-note bar are the other two); inventing a tag can't be done
     with a plain `<form>`. Enter inside the box adds the tag and never submits the page.
   - `TagsField` (the old free-text tags input) is gone — one tag control, not two.
 
@@ -401,7 +402,8 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     Behind one fold: fee drag across move sizes, and the target you'd need for a true 1/2/3R.
   - Warnings (not silent nonsense) for a stop on the wrong side, a stop past the rough
     liquidation, and a size needing more margin than the account holds.
-  - **It ships client JS on purpose** — the second exception after `TagPicker`. A calculator
+  - **It ships client JS on purpose** — the second exception after `TagPicker`, with the
+    Today quick-note bar the third. A calculator
     you have to submit isn't a calculator; you'd never scrub the stop around to find where
     fees stop eating the trade. Fee tier / account / risk / leverage persist in
     `localStorage` (convenience only, never load-bearing); prices don't.
@@ -414,8 +416,7 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   shape as the symbol row on the quick trade log. Typing a label saves it with the
   record *and* keeps it: it's a chip/dropdown entry from then on. Zero client JS —
   the typed value rides along in the same form, exactly like a `#hashtag` typed
-  into a thesis becomes a tag. (`TagPicker` and the calculator remain the only
-  client-JS form controls.)
+  into a thesis becomes a tag.
   - **`lib/options.ts` is THE registry**: one normalizer (`normalizeOptionValue`,
     "Cut winner early!" → `CUT_WINNER_EARLY`), one storage collection
     (`customOptions`), one catalog (`getOptionCatalog()` → `choices` / `label` /
@@ -483,6 +484,46 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     against the closed enum — that guard is what stops a hand-typed value smuggling a bad enum
     into a record. Reconciling "enum discipline" with the extendable vocabulary is its own piece
     of work; custom labels still work everywhere else.
+
+- **Quick note — the box with nothing to decide** (`components/QuickNoteBar.tsx` on
+  Today, `components/QuickNoteBox.tsx` on `/daily`, both writing `freeNotes`). A
+  thought that isn't a trade, a lesson or a check-in has a home now.
+  - **Today is one line and nothing else** — a slim pill copied in shape from the
+    time-tracker's quick-capture bar: borderless input, a send button that stays
+    muted until there's text (dictation and paste need a save path that isn't the
+    Enter key), and a `N notes today →` link. No heading, no textarea, no Save
+    button. Type → Enter → saved.
+  - **Long-press (420ms, the time-tracker's `LONG_PRESS_MS`) or double-click**
+    promotes the thought to its home page, `/daily`, where the full box and Save
+    button live. Whatever was typed rides along in `?note=` and prefills the big
+    box, so the gesture never costs you a thought — and it saves nothing by
+    itself, it just moves you.
+  - **The bar is the third client-JS control** (after `TagPicker` and the
+    calculator), for the same reason: a press-and-hold gesture can't be expressed
+    as a plain form. It degrades cleanly — with JS off it is still a real server
+    form, so Enter and the send button save exactly as before; only the shortcut
+    gesture is lost.
+  - **Stored as `freeNotes`** — the same collection the segmented capture pipeline
+    already writes for the leftover parts of a voice note, not a parallel one. The
+    box was built against that exact `FreeNote` shape while the pipeline was still
+    on an unmerged branch, so the two landed on `main` days apart and converged
+    with no migration. Hand-typed notes carry `linkedTranscriptId: null`.
+  - **The day's review lists both kinds**, hand-typed and capture-derived, since
+    both are filed by `createdAt`. Free notes previously had nowhere to link to;
+    search now points them at `/daily?date=…#note-<id>` instead of the inbox.
+  - **Filed by `createdAt` to the day being viewed**, not to "now": writing on
+    `/daily?date=<older day>` files the note to that day, so a day can be written
+    up late. Same-day notes keep the real clock time (the list shows HH:mm).
+  - **Its own small form on purpose.** The page-wide "one button saves the page"
+    rule exists to stop two forms fighting; here the opposite applies — the note
+    box must not ride along with (or be lost to) an unrelated save. Regression-
+    tested: saving the evening review leaves the day's notes untouched.
+  - Tags come from inline `#hashtags` via `deriveTags` — nothing extra to fill in.
+    Indexed in `lib/search.ts` as its own **"Quick notes"** kind, deep-linking to
+    `/daily?date=...#note-<id>`. Added to `/api/export`.
+  - Deliberately NOT done: editing a saved note (delete + retype — it's one line),
+    and a separate calendar entry (the owner chose the day-review home over a
+    parallel calendar item).
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
