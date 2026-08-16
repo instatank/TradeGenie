@@ -2,7 +2,7 @@ import Link from "next/link";
 import { addDays, format, isSameDay, startOfDay, startOfWeek, subDays } from "date-fns";
 import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic, Sunrise, Sunset } from "lucide-react";
 import { DisciplineLines, DivergingColumns, EquityCurve, HBarList, MoneyBars } from "@/components/Charts";
-import { QuickNoteBox } from "@/components/QuickNoteBox";
+import { QuickNoteBar } from "@/components/QuickNoteBar";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { humanize } from "@/lib/constants";
@@ -188,7 +188,15 @@ export default async function TodayPage() {
 
       <section className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <div className="space-y-4">
-          <QuickNoteBox notes={freeNotes} date={format(now, "yyyy-MM-dd")} redirectTo="/" />
+          {/* One line, nothing to decide. Hold it (or double-click) to carry the
+              thought into the day's review, where the full box lives. */}
+          <QuickNoteBar
+            key={freeNotes.length}
+            date={format(now, "yyyy-MM-dd")}
+            redirectTo="/"
+            homeHref={`/daily?date=${format(now, "yyyy-MM-dd")}`}
+            noteCount={freeNotes.length}
+          />
 
           <div id="quick-log" className="panel">
             <div className="mb-3 flex items-center justify-between gap-2">

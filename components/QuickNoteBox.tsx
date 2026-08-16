@@ -15,6 +15,7 @@ export function QuickNoteBox({
   notes,
   date,
   redirectTo,
+  defaultText = "",
   heading = "Quick note",
   subtitle = "Any thought that doesn't belong anywhere else. It lands in today's review.",
 }: {
@@ -23,11 +24,14 @@ export function QuickNoteBox({
    *  yesterday from the day's review page files it to yesterday. */
   date: string;
   redirectTo: string;
+  /** A thought carried here by the Today bar's long-press, so the gesture never
+   *  costs you what you had already typed. */
+  defaultText?: string;
   heading?: string;
   subtitle?: string;
 }) {
   return (
-    <div className="panel">
+    <div id="quick-note" className="panel scroll-mt-24">
       <div className="mb-3 flex items-center gap-2">
         <NotebookPen className="h-4 w-4 text-forge-blue" aria-hidden="true" />
         <h2 className="font-semibold">{heading}</h2>
@@ -41,6 +45,10 @@ export function QuickNoteBox({
         <textarea
           id="quick-note-text"
           name="text"
+          // Remounts when a carried-over thought arrives, so defaultValue takes.
+          key={defaultText}
+          defaultValue={defaultText}
+          autoFocus={Boolean(defaultText)}
           rows={2}
           placeholder="What's on your mind? #hashtags work here too."
           // .textarea carries no width of its own — every other use sits inside

@@ -15,7 +15,7 @@ import { getTradePnl } from "@/lib/metrics";
 
 // Two rituals, two small cards. Morning: mood + guardrails, under a minute.
 // Evening: three taps and two lines, 2–4 minutes. Everything else is optional.
-export default async function DailyPage({ searchParams }: { searchParams?: Promise<{ date?: string }> }) {
+export default async function DailyPage({ searchParams }: { searchParams?: Promise<{ date?: string; note?: string }> }) {
   const params = await searchParams;
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
@@ -105,6 +105,7 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
           notes={freeNotes}
           date={dateParam}
           redirectTo={`/daily?date=${dateParam}`}
+          defaultText={params?.note ?? ""}
           heading="Notes from this day"
           subtitle="Anything that didn't belong to a trade or a lesson. Add one any time — it stays with this day."
         />
