@@ -218,9 +218,14 @@ export type Asset = {
   tags?: string[];
 };
 
-// A thought that belongs to no other collection. Captured notes segment into
-// typed entries; anything that is genuinely "just a thought" lands here rather
-// than being forced into a lesson or a journal field, or silently dropped.
+// A thought that belongs to no other collection: typed into the quick-note box
+// on Today or on a day's review, or left over when a captured note segments into
+// typed entries. Either way it lands here rather than being forced into a lesson
+// or a journal field, or silently dropped.
+//
+// Filed to a day by `createdAt` — that is the only date it has. A hand-typed note
+// carries `linkedTranscriptId: null`; one lifted out of a captured note points
+// back at the transcript it came from.
 export type FreeNote = {
   id: string;
   createdAt: Date;

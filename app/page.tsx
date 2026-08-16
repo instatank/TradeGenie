@@ -2,10 +2,11 @@ import Link from "next/link";
 import { addDays, format, isSameDay, startOfDay, startOfWeek, subDays } from "date-fns";
 import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic, Sunrise, Sunset } from "lucide-react";
 import { DisciplineLines, DivergingColumns, EquityCurve, HBarList, MoneyBars } from "@/components/Charts";
+import { QuickNoteBox } from "@/components/QuickNoteBox";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { humanize } from "@/lib/constants";
-import { db, getResurfacedLessons, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
+import { db, getFreeNotesForDay, getResurfacedLessons, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
 import {
   analyticsLeaks,
@@ -26,7 +27,7 @@ import {
 export default async function TodayPage() {
   const now = new Date();
   const today = startOfDay(now);
-  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options] = await Promise.all([
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
     db.list("transcripts"),
@@ -36,6 +37,7 @@ export default async function TodayPage() {
     getTodayJournal(now),
     getTagVocabulary(),
     getOptionCatalog(),
+    getFreeNotesForDay(now),
   ]);
 
   // Streak counts showing up in any form — never profitability.
@@ -186,6 +188,8 @@ export default async function TodayPage() {
 
       <section className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <div className="space-y-4">
+          <QuickNoteBox notes={freeNotes} date={format(now, "yyyy-MM-dd")} redirectTo="/" />
+
           <div id="quick-log" className="panel">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 className="font-semibold">Log a trade</h2>

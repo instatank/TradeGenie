@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { endOfDay, format, startOfDay } from "date-fns";
+import { endOfDay, format, isSameDay, startOfDay } from "date-fns";
 import { checkAiConnection } from "@/lib/ai-status";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { defaultMistakeTagNames } from "@/lib/constants";
@@ -485,6 +485,44 @@ export async function saveDailyJournalAction(formData: FormData) {
   revalidatePath("/daily");
   revalidatePath("/");
   redirect(withFeedback(`/daily?date=${format(date, "yyyy-MM-dd")}`, "Daily journal saved."));
+}
+
+// The quick-note box on Today and on the day's review. One field, one button —
+// no type, no category, nothing to choose. #hashtags in the text become tags
+// through the same tokenizer as everywhere else, so a note is searchable and
+// tappable without any extra step.
+export async function saveQuickNoteAction(formData: FormData) {
+  const text = toText(formData.get("text"));
+  const redirectTo = toText(formData.get("redirectTo")) ?? "/";
+  if (!text) {
+    redirect(withFeedback(redirectTo, "Type something first — an empty note isn't saved.", "error"));
+  }
+  // Filed to the day being viewed, not to "now", so writing up yesterday from
+  // its review page files the note under yesterday. Time-of-day comes from the
+  // clock, since that is what the note list shows.
+  const now = new Date();
+  const day = startOfDay(dateFromForm(formData.get("date"), now));
+  const createdAt = isSameDay(day, now) ? now : new Date(day.getTime() + 12 * 60 * 60 * 1000);
+  const note = await db.create("freeNotes", {
+    createdAt,
+    updatedAt: now,
+    text,
+    linkedTranscriptId: null,
+    tags: deriveTags([text]),
+  });
+  revalidatePath("/");
+  revalidatePath("/daily");
+  revalidatePath("/search");
+  redirect(withFeedback(`${redirectTo}#note-${note.id}`, "Note saved to today's review."));
+}
+
+export async function deleteFreeNoteAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  await db.deleteWhere("freeNotes", (note) => note.id === id);
+  revalidatePath("/");
+  revalidatePath("/daily");
+  revalidatePath("/search");
+  await redirectBackWithFeedback("Note deleted.", toText(formData.get("redirectTo")) ?? "/");
 }
 
 export async function deleteDailyJournalAction(formData: FormData) {

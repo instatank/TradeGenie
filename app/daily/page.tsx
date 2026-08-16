@@ -4,11 +4,12 @@ import { Sunrise, Sunset, Trash2 } from "lucide-react";
 import { deleteDailyJournalAction, saveEveningReviewAction, saveMorningCheckinAction } from "@/app/actions";
 import { ScaleChips, YesNoChips } from "@/components/Chips";
 import { PageTitle } from "@/components/Fields";
+import { QuickNoteBox } from "@/components/QuickNoteBox";
 import { OptionChipRadio } from "@/components/OptionField";
 import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
 import { humanize } from "@/lib/constants";
-import { db, getTagVocabulary, getTodayJournal } from "@/lib/data";
+import { db, getFreeNotesForDay, getTagVocabulary, getTodayJournal } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { getTradePnl } from "@/lib/metrics";
 
@@ -18,8 +19,9 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
   const params = await searchParams;
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
-  const [journal, allTrades, tagVocabulary, options] = await Promise.all([
+  const [journal, allTrades, tagVocabulary, options, freeNotes] = await Promise.all([
     getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(), getOptionCatalog(),
+    getFreeNotesForDay(selectedDate),
   ]);
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const dayTrades = allTrades
@@ -96,6 +98,17 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
 
         <button className="button" type="submit">Check in</button>
       </form>
+
+      {/* ---- The day's loose thoughts ---- */}
+      <div className="mt-5">
+        <QuickNoteBox
+          notes={freeNotes}
+          date={dateParam}
+          redirectTo={`/daily?date=${dateParam}`}
+          heading="Notes from this day"
+          subtitle="Anything that didn't belong to a trade or a lesson. Add one any time — it stays with this day."
+        />
+      </div>
 
       {/* ---- Evening ---- */}
       <form id="evening" action={saveEveningReviewAction} className="panel mt-5 space-y-4">
