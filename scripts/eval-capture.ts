@@ -60,9 +60,9 @@ async function main() {
   const { EntryKind } = await import("../lib/extraction");
   const { activeModel } = await import("../lib/ai-status");
 
-  // Pre-flight: a schema the API would reject makes every fixture "fail" for a
-  // reason that has nothing to do with extraction quality. Catch it first.
-  execFileSync("npx", ["tsx", path.join("scripts", "check-schema.ts")], { stdio: "inherit" });
+  // Pre-flight: a prompt whose own examples don't survive parse+normalize makes
+  // every fixture "fail" for a reason unrelated to extraction quality.
+  execFileSync("npx", ["tsx", path.join("scripts", "check-capture.ts")], { stdio: "inherit" });
 
   const tradeIdByLabel = await seedFixtureWorld(db, defaultMistakeTags);
   const usingRealModel = Boolean(process.env.ANTHROPIC_API_KEY);

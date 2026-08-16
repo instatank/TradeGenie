@@ -1,0 +1,53 @@
+{
+  "name": "Stop and target given as percentages become real prices",
+  "why": "The owner's real note. Traders quote risk off the entry (\"stop 0.5% lower, target 1%\") rather than as absolute levels; deriving them from a stated entry is arithmetic on what was said, not invention, and leaving them null would mean retyping both. NOTE: \"62.975\" is genuinely ambiguous \u2014 the model has returned both 62.975 (literal) and 62975 (read as $62,975, the realistic BTC price) across runs. That is an open product decision, so this fixture deliberately does not assert the entry price; it asserts the parts that are stable.",
+  "minEntries": 1,
+  "kinds": [
+    "TRADE_ENTRY"
+  ],
+  "forbidKinds": [
+    "FREE_NOTE"
+  ],
+  "fields": [
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "instrument",
+      "equals": "BTC"
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "direction",
+      "equals": "LONG"
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "status",
+      "equals": "OPEN"
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "entryPrice",
+      "present": true
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "stopPrice",
+      "present": true
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "targetPrice",
+      "present": true
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "notes",
+      "present": true
+    },
+    {
+      "kind": "TRADE_ENTRY",
+      "field": "quantity",
+      "equals": null
+    }
+  ]
+}

@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { activeModel, describeAiError } from "@/lib/ai-status";
 import { db } from "@/lib/data";
 import { buildExtractionContext, resolveTradeHandle } from "@/lib/extraction-context";
-import { normalizeExtraction, segmentedJsonSchema, type SegmentedExtraction } from "@/lib/extraction";
+import { normalizeExtraction, type SegmentedExtraction } from "@/lib/extraction";
 import { extractionSystemPrompt } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
 
@@ -41,6 +41,40 @@ export async function structureTranscript(rawText: string): Promise<SegmentedExt
   }
 }
 
+/**
+ * Pull the JSON object out of the model's reply.
+ *
+ * We deliberately do NOT constrain generation with `output_config.format` any
+ * more. Structured outputs compile the schema into a grammar, and this schema —
+ * seven entry kinds in an `anyOf`, each with up to 19 required properties, inside
+ * an array — blew two separate ceilings in a row: first the 16-union parameter
+ * cap, then "the compiled grammar is too large". Both rejected the request with a
+ * 400 before the model ever read the note, so every single capture fell back to
+ * plain text. Shrinking the vocabulary to fit an undocumented size limit would
+ * have meant giving up entry kinds or fields, i.e. giving up the product.
+ *
+ * The guarantee moves to our side instead, where it was always enforced anyway:
+ * normalizeExtraction() is tolerant by construction — it already had to survive
+ * hand-edited drafts read back from the store, so it coerces types, drops unknown
+ * kinds and fills defaults. The only thing the grammar bought us was well-formed
+ * JSON, which this recovers: strip any markdown fence, then take the outermost
+ * {...}. A reply we genuinely can't parse throws and is reported by name.
+ */
+export function parseJsonLoose(text: string): unknown {
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Any prose the model wrapped around the object — take the widest {...}.
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start === -1 || end <= start) {
+      throw new Error("the model's reply contained no JSON object");
+    }
+    return JSON.parse(cleaned.slice(start, end + 1));
+  }
+}
+
 // Pull the real mistake-tag vocabulary from the store so the model is told the
 // exact identifiers that linkSuggestedMistakes() will match — no hardcoded drift.
 async function mistakeTagReference(): Promise<string> {
@@ -64,10 +98,7 @@ async function anthropicExtraction(rawText: string, template: string): Promise<S
     thinking: { type: "adaptive" },
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
-    output_config: {
-      effort: EXTRACTION_EFFORT,
-      format: { type: "json_schema", schema: segmentedJsonSchema },
-    },
+    output_config: { effort: EXTRACTION_EFFORT },
   });
 
   const text = message.content
@@ -85,7 +116,7 @@ async function anthropicExtraction(rawText: string, template: string): Promise<S
   }
   if (!text.trim()) throw new Error("Anthropic returned no content");
 
-  const extraction = normalizeExtraction(JSON.parse(text));
+  const extraction = normalizeExtraction(parseJsonLoose(text));
 
   // Turn short open-trade handles ("T2") back into real trade ids immediately,
   // so nothing downstream — review card, confirm, stored draft — sees a handle.

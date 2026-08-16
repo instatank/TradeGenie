@@ -109,16 +109,26 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   notes **append** (`appendNotes`) so closing a trade never erases what was said opening it.
   `entryThesis` stays the short why-this-why-now; the rest of the reasoning is notes.
   Fixture `16-facts-and-commentary` is the owner's real note and guards this.
-- **Schema union budget (hard API limit).** Anthropic rejects a structured-output schema with
-  more than **16** union-typed parameters (`type: [...]` or `anyOf`) — exponential compilation
-  cost. Seven entry variants put us at 29, and *every* capture 400'd into the plain-text
-  fallback. Text fields are now plain strings using `""` for "not stated" (`normalizeEntry`
-  turns `""` into null via `textOrNull`, so nothing downstream changed); numbers and booleans
-  keep `null`, because there is no honest empty number and a sentinel would put a figure the
-  trader never said into a record. Now 13. **Adding a nullable number or boolean to an entry
-  kind spends from that budget — count before adding one.** `npm run check:schema` enforces this
-  offline (and runs as the eval's pre-flight), so it fails locally instead of silently in
-  production the way it did the first time.
+- **No structured outputs — the shape is ours to enforce.** Constraining generation with
+  `output_config.format` hit two Anthropic ceilings back to back: first the **16 union-typed
+  parameter** cap (seven entry variants put us at 29), then, after fixing that, *"the compiled
+  grammar is too large"*. Both 400'd before the model ever read the note, so **every** capture
+  fell back to plain text — that was the "AI isn't doing anything" bug, start to finish.
+  Shrinking to fit an undocumented grammar-size limit would have meant deleting entry kinds or
+  fields, i.e. deleting the product, so the schema is no longer sent at all.
+  - The prompt teaches the shape (two full worked examples + an explicit raw-JSON contract) and
+    `parseJsonLoose()` + `normalizeExtraction()` enforce it. That normalizer was **always** the
+    real guarantee: it had to survive hand-edited drafts read back from the store, so it already
+    coerces types, drops unknown kinds and fills defaults. The grammar only ever bought us
+    well-formed JSON, which `parseJsonLoose` recovers (strips ``` fences, takes the outermost
+    `{...}`).
+  - `lib/extraction.ts` keeps `optionalText` (`""` for "not stated") over nullable strings —
+    fewer ways for the model to express "nothing", and `textOrNull` turns `""` into null anyway.
+  - The new risk is prompt/normalizer **drift**, since nothing external validates the shape.
+    `npm run check:capture` guards exactly that (and runs as the eval's pre-flight): it pulls the
+    worked examples out of the prompt the model actually receives, runs them through the real
+    parse + normalize path, and fails if an entry is dropped or the prompt promises a field the
+    normalizer discards. Both failure modes are covered by negative tests.
 - **Eval harness**: `npm run eval:capture` runs `tests/fixtures/capture/*.txt` through the real
   pipeline against a throwaway seeded world and prints a per-fixture diff (kinds produced,
   fields extracted, links resolved). Add a fixture + `.expected.json` sidecar before changing
@@ -495,5 +505,5 @@ npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
-npm run check:schema   # offline: does the capture schema satisfy the API's limits?
+npm run check:capture  # offline: do the prompt's examples survive parse + normalize?
 ```

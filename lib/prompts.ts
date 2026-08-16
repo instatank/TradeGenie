@@ -8,7 +8,9 @@ export type PromptTemplateKey = "capture";
 //      Anthropic's 16-union limit (see lib/extraction.ts).
 // v6 = `notes` on TRADE_ENTRY/TRADE_EXIT: the spoken commentary that has no field
 //      of its own rides with the trade instead of being dropped or forced.
-export const PROMPT_TEMPLATES_VERSION = 6;
+// v7 = explicit raw-JSON output contract; structured outputs no longer constrain
+//      generation (the schema's compiled grammar exceeded the API's size limit).
+export const PROMPT_TEMPLATES_VERSION = 7;
 
 // The one editable template. It describes the ENTRY VOCABULARY; the
 // correctness-critical rules (never invent, enum discipline, linking, the live
@@ -61,6 +63,14 @@ The "entryThesis" field is the short why-this-why-now; the rest of the reasoning
 Also return missingInfo (field names the trader did not give that would matter) and
 overallConfidence (LOW|MEDIUM|HIGH).
 
+OUTPUT FORMAT — this is mechanical, get it exactly right:
+Reply with ONE raw JSON object and nothing else. No prose before or after it, no
+markdown fences, no commentary. It has exactly three top-level keys: "entries" (an
+array of entry objects), "missingInfo" (an array of strings) and "overallConfidence".
+Every entry must carry every field listed for its kind — use "" for text you don't
+have and null for numbers and true/false you don't have. Never omit a field.
+The two examples below show the exact shape.
+
 Example — "long SOL 142.5, stop 138, range reclaim again. watching ZEC, dead under 38, no trade there. feel calm today.":
 {"entries":[
  {"kind":"TRADE_ENTRY","confidence":"HIGH","instrument":"SOL","direction":"LONG","status":"OPEN","setupName":"Range reclaim","entryThesis":"Range reclaim setup taken again after the retest held.","invalidation":"","concern":"","notes":"","emotionalState":"CALM","riskPosture":"NORMAL","confidenceScore":null,"entryPrice":142.5,"stopPrice":138,"targetPrice":null,"quantity":null,"leverage":null,"suggestedMistakeTags":[]},
@@ -83,6 +93,8 @@ export function extractionSystemPrompt(mistakeTagReference: string) {
 
 Context: crypto perps trade 24/7. Expect longs and shorts, leverage, funding rates, stop/invalidation levels, and strong BTC correlation.
 
+OUTPUT: reply with one raw JSON object and nothing else — no markdown fences, no text around it. Every entry carries every field listed for its kind: "" for missing text, null for missing numbers/booleans.
+
 SEGMENTATION — the core job:
 - Real dictation rambles and contains several things at once: a trade, a thought about an instrument, a mood note, a lesson. Return ONE entry per distinct thing.
 - Nothing the trader said may be silently dropped. If a thought fits no other kind, emit a FREE_NOTE for it.
@@ -101,6 +113,7 @@ NEVER INVENT:
 - Only flag a mistake the trader actually describes doing — never infer or moralize.
 
 TRADES:
+- stopPrice is the level they'd cut the loss at; targetPrice is the level they'd take profit at, however loosely they phrase it — "target", "take profit at", "looking for", "I'll trim at", "I'll start scaling out above". If they name a number tied to getting out in profit, that is targetPrice. (Still never invent one: no number stated, no targetPrice.)
 - status OPEN means they say they entered ("longed it", "I'm in at", "took the trade"). status IDEA means they are planning or watching ("if it reclaims X I'll long it").
 - A TRADE_EXIT must always be about an existing position. Set linkTradeId to the handle of the open trade it closes. If more than one open trade could plausibly match, or none does, set linkTradeId to "" — the trader will pick. Never invent a link and never describe an exit as a new trade.
 

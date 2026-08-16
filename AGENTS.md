@@ -50,9 +50,9 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `components/OptionField.tsx`: the pill controls with an "or type another…" box (radio / checkbox / select). Server-rendered, zero client JS — a control named `x` posts its typed label in `xCustom`, and typed always beats the tapped chip.
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
-- `lib/transcript-processor.ts`: one Claude call per captured note (official SDK, structured outputs) returning an array of typed entries; single-FREE_NOTE fallback when the AI is off, unkeyed, or erroring — the reason always rides along.
+- `lib/transcript-processor.ts`: one Claude call per captured note (official SDK; the shape is taught by the prompt and enforced by parseJsonLoose + normalizeExtraction, not by a JSON schema — see CLAUDE.md) returning an array of typed entries; single-FREE_NOTE fallback when the AI is off, unkeyed, or erroring — the reason always rides along.
 - `lib/ai-status.ts`: turns a thrown Anthropic error into an actionable sentence, and backs the `/settings` "Test AI connection" check. Every AI path reads its model from `activeModel()`.
-- `lib/extraction.ts`: the entry vocabulary — kinds, per-kind fields, the JSON Schema, and the tolerant normalizer used on both the model response and every read of a saved draft.
+- `lib/extraction.ts`: the entry vocabulary — kinds, per-kind fields, the tolerant normalizer used on both the model response and every read of a saved draft.
 - `lib/extraction-context.ts`: the ~300-token trader-context block (open trades, tracked assets, recent instruments, active setups) + open-trade handle resolution.
 - `lib/market-context.ts`: the SignalDesk bridge — fetches the market snapshot for a trade's entry and returns null on any failure. Design record lives in the other repo: `signaldesk/TRADEGENIE_BRIDGE.md`.
 - `scripts/eval-capture.ts` / `tests/fixtures/capture/`: `npm run eval:capture` scores the capture pipeline against 15 realistic messy notes.
