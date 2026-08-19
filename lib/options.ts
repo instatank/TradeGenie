@@ -7,7 +7,7 @@ import {
   mindStateOptions,
   riskPostures,
 } from "@/lib/constants";
-import { createRecord, deleteWhere, listRecords } from "@/lib/store";
+import { createRecord, deleteWhere, listRecords, updateRecord } from "@/lib/store";
 import type { CustomOption, MistakeTag } from "@/lib/types";
 
 // THE custom-option registry. Every preset-pill field whose vocabulary the
@@ -213,6 +213,22 @@ export async function getOptionCatalog(): Promise<OptionCatalog> {
   };
 }
 
+/** Rename one of the trader's own labels — the DISPLAY label only.
+ *
+ *  The stored `value` is deliberately frozen. Records carry the value, not the
+ *  label (analytics group by it, filters match on it), so re-normalizing on a
+ *  rename would orphan every entry already using it: they'd fall back to the
+ *  humanized old value while the picker showed the new one. Renaming is for
+ *  fixing how a label reads, not for changing what it means — for that, add a
+ *  new label and retire the old one. */
+export async function renameCustomOption(id: string, label: string) {
+  const clean = cleanOptionLabel(label);
+  if (!clean) return null;
+  const option = (await listRecords("customOptions")).find((entry) => entry.id === id);
+  if (!option) return null;
+  return updateRecord("customOptions", id, { label: clean, updatedAt: new Date() });
+}
+
 /** Remove one of the trader's own labels. The built-in set can't be touched, and
  *  records already carrying the value keep it — they just fall back to the
  *  humanized form. Nothing in the journal is rewritten. */
@@ -224,6 +240,18 @@ export async function removeCustomOption(id: string) {
 // Stored as real mistakeTags records (a trade links to one by id), so they get
 // their own registration path — but the same rules: normalize once, never
 // duplicate an existing tag, keep the typed label for display.
+
+/** Same rule as renameCustomOption: the display label moves, the `name` does
+ *  not. Trades link to a mistake tag by id so the name is not load-bearing for
+ *  them, but the built-in/primary sets are keyed by name — re-normalizing on a
+ *  rename could quietly collide with one of those. */
+export async function renameCustomMistakeTag(id: string, label: string) {
+  const clean = cleanOptionLabel(label);
+  if (!clean) return null;
+  const tag = (await listRecords("mistakeTags")).find((entry) => entry.id === id);
+  if (!tag) return null;
+  return updateRecord("mistakeTags", id, { label: clean });
+}
 
 export async function registerCustomMistakeTags(labels: string[]): Promise<MistakeTag[]> {
   const cleaned = labels.map(cleanOptionLabel).filter(Boolean);

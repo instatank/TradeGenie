@@ -1,6 +1,6 @@
 import { format } from "date-fns";
-import { NotebookPen, Trash2 } from "lucide-react";
-import { deleteFreeNoteAction, saveQuickNoteAction } from "@/app/actions";
+import { NotebookPen, Pencil, Trash2 } from "lucide-react";
+import { deleteFreeNoteAction, saveQuickNoteAction, updateFreeNoteAction } from "@/app/actions";
 import { TagPills } from "@/components/TagPills";
 import type { FreeNote } from "@/lib/types";
 
@@ -82,6 +82,28 @@ export function QuickNoteBox({
                 <span className="text-[11px] text-forge-muted">{format(note.createdAt, "HH:mm")}</span>
                 <TagPills tags={note.tags} />
               </div>
+              {/* Fixing a typo or finishing a half-typed thought shouldn't mean
+                  delete-and-retype. Same one-field shape as writing the note:
+                  edit the words, tags re-derive from the #hashtags in them. */}
+              <details className="mt-2">
+                <summary className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-forge-muted transition hover:text-forge-blue">
+                  <Pencil className="h-3 w-3" aria-hidden="true" />
+                  Edit
+                </summary>
+                <form action={updateFreeNoteAction} className="mt-2 space-y-2">
+                  <input type="hidden" name="id" value={note.id} />
+                  <input type="hidden" name="redirectTo" value={redirectTo} />
+                  <label className="sr-only" htmlFor={`edit-note-${note.id}`}>Edit note</label>
+                  <textarea
+                    id={`edit-note-${note.id}`}
+                    name="text"
+                    defaultValue={note.text}
+                    rows={3}
+                    className="textarea min-h-16 w-full"
+                  />
+                  <button className="button-secondary" type="submit">Save changes</button>
+                </form>
+              </details>
             </article>
           ))}
         </div>

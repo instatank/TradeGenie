@@ -11,6 +11,8 @@ import {
   getOptionCatalog,
   registerCustomMistakeTags,
   removeCustomOption,
+  renameCustomMistakeTag,
+  renameCustomOption,
   splitCustomLabels,
   type OptionCatalog,
   type OptionGroupKey,
@@ -514,6 +516,26 @@ export async function saveQuickNoteAction(formData: FormData) {
   revalidatePath("/daily");
   revalidatePath("/search");
   redirect(withFeedback(`${redirectTo}#note-${note.id}`, "Note saved to today's review."));
+}
+
+// Editing a saved quick note. Same "nothing to decide" shape as writing one:
+// one text field, tags re-derived from its #hashtags. The note keeps its id and
+// its `createdAt`, so it stays filed to the same day and every deep link into it
+// (search results, the `#note-<id>` anchor) still lands.
+export async function updateFreeNoteAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const text = toText(formData.get("text"));
+  const redirectTo = toText(formData.get("redirectTo")) ?? "/";
+  if (!text) {
+    // Emptying the box is not how you delete a note — the delete button is right
+    // there, and silently dropping the text would look like a save that worked.
+    redirect(withFeedback(`${redirectTo}#note-${id}`, "A note can't be emptied — use delete if you want it gone.", "error"));
+  }
+  await db.update("freeNotes", id, { text, tags: deriveTags([text]), updatedAt: new Date() });
+  revalidatePath("/");
+  revalidatePath("/daily");
+  revalidatePath("/search");
+  redirect(withFeedback(`${redirectTo}#note-${id}`, "Note updated."));
 }
 
 export async function deleteFreeNoteAction(formData: FormData) {
@@ -1034,6 +1056,42 @@ export async function deleteImportBatchAction(formData: FormData) {
 // Housekeeping for the labels the trader invented. Removing one takes it out of
 // the pickers only — records that already carry the value keep it and fall back
 // to the humanized form, so nothing in the journal is rewritten behind them.
+// Renaming is the edit half of the same housekeeping: a label typed in a hurry
+// ("chased bo") should be fixable without retiring it and re-tagging everything.
+// Only what's shown changes — see renameCustomOption for why the stored value
+// stays put.
+export async function renameCustomOptionAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const label = toText(formData.get("label"));
+  if (!label) {
+    redirect(withFeedback("/settings", "A label needs some text — nothing was renamed.", "error"));
+  }
+  const renamed = await renameCustomOption(id, label);
+  revalidatePath("/settings");
+  await redirectBackWithFeedback(
+    renamed ? `Renamed to “${renamed.label}”. Entries already using it now read the new way.` : "That label is gone already.",
+    "/settings",
+  );
+}
+
+export async function renameCustomMistakeTagAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const label = toText(formData.get("label"));
+  if (!label) {
+    redirect(withFeedback("/settings", "A label needs some text — nothing was renamed.", "error"));
+  }
+  const tag = await db.get("mistakeTags", id);
+  if (tag && defaultMistakeTagNames.has(tag.name)) return;
+  const renamed = await renameCustomMistakeTag(id, label);
+  revalidatePath("/settings");
+  revalidatePath("/trades");
+  revalidatePath("/analytics");
+  await redirectBackWithFeedback(
+    renamed ? `Renamed to “${renamed.label}”. Trades tagged with it now read the new way.` : "That tag is gone already.",
+    "/settings",
+  );
+}
+
 export async function removeCustomOptionAction(formData: FormData) {
   const id = String(formData.get("id"));
   const option = (await db.list("customOptions")).find((entry) => entry.id === id);

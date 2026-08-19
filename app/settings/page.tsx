@@ -1,7 +1,9 @@
-import { Download, Stethoscope, X } from "lucide-react";
+import { Download, Pencil, Stethoscope, X } from "lucide-react";
 import {
   removeCustomMistakeTagAction,
   removeCustomOptionAction,
+  renameCustomMistakeTagAction,
+  renameCustomOptionAction,
   saveSettingsAction,
   testAiConnectionAction,
 } from "@/app/actions";
@@ -204,19 +206,32 @@ async function CustomLabelsPanel() {
           {customMistakes.length ? (
             <LabelGroup title="Trade review — mistakes">
               {customMistakes.map((tag) => (
-                <LabelChip key={tag.id} id={tag.id} label={tag.label} action={removeCustomMistakeTagAction} />
+                <LabelChip
+                  key={tag.id}
+                  id={tag.id}
+                  label={tag.label}
+                  action={removeCustomMistakeTagAction}
+                  renameAction={renameCustomMistakeTagAction}
+                />
               ))}
             </LabelGroup>
           ) : null}
           {groups.map((group) => (
             <LabelGroup key={group.key} title={group.title}>
               {group.entries.map((entry) => (
-                <LabelChip key={entry.id} id={entry.id} label={entry.label} action={removeCustomOptionAction} />
+                <LabelChip
+                  key={entry.id}
+                  id={entry.id}
+                  label={entry.label}
+                  action={removeCustomOptionAction}
+                  renameAction={renameCustomOptionAction}
+                />
               ))}
             </LabelGroup>
           ))}
           <p className="text-xs text-forge-muted">
-            Removing a label only takes it out of the pickers. Entries that already carry it keep it — except a mistake
+            Tap a label to rename or retire it. Renaming changes how it reads everywhere, including on entries that
+            already carry it. Removing only takes it out of the pickers. Entries that already carry it keep it — except a mistake
             tag, which trades link to by id, so removing one un-tags those trades and says how many.
           </p>
         </div>
@@ -234,29 +249,46 @@ function LabelGroup({ title, children }: { title: string; children: React.ReactN
   );
 }
 
+// Tapping a label opens its housekeeping: rename it, or retire it. Both live
+// behind the same tap because both are rare — this panel exists for the once-in-
+// a-while tidy-up, not for the daily loop. Two sibling forms, never nested, so
+// neither submit can swallow the other. Zero client JS, like every other pill.
 function LabelChip({
   id,
   label,
   action,
+  renameAction,
 }: {
   id: string;
   label: string;
   action: (formData: FormData) => Promise<void>;
+  renameAction: (formData: FormData) => Promise<void>;
 }) {
   return (
-    <form action={action} className="inline-flex">
-      <input type="hidden" name="id" value={id} />
-      <span className="inline-flex items-center gap-1 rounded-full border border-forge-line bg-white py-1 pl-3 pr-1 text-sm">
+    <details className="inline-block align-top">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border border-forge-line bg-white px-3 py-1 text-sm transition hover:border-forge-blue hover:text-forge-blue">
         {label}
-        <button
-          type="submit"
-          className="rounded-full p-1 text-forge-muted transition hover:bg-red-50 hover:text-forge-red"
-          title={`Remove ${label}`}
-          aria-label={`Remove ${label}`}
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </span>
-    </form>
+        <Pencil className="h-3 w-3 text-forge-muted" aria-hidden="true" />
+      </summary>
+      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-forge-line bg-forge-panel p-2">
+        <form action={renameAction} className="flex items-center gap-2">
+          <input type="hidden" name="id" value={id} />
+          <label className="sr-only" htmlFor={`rename-${id}`}>{`Rename ${label}`}</label>
+          <input id={`rename-${id}`} name="label" defaultValue={label} className="input min-h-8 w-44 text-sm" />
+          <button className="button-secondary min-h-8 px-2 text-sm" type="submit">Rename</button>
+        </form>
+        <form action={action}>
+          <input type="hidden" name="id" value={id} />
+          <button
+            type="submit"
+            className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-sm text-forge-muted transition hover:bg-red-50 hover:text-forge-red"
+            title={`Remove ${label}`}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+            Remove
+          </button>
+        </form>
+      </div>
+    </details>
   );
 }

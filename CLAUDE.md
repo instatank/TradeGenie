@@ -443,7 +443,12 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     output. The inbox review card resolves mind state / risk posture from the form
     box; an out-of-vocabulary value in an AI draft still falls back to `UNKNOWN`.
     (Same line we drew for tags: no AI-proposed vocabulary.)
-  - **/settings → "Your own labels"** lists everything added, with a remove ✕.
+  - **/settings → "Your own labels"** lists everything added; tapping a label opens
+    **rename** and **remove** together. Rename moves the **display label only** —
+    the stored `value` (and a mistake tag's `name`) is frozen, because records
+    carry the value and analytics group by it, so re-normalizing would orphan
+    every entry already using it. Rename is for fixing how a label reads, not for
+    changing what it means; for that, add a new label and retire the old one.
     Removing takes a label out of the pickers only; records already carrying the
     value keep it and fall back to the humanized form. The exception is a mistake
     tag, which trades link to by id — removing one un-tags those trades and says
@@ -521,9 +526,15 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - Tags come from inline `#hashtags` via `deriveTags` — nothing extra to fill in.
     Indexed in `lib/search.ts` as its own **"Quick notes"** kind, deep-linking to
     `/daily?date=...#note-<id>`. Added to `/api/export`.
-  - Deliberately NOT done: editing a saved note (delete + retype — it's one line),
-    and a separate calendar entry (the owner chose the day-review home over a
-    parallel calendar item).
+  - **Edit came later** (`updateFreeNoteAction`): "delete + retype" was fine for a
+    one-liner and wrong for a paragraph, so each note in the day's list carries an
+    **"Edit"** fold — same one-field shape as writing it, tags re-derived from the
+    text. `id` and `createdAt` are untouched, so the note stays filed to its day
+    and every `#note-<id>` deep link (search results, the post-save anchor) still
+    lands. Emptying the box is refused, not treated as a delete — the delete
+    button is right there, and a silent drop would look like a save that worked.
+  - Deliberately NOT done: a separate calendar entry (the owner chose the
+    day-review home over a parallel calendar item).
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
