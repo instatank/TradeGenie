@@ -32,6 +32,11 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - Optional SignalDesk bridge (both required, or the feature is off):
   - `SIGNALDESK_SNAPSHOT_URL`
   - `SIGNALDESK_SNAPSHOT_TOKEN`
+- Optional site password gate (`lib/site-auth.ts` + `middleware.ts`), off until set:
+  - `SITE_PASSWORD` — one shared password for the whole app, checked in `middleware.ts`.
+    No `SITE_PASSWORD` means no gate at all, same "off until configured" rule as
+    everything else here. Built because Vercel's own Deployment Protection is a
+    paid Pro feature and this app has exactly one user.
 - Do not commit secrets, service account JSON, `.env`, `.env.local`, or local data exports.
 - Screenshot uploads use Firebase Storage when Firebase is configured; local disk under `public/uploads` is only a development fallback.
 

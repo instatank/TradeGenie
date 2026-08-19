@@ -536,6 +536,26 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - Deliberately NOT done: a separate calendar entry (the owner chose the
     day-review home over a parallel calendar item).
 
+- **Site password gate** (`lib/site-auth.ts`, `middleware.ts`, `app/login/`). The app was
+  fully open at its Vercel URL — anyone with the link had read *and write* access. Vercel's
+  own Deployment Protection (password or SSO) is a paid Pro feature; for one trader that
+  cost buys nothing a five-line middleware check doesn't already do.
+  - **One password, one cookie, no accounts.** `SITE_PASSWORD` is a single env var checked
+    against the login form; the cookie is a SHA-256 digest of the password (`lib/site-auth.ts`),
+    not the password itself, computed with Web Crypto so the same code runs in the Edge
+    `middleware.ts` runtime and the Node server-action runtime. Rotating `SITE_PASSWORD`
+    invalidates every existing cookie for free, with no session store.
+  - **Off until configured** — same rule as the SignalDesk bridge and the AI path. No
+    `SITE_PASSWORD` means `middleware.ts` no-ops entirely; a fresh clone or an unconfigured
+    preview deploy behaves exactly as before this existed, so this can never lock anyone out
+    by accident.
+  - **Stateless on purpose, with the tradeoff that implies**: there is no server-side session
+    list, so "log out" (`/settings` → Log out) only clears the browser's cookie — a copied
+    cookie value stays valid until the password is rotated. Acceptable for keeping a personal
+    URL private; not a defense against a captured cookie.
+  - `middleware.ts` matcher excludes only `/login` and Next's own static/image assets, so it
+    covers every page, every server action, and `/api/export` (the full-backup dump) alike.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

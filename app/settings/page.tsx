@@ -1,4 +1,5 @@
-import { Download, Pencil, Stethoscope, X } from "lucide-react";
+import { Download, Lock, Pencil, Stethoscope, X } from "lucide-react";
+import { logoutAction } from "@/app/login/actions";
 import {
   removeCustomMistakeTagAction,
   removeCustomOptionAction,
@@ -14,6 +15,7 @@ import { db } from "@/lib/data";
 import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
 import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
+import { siteAuthConfigured } from "@/lib/site-auth";
 import { storageStatus } from "@/lib/store";
 
 // One template now — the capture pipeline makes a single call that returns every
@@ -32,10 +34,28 @@ export default async function SettingsPage({
   const aiCheck = single(params.aiCheck);
   const aiCheckDetail = single(params.aiCheckDetail);
   const aiCheckModel = single(params.aiCheckModel);
+  const siteLocked = siteAuthConfigured();
 
   return (
     <main className="page-shell max-w-4xl">
       <PageTitle title="Settings" subtitle="Local preferences only. The API key status is shown, not stored here." />
+
+      {siteLocked ? (
+        <section className="panel mb-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-forge-panel p-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Lock className="h-4 w-4 text-forge-blue" aria-hidden="true" />
+              <div>
+                <div className="font-medium">Site is password-locked</div>
+                <div className="text-forge-muted">A password gate covers the whole app. This clears your login on this device.</div>
+              </div>
+            </div>
+            <form action={logoutAction}>
+              <button className="button-secondary" type="submit">Log out</button>
+            </form>
+          </div>
+        </section>
+      ) : null}
 
       <section className="panel mb-5 space-y-3">
         <h2 className="font-semibold">Data &amp; backup</h2>
