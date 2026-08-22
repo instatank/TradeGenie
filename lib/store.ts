@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { cache } from "react";
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, Timestamp, type Firestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import type {
   Asset,
@@ -121,7 +122,41 @@ export function newId() {
   return randomUUID();
 }
 
+// Request-scoped read cache. React's cache() hands back the same Map for the
+// whole of one render or one server action, so a page whose helpers each want
+// "trades" pays for one round trip instead of five. Measured collection reads
+// per render, before -> after: Today 18 -> 11, a trade page 18 -> 12, /inbox
+// 13 -> 7, /lessons 11 -> 8, /daily 11 -> 9. getTagVocabulary alone is 7 full
+// scans and runs on nearly every page just to draw the tag chips, which is
+// where most of the duplication came from. /search is 13 distinct collections
+// and legitimately has nothing to dedupe.
+//
+// Deliberately per-request and no longer: two clicks a second apart must still
+// see each other's writes, so every write invalidates its collection below.
+// Outside a request (the seed and eval scripts) cache() degrades to "no
+// memoization" instead of throwing, which is exactly what those want.
+const readCache = cache(() => new Map<CollectionName, Promise<unknown>>());
+
+function invalidateRead(collection: CollectionName) {
+  readCache().delete(collection);
+}
+
 export async function listRecords<K extends CollectionName>(collection: K): Promise<StoreShape[K]> {
+  const pending = readCache();
+  const hit = pending.get(collection);
+  if (hit) return hit as Promise<StoreShape[K]>;
+  // Cache the promise, not the resolved value, so the callers inside one
+  // Promise.all share a single round trip rather than each starting their own.
+  const read = fetchRecords(collection).catch((error: unknown) => {
+    // A failed read must not poison the rest of the request.
+    pending.delete(collection);
+    throw error;
+  });
+  pending.set(collection, read);
+  return read as Promise<StoreShape[K]>;
+}
+
+async function fetchRecords<K extends CollectionName>(collection: K): Promise<StoreShape[K]> {
   if (usesFirebase()) {
     const snapshot = await firestore().collection(collection).get();
     return snapshot.docs.map((doc) => hydrate({ id: doc.id, ...doc.data() })) as StoreShape[K];
@@ -147,11 +182,13 @@ export async function createRecord<K extends CollectionName>(
   const record = { ...input, id } as StoreShape[K][number];
   if (usesFirebase()) {
     await firestore().collection(collection).doc(id).set(dehydrate(record) as Record<string, unknown>);
+    invalidateRead(collection);
     return record;
   }
   const store = await readLocalStore();
   (store[collection] as StoreShape[K][number][]).push(record);
   await writeLocalStore(store);
+  invalidateRead(collection);
   return record;
 }
 
@@ -165,6 +202,7 @@ export async function updateRecord<K extends CollectionName>(
   const record = { ...existing, ...patch } as StoreShape[K][number];
   if (usesFirebase()) {
     await firestore().collection(collection).doc(id).set(dehydrate(record) as Record<string, unknown>, { merge: true });
+    invalidateRead(collection);
     return record;
   }
   const store = await readLocalStore();
@@ -172,6 +210,7 @@ export async function updateRecord<K extends CollectionName>(
   const index = list.findIndex((item) => item.id === id);
   list[index] = record;
   await writeLocalStore(store);
+  invalidateRead(collection);
   return record;
 }
 
@@ -186,11 +225,13 @@ export async function deleteWhere<K extends CollectionName>(
       batch.delete(firestore().collection(collection).doc(record.id));
     }
     await batch.commit();
+    invalidateRead(collection);
     return;
   }
   const store = await readLocalStore();
   store[collection] = (store[collection] as StoreShape[K][number][]).filter((record) => !predicate(record)) as StoreShape[K];
   await writeLocalStore(store);
+  invalidateRead(collection);
 }
 
 export async function upsertBy<K extends CollectionName>(
@@ -224,7 +265,10 @@ export function getFirestoreDb() {
   return firestore();
 }
 
+let firestoreClient: Firestore | null = null;
+
 function firestore() {
+  if (firestoreClient) return firestoreClient;
   if (!getApps().length) {
     const storageBucket = firebaseStorageBucketName();
     if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
@@ -240,7 +284,26 @@ function firestore() {
       initializeApp({ credential: applicationDefault(), ...(storageBucket ? { storageBucket } : {}) });
     }
   }
-  return getFirestore();
+  const client = getFirestore();
+  try {
+    // REST instead of gRPC. Every call we make is a one-shot read or write —
+    // there are no listeners anywhere in the app — and gRPC pays for an HTTP/2
+    // channel handshake on top of the OAuth token exchange on every cold start.
+    // For a one-user journal the container is almost always cold, so that
+    // handshake was being paid on very nearly every navigation.
+    //
+    // It also skips a module load: @grpc/grpc-js (4.8MB installed) is required
+    // lazily on the first Firestore operation, and under preferRest it is
+    // never required at all. Verified by inspecting require.cache after a call
+    // with and without this setting. google-gax still loads either way.
+    client.settings({ preferRest: true });
+  } catch {
+    // settings() refuses once the client has been used. Only reachable through
+    // a dev hot-reload that dropped our memo while the client survived — in
+    // which case the live client already has these settings.
+  }
+  firestoreClient = client;
+  return firestoreClient;
 }
 
 export function firebaseStorageBucket(bucketName = firebaseStorageBucketName()) {

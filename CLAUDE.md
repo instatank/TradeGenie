@@ -556,6 +556,30 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - `middleware.ts` matcher excludes only `/login` and Next's own static/image assets, so it
     covers every page, every server action, and `/api/export` (the full-backup dump) alike.
 
+- **Page-load latency — first pass** (owner: "any action that requires a page load takes a few
+  seconds"). Benchmarked first: rendering a page against a local store is **7–57ms**, so
+  effectively none of the delay was app code. It was cold containers, a US-East round trip and
+  a full re-read of the database, with **nothing on screen** while it happened. Three fixes:
+  - **`app/loading.tsx`** — one root skeleton. Without a loading boundary the App Router keeps
+    the *previous* page frozen on screen until the whole render arrives, so a click looked like
+    it had done nothing. It also fixes prefetch: for a dynamic route Next can only prefetch as
+    far as the nearest loading boundary, so before this every `<Link>` prefetch did a full
+    server render and cached nothing usable. (The `/trades` list fires ~6 of those at once.)
+  - **Request-scoped read cache** in `lib/store.ts` — `listRecords` memoizes the *promise* in a
+    `React.cache()` Map, so helpers sharing a collection share one round trip. Measured
+    18 → 11 reads on Today, 18 → 12 on a trade page, 13 → 7 on `/inbox`. Every write
+    invalidates its collection, so read-after-write inside one action stays correct; the cache
+    never outlives a single request. Outside a request (seed / eval scripts) `cache()`
+    degrades to no memoization rather than throwing.
+  - **`preferRest: true`** on the Firestore client (memoized, since `settings()` may only be
+    called once). No listeners anywhere in the app, so gRPC bought nothing and cost an HTTP/2
+    handshake per cold start — plus a lazy 4.8MB `@grpc/grpc-js` load that now never happens.
+  - **Still open, bigger wins**: function region is US-East while the owner is on IST (move to
+    `bom1`, check the Firestore location too); every save fans out up to 7 `revalidatePath`
+    calls that evict the five statically-cached routes; a save is two full round trips because
+    the action redirects. Full-collection scans with no `where`/`limit` remain, and grow with
+    the journal.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
