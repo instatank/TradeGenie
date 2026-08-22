@@ -58,6 +58,28 @@ import {
   type Lesson,
 } from "@/lib/types";
 
+// ONE revalidation, covering every route.
+//
+// Next gives every page an implicit "/layout" tag (see getDerivedTags in
+// next/dist/server/lib/implicit-tags: the derived list always starts with
+// `/layout`), so expiring the root layout expires the whole app's route cache.
+//
+// This replaces ~40 hand-written revalidatePath() calls that had already
+// drifted into real bugs: /analytics is a statically-prerendered route that
+// reads every trade, yet no trade action revalidated it — its numbers went
+// stale until an unrelated setup edit happened to clear it — and deleting a
+// trade never revalidated Today either. Every page here reads overlapping
+// slices of one small store, so a per-action list of paths was always going to
+// rot. Same reasoning as one tag tokenizer and one search index: the moment
+// there are two places that have to agree, they stop agreeing.
+//
+// The cost is that any save expires all cached routes rather than some. At this
+// size that is close to free — a page render is single-digit milliseconds once
+// the data is in hand — and it buys correctness that the old lists never had.
+function revalidateEverything() {
+  revalidatePath("/", "layout");
+}
+
 function withFeedback(target: string, message: string, type = "success") {
   const url = new URL(target, "http://tradeforge.local");
   url.searchParams.set("feedback", message);
@@ -172,7 +194,7 @@ export async function saveTranscriptAction(formData: FormData) {
     await db.update("transcripts", created.id, await structuredPatch(rawText));
   }
 
-  revalidatePath("/inbox");
+  revalidateEverything();
   redirect(withFeedback("/inbox", "Saved. Review the entries below, then confirm."));
 }
 
@@ -181,7 +203,7 @@ export async function structureTranscriptAction(formData: FormData) {
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
   await db.update("transcripts", id, await structuredPatch(transcript.rawText));
-  revalidatePath("/inbox");
+  revalidateEverything();
   await redirectBackWithFeedback("Voice note re-read. Review the entries before confirming.", "/inbox");
 }
 
@@ -215,7 +237,7 @@ export async function dropTranscriptEntryAction(formData: FormData) {
     cleanedSummary: buildTranscriptSummary(remaining),
     updatedAt: new Date(),
   });
-  revalidatePath("/inbox");
+  revalidateEverything();
   await redirectBackWithFeedback(`Removed the ${entryKindWord(dropped)} entry. Nothing was saved to your journal.`, "/inbox");
 }
 
@@ -347,14 +369,7 @@ export async function confirmTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
 
-  revalidatePath("/inbox");
-  revalidatePath("/trades");
-  revalidatePath("/daily");
-  revalidatePath("/lessons");
-  revalidatePath("/assets");
-  revalidatePath("/weekly-review");
-  revalidatePath("/search");
-  revalidatePath("/");
+  revalidateEverything();
   // Stay on the inbox — the trader keeps working through the queue instead of
   // being thrown onto whichever page the last entry happened to touch.
   redirect(withFeedback("/inbox?view=confirmed", `Saved ${describeWritten(written)}.`));
@@ -365,7 +380,7 @@ export async function archiveTranscriptAction(formData: FormData) {
     processingStatus: ProcessingStatus.ARCHIVED,
     updatedAt: new Date(),
   });
-  revalidatePath("/inbox");
+  revalidateEverything();
   await redirectBackWithFeedback("Voice note archived.", "/inbox");
 }
 
@@ -384,7 +399,7 @@ export async function updateTranscriptAction(formData: FormData) {
     aiConfidence: null,
     updatedAt: new Date(),
   });
-  revalidatePath("/inbox");
+  revalidateEverything();
   await redirectBackWithFeedback("Voice note edits saved. Re-read it to get fresh entries.", "/inbox");
 }
 
@@ -401,8 +416,7 @@ export async function deleteTranscriptAction(formData: FormData) {
       .filter((note) => note.linkedTranscriptId === id)
       .map((note) => db.update("freeNotes", note.id, { linkedTranscriptId: null, updatedAt: new Date() })),
   ]);
-  revalidatePath("/inbox");
-  revalidatePath("/lessons");
+  revalidateEverything();
   await redirectBackWithFeedback("Voice note deleted.", "/inbox");
 }
 
@@ -412,7 +426,7 @@ export async function linkTranscriptAction(formData: FormData) {
     linkedDailyJournalId: toText(formData.get("linkedDailyJournalId")),
     updatedAt: new Date(),
   });
-  revalidatePath("/inbox");
+  revalidateEverything();
   await redirectBackWithFeedback("Voice note links saved.", "/inbox");
 }
 
@@ -439,8 +453,7 @@ export async function extractLessonsAction(formData: FormData) {
       transcript.tags,
     );
   }
-  revalidatePath("/lessons");
-  revalidatePath("/inbox");
+  revalidateEverything();
   await redirectBackWithFeedback(
     lessons.length ? `Saved ${lessons.length} lesson${lessons.length === 1 ? "" : "s"} from this note.` : "No lessons in this note.",
     "/inbox",
@@ -484,8 +497,7 @@ export async function saveDailyJournalAction(formData: FormData) {
   } else {
     await db.create("dailyJournals", { id: newId(), createdAt: new Date(), ...payload, tags });
   }
-  revalidatePath("/daily");
-  revalidatePath("/");
+  revalidateEverything();
   redirect(withFeedback(`/daily?date=${format(date, "yyyy-MM-dd")}`, "Daily journal saved."));
 }
 
@@ -512,9 +524,7 @@ export async function saveQuickNoteAction(formData: FormData) {
     linkedTranscriptId: null,
     tags: deriveTags([text]),
   });
-  revalidatePath("/");
-  revalidatePath("/daily");
-  revalidatePath("/search");
+  revalidateEverything();
   redirect(withFeedback(`${redirectTo}#note-${note.id}`, "Note saved to today's review."));
 }
 
@@ -532,18 +542,14 @@ export async function updateFreeNoteAction(formData: FormData) {
     redirect(withFeedback(`${redirectTo}#note-${id}`, "A note can't be emptied — use delete if you want it gone.", "error"));
   }
   await db.update("freeNotes", id, { text, tags: deriveTags([text]), updatedAt: new Date() });
-  revalidatePath("/");
-  revalidatePath("/daily");
-  revalidatePath("/search");
+  revalidateEverything();
   redirect(withFeedback(`${redirectTo}#note-${id}`, "Note updated."));
 }
 
 export async function deleteFreeNoteAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("freeNotes", (note) => note.id === id);
-  revalidatePath("/");
-  revalidatePath("/daily");
-  revalidatePath("/search");
+  revalidateEverything();
   await redirectBackWithFeedback("Note deleted.", toText(formData.get("redirectTo")) ?? "/");
 }
 
@@ -557,9 +563,7 @@ export async function deleteDailyJournalAction(formData: FormData) {
       .filter((transcript) => transcript.linkedDailyJournalId === id)
       .map((transcript) => db.update("transcripts", transcript.id, { linkedDailyJournalId: null, updatedAt: new Date() })),
   );
-  revalidatePath("/daily");
-  revalidatePath("/");
-  revalidatePath("/inbox");
+  revalidateEverything();
   redirect(withFeedback("/daily", "Daily journal deleted."));
 }
 
@@ -602,7 +606,7 @@ export async function createTradeAction(formData: FormData) {
     ...numeric,
   });
   await saveScreenshot(formData.get("screenshot"), trade.id);
-  revalidatePath("/trades");
+  revalidateEverything();
   redirect(withFeedback(`/trades/${trade.id}`, "Trade note saved."));
 }
 
@@ -666,8 +670,7 @@ export async function quickLogTradeAction(formData: FormData) {
     netPnl: calculateNetPnl(realizedPnl, null, null),
     rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
   });
-  revalidatePath("/trades");
-  revalidatePath("/");
+  revalidateEverything();
   const label = `${instrument}${direction === "UNKNOWN" ? "" : ` ${direction.toLowerCase()}`}`;
   if (status === TradeStatus.CLOSED) {
     redirect(withFeedback(`/trades/${trade.id}`, `${label} logged. Take one minute to review it below.`));
@@ -801,10 +804,7 @@ export async function saveTradeAction(formData: FormData) {
     }
   }
 
-  revalidatePath(`/trades/${id}`);
-  revalidatePath("/trades");
-  revalidatePath("/");
-  revalidatePath("/lessons");
+  revalidateEverything();
   const reviewed = status === TradeStatus.CLOSED && (formData.get("followedPlan") ?? "NA") !== "NA";
   redirect(withFeedback(
     toText(formData.get("redirectTo")) ?? `/trades/${id}`,
@@ -857,8 +857,7 @@ export async function saveMorningCheckinAction(formData: FormData) {
       tags: morningTags,
     });
   }
-  revalidatePath("/daily");
-  revalidatePath("/");
+  revalidateEverything();
   redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Checked in. Have a disciplined day."));
 }
 
@@ -905,8 +904,7 @@ export async function saveEveningReviewAction(formData: FormData) {
       tags: eveningTags,
     });
   }
-  revalidatePath("/daily");
-  revalidatePath("/");
+  revalidateEverything();
   redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Day reviewed. That's the habit that compounds."));
 }
 
@@ -932,10 +930,7 @@ export async function deleteTradeAction(formData: FormData) {
       .filter((execution) => execution.linkedTradeId === id)
       .map((execution) => db.update("rawExecutions", execution.id, { linkedTradeId: null })),
   ]);
-  revalidatePath("/trades");
-  revalidatePath("/inbox");
-  revalidatePath("/lessons");
-  revalidatePath("/import");
+  revalidateEverything();
   if (redirectTo) redirect(withFeedback(redirectTo, "Trade deleted."));
   await redirectBackWithFeedback("Trade deleted.", "/trades");
 }
@@ -952,8 +947,7 @@ export async function createLessonFromTradeAction(formData: FormData) {
     linkedTradeId: tradeId,
     linkedTranscriptId: null,
   }, toText(formData.get("tags")));
-  revalidatePath(`/trades/${tradeId}`);
-  revalidatePath("/lessons");
+  revalidateEverything();
   redirect(withFeedback(`/trades/${tradeId}`, "Lesson added from trade."));
 }
 
@@ -968,7 +962,7 @@ export async function addManualLessonAction(formData: FormData) {
     linkedTradeId: null,
     linkedTranscriptId: null,
   }, toText(formData.get("tags")));
-  revalidatePath("/lessons");
+  revalidateEverything();
   await redirectBackWithFeedback("Lesson added.", "/lessons");
 }
 
@@ -976,7 +970,7 @@ export async function toggleLessonActiveAction(formData: FormData) {
   const id = String(formData.get("id"));
   const isActive = formData.get("isActive") === "true";
   await db.update("lessons", id, { isActive: !isActive, updatedAt: new Date() });
-  revalidatePath("/lessons");
+  revalidateEverything();
   await redirectBackWithFeedback(isActive ? "Lesson marked inactive." : "Lesson reactivated.", "/lessons");
 }
 
@@ -991,15 +985,14 @@ export async function updateLessonAction(formData: FormData) {
     tags: deriveTags([lessonText], toText(formData.get("tags"))),
     updatedAt: new Date(),
   });
-  revalidatePath("/lessons");
+  revalidateEverything();
   await redirectBackWithFeedback("Lesson changes saved.", "/lessons");
 }
 
 export async function deleteLessonAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("lessons", (lesson) => lesson.id === id);
-  revalidatePath("/lessons");
-  revalidatePath("/trades");
+  revalidateEverything();
   await redirectBackWithFeedback("Lesson deleted.", "/lessons");
 }
 
@@ -1007,8 +1000,7 @@ export async function linkRawExecutionAction(formData: FormData) {
   const rawExecutionId = String(formData.get("rawExecutionId"));
   const linkedTradeId = toText(formData.get("linkedTradeId"));
   await db.update("rawExecutions", rawExecutionId, { linkedTradeId });
-  revalidatePath("/import");
-  if (linkedTradeId) revalidatePath(`/trades/${linkedTradeId}`);
+  revalidateEverything();
   await redirectBackWithFeedback(linkedTradeId ? "Execution linked to trade." : "Execution unlinked.", "/import");
 }
 
@@ -1033,15 +1025,14 @@ export async function updateRawExecutionAction(formData: FormData) {
     realizedPnl: toNumber(formData.get("realizedPnl")),
     orderId: toText(formData.get("orderId")),
   });
-  revalidatePath("/import");
+  revalidateEverything();
   await redirectBackWithFeedback("Execution row saved.", "/import");
 }
 
 export async function deleteRawExecutionAction(formData: FormData) {
   const id = String(formData.get("rawExecutionId"));
   await db.deleteWhere("rawExecutions", (execution) => execution.id === id);
-  revalidatePath("/import");
-  revalidatePath("/trades");
+  revalidateEverything();
   await redirectBackWithFeedback("Execution row deleted.", "/import");
 }
 
@@ -1049,7 +1040,7 @@ export async function deleteImportBatchAction(formData: FormData) {
   const id = String(formData.get("importBatchId"));
   await db.deleteWhere("importBatches", (batch) => batch.id === id);
   await db.deleteWhere("rawExecutions", (execution) => execution.importBatchId === id);
-  revalidatePath("/import");
+  revalidateEverything();
   await redirectBackWithFeedback("Import batch deleted.", "/import");
 }
 
@@ -1067,7 +1058,7 @@ export async function renameCustomOptionAction(formData: FormData) {
     redirect(withFeedback("/settings", "A label needs some text — nothing was renamed.", "error"));
   }
   const renamed = await renameCustomOption(id, label);
-  revalidatePath("/settings");
+  revalidateEverything();
   await redirectBackWithFeedback(
     renamed ? `Renamed to “${renamed.label}”. Entries already using it now read the new way.` : "That label is gone already.",
     "/settings",
@@ -1083,9 +1074,7 @@ export async function renameCustomMistakeTagAction(formData: FormData) {
   const tag = await db.get("mistakeTags", id);
   if (tag && defaultMistakeTagNames.has(tag.name)) return;
   const renamed = await renameCustomMistakeTag(id, label);
-  revalidatePath("/settings");
-  revalidatePath("/trades");
-  revalidatePath("/analytics");
+  revalidateEverything();
   await redirectBackWithFeedback(
     renamed ? `Renamed to “${renamed.label}”. Trades tagged with it now read the new way.` : "That tag is gone already.",
     "/settings",
@@ -1097,7 +1086,7 @@ export async function removeCustomOptionAction(formData: FormData) {
   const option = (await db.list("customOptions")).find((entry) => entry.id === id);
   if (!option) return;
   await removeCustomOption(id);
-  revalidatePath("/settings");
+  revalidateEverything();
   await redirectBackWithFeedback(`Removed “${option.label}” from the pickers. Entries already using it are untouched.`, "/settings");
 }
 
@@ -1111,9 +1100,7 @@ export async function removeCustomMistakeTagAction(formData: FormData) {
   const links = (await db.list("tradeMistakes")).filter((link) => link.mistakeTagId === id);
   await db.deleteWhere("tradeMistakes", (link) => link.mistakeTagId === id);
   await db.deleteWhere("mistakeTags", (entry) => entry.id === id);
-  revalidatePath("/settings");
-  revalidatePath("/trades");
-  revalidatePath("/analytics");
+  revalidateEverything();
   await redirectBackWithFeedback(
     links.length
       ? `Removed “${tag.label}” and un-tagged ${links.length} trade${links.length === 1 ? "" : "s"}.`
@@ -1133,7 +1120,7 @@ export async function saveSettingsAction(formData: FormData) {
     },
   };
   await saveSettings(settings);
-  revalidatePath("/settings");
+  revalidateEverything();
   redirect(withFeedback("/settings", "Settings saved."));
 }
 
@@ -1145,7 +1132,7 @@ export async function testAiConnectionAction() {
   target.searchParams.set("aiCheck", result.ok ? "ok" : "fail");
   target.searchParams.set("aiCheckDetail", result.detail);
   target.searchParams.set("aiCheckModel", result.model);
-  revalidatePath("/settings");
+  revalidateEverything();
   redirect(`${target.pathname}${target.search}`);
 }
 
@@ -1185,8 +1172,7 @@ export async function generateWeeklyReviewAction(formData: FormData) {
     bestLesson: weekLessons[0]?.lessonText ?? null,
     actionItem: stats.mostCommonMistake ? `Reduce ${stats.mostCommonMistake.toLowerCase()} next week.` : "Write one clear invalidation before every trade.",
   });
-  revalidatePath("/weekly-review");
-  revalidatePath("/");
+  revalidateEverything();
   redirect(withFeedback("/weekly-review", "Weekly review generated and saved."));
 }
 
@@ -1199,14 +1185,14 @@ export async function updateWeeklyReviewAction(formData: FormData) {
     bestLesson: toText(formData.get("bestLesson")),
     actionItem: toText(formData.get("actionItem")),
   });
-  revalidatePath("/weekly-review");
+  revalidateEverything();
   await redirectBackWithFeedback("Weekly review saved.", "/weekly-review");
 }
 
 export async function deleteWeeklyReviewAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("weeklyReviews", (review) => review.id === id);
-  revalidatePath("/weekly-review");
+  revalidateEverything();
   await redirectBackWithFeedback("Weekly review deleted.", "/weekly-review");
 }
 
@@ -1267,7 +1253,7 @@ export async function createAssetAction(formData: FormData) {
     gamePlan: null,
     isArchived: false,
   });
-  revalidatePath("/assets");
+  revalidateEverything();
   redirect(withFeedback(`/assets/${asset.id}`, `Now tracking ${symbol}.`));
 }
 
@@ -1330,9 +1316,7 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
 
   // Touch the asset so it bubbles to the top of the index on any activity.
   if (!viewSaved && (newNote || notesEdited)) await db.update("assets", assetId, { updatedAt: now });
-  revalidatePath(`/assets/${assetId}`);
-  revalidatePath("/assets");
-  revalidatePath("/");
+  revalidateEverything();
   return { assetId, viewSaved, noteAdded: Boolean(newNote), notesEdited };
 }
 
@@ -1350,7 +1334,7 @@ export async function deleteAssetAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("assetNotes", (note) => note.assetId === id);
   await db.deleteWhere("assets", (asset) => asset.id === id);
-  revalidatePath("/assets");
+  revalidateEverything();
   redirect(withFeedback("/assets", "Asset removed."));
 }
 
@@ -1365,7 +1349,7 @@ export async function structureAssetNoteDraftAction(rawText: string) {
 export async function deleteAssetNoteAction(noteId: string, formData: FormData) {
   const result = await applyAssetWorkspace(formData, noteId);
   await db.deleteWhere("assetNotes", (note) => note.id === noteId);
-  revalidatePath(`/assets/${result.assetId}`);
+  revalidateEverything();
   redirect(withFeedback(`/assets/${result.assetId}`, "Note deleted — your other changes were saved."));
 }
 
@@ -1388,8 +1372,7 @@ export async function createSetupAction(formData: FormData) {
     idealRiskReward: toNumber(formData.get("idealRiskReward")),
     isActive: true,
   });
-  revalidatePath("/playbook");
-  revalidatePath("/trades/new");
+  revalidateEverything();
   await redirectBackWithFeedback("Setup added to playbook.", "/playbook");
 }
 
@@ -1410,8 +1393,7 @@ export async function updateSetupAction(formData: FormData) {
     idealRiskReward: toNumber(formData.get("idealRiskReward")),
     updatedAt: new Date(),
   });
-  revalidatePath("/playbook");
-  revalidatePath("/trades/new");
+  revalidateEverything();
   await redirectBackWithFeedback("Setup updated.", "/playbook");
 }
 
@@ -1419,7 +1401,7 @@ export async function toggleSetupActiveAction(formData: FormData) {
   const id = String(formData.get("id"));
   const isActive = formData.get("isActive") === "true";
   await db.update("setups", id, { isActive: !isActive, updatedAt: new Date() });
-  revalidatePath("/playbook");
+  revalidateEverything();
   await redirectBackWithFeedback(isActive ? "Setup archived." : "Setup reactivated.", "/playbook");
 }
 
@@ -1432,8 +1414,7 @@ export async function deleteSetupAction(formData: FormData) {
       .filter((trade) => trade.setupId === id)
       .map((trade) => db.update("trades", trade.id, { setupId: null, updatedAt: new Date() })),
   );
-  revalidatePath("/playbook");
-  revalidatePath("/trades");
+  revalidateEverything();
   await redirectBackWithFeedback("Setup deleted.", "/playbook");
 }
 
@@ -1441,8 +1422,7 @@ export async function toggleLessonPinAction(formData: FormData) {
   const id = String(formData.get("id"));
   const isPinned = formData.get("isPinned") === "true";
   await db.update("lessons", id, { isPinned: !isPinned, updatedAt: new Date() });
-  revalidatePath("/lessons");
-  revalidatePath("/trades/new");
+  revalidateEverything();
   await redirectBackWithFeedback(isPinned ? "Lesson unpinned." : "Lesson pinned.", "/lessons");
 }
 

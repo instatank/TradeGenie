@@ -574,11 +574,23 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - **`preferRest: true`** on the Firestore client (memoized, since `settings()` may only be
     called once). No listeners anywhere in the app, so gRPC bought nothing and cost an HTTP/2
     handshake per cold start — plus a lazy 4.8MB `@grpc/grpc-js` load that now never happens.
-  - **Still open, bigger wins**: function region is US-East while the owner is on IST (move to
-    `bom1`, check the Firestore location too); every save fans out up to 7 `revalidatePath`
-    calls that evict the five statically-cached routes; a save is two full round trips because
-    the action redirects. Full-collection scans with no `where`/`limit` remain, and grow with
-    the journal.
+  - **One revalidation, not forty** (`revalidateEverything()` in `app/actions.ts`). Every save
+    used to hand-write the paths it thought it affected — up to 8 per action, ~90 lines — and
+    the lists had already rotted into real staleness bugs: `/analytics` is statically
+    prerendered and reads every trade, yet **no** trade action revalidated it, so its numbers
+    stayed stale until an unrelated setup edit happened to clear them; deleting a trade never
+    revalidated Today either. Next gives every route an implicit `/layout` tag (see
+    `getDerivedTags` in `next/dist/server/lib/implicit-tags`), so a single
+    `revalidatePath("/", "layout")` expires the whole route cache. Verified at runtime: one
+    call flips `/`, `/analytics`, `/assets`, `/playbook`, `/trades/new` from HIT to MISS, and
+    they re-cache on the next visit. Same reasoning as one tag tokenizer and one search index —
+    the moment two places have to agree about what a save touched, they stop agreeing.
+  - **Still open, bigger wins**: function region is US-East while the owner is on IST — but
+    moving to `bom1` is only right if Firestore is also in `asia-south1`, otherwise it just
+    swaps a short function→DB hop for a long one. A save is still two full round trips because
+    every action `redirect()`s (the toast rides in a query param); dropping that would let one
+    action response carry the re-rendered page. Full-collection scans with no `where`/`limit`
+    remain and grow with the journal — irrelevant at 5 trades, not at 1000.
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
