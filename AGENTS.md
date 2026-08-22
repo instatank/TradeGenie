@@ -51,7 +51,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/metrics.ts`: P&L, R, win rate, expectancy, weekly stats, frequency helpers.
 - `lib/calculator.ts`: pre-trade math for `/calculator` — net-of-fees R, solved break-even price, break-even win rate, fee-aware position sizing. Pure functions, no store access.
 - `lib/tags.ts`: THE tag tokenizer — normalize/extract/derive for free-form `#tags`; every tag path goes through it.
-- `lib/options.ts`: THE custom-option registry — the trader's own labels for the preset pills (mood, market conditions, mistakes, lesson categories, asset timeframes, risk posture, trading mode, quick-note categories). One normalizer, one `customOptions` collection, one catalog. Custom mistake tags are `mistakeTags` records instead, because trades link to them by id.
+- `lib/options.ts`: THE custom-option registry — the trader's own labels for the preset pills (mood, market conditions, mistakes, lesson categories, asset timeframes, risk posture, trading mode, quick-note categories, trade timeframes, setup mechanisms). One normalizer, one `customOptions` collection, one catalog. Custom mistake tags are `mistakeTags` records instead, because trades link to them by id.
 - `components/OptionField.tsx`: the pill controls with an "or type another…" box (radio / checkbox / select). Server-rendered, zero client JS — a control named `x` posts its typed label in `xCustom`, and typed always beats the tapped chip.
 - `lib/search.ts`: unified search index over every collection + `#tag`/word query engine + tag-usage registry.
 - `components/TagPills.tsx`: tappable tag pills (route to exact-tag search) + the optional Tags form input.
@@ -59,6 +59,8 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `components/QuickNoteBox.tsx`: the day's thoughts on `/daily` — the composer plus that day's notes, and the landing spot for a thought promoted from the Today bar. Its own small form, so a half-typed thought never rides along with an unrelated save.
 - `components/QuickNoteComposer.tsx`: writing one note — textarea + Save, plus two optional taps: an "About" category row (`noteCategory`, extendable by typing) and a `TagPicker` whose first row is the assets being tracked. Shared by `/daily` and `/notes`.
 - `components/FreeNoteCard.tsx`: one saved note wherever it's read — text, time, category chip, tag pills, and an Edit fold carrying the same three controls it was written with.
+- `lib/setups.ts`: a playbook setup's "Entry checklist" read as tickable steps (one per line), the `n of N` score for a trade, and the label lookup. No new field — the checklist text IS the model definition.
+- `components/TradeSetupFields.tsx`: the "Setup & execution" controls — playbook setup chips, timeframes used, mechanisms in the entry, and the linked setup's checklist as tick chips. Shared by the trade page fold and the `/trades` inline review (inside that row's existing form).
 - `lib/notes.ts`: the `/notes` filter — category (one per note) × tags (many) × free text in the search grammar. Pure functions over the note list, no store access.
 - `lib/transcript-processor.ts`: one Claude call per captured note (official SDK; the shape is taught by the prompt and enforced by parseJsonLoose + normalizeExtraction, not by a JSON schema — see CLAUDE.md) returning an array of typed entries; single-FREE_NOTE fallback when the AI is off, unkeyed, or erroring — the reason always rides along.
 - `lib/ai-status.ts`: turns a thrown Anthropic error into an actionable sentence, and backs the `/settings` "Test AI connection" check. Every AI path reads its model from `activeModel()`.
@@ -76,7 +78,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/notes`: every quick note, filterable — category chips × tag chips × text box (search grammar), day-grouped, with a composer on top; filters are links, so every view is a real URL
 - `/trades`: day-grouped journal rows (day P&L headers, direction/status chips, mistake badges); quick symbol/date filter row, advanced filters folded
 - `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
-- `/trades/[id]`: review-first trade page — one-minute close & review panel on top, full editor collapsed below
+- `/trades/[id]`: review-first trade page — one-minute close & review panel on top, then "Setup & execution" (setup / timeframes / mechanisms / model checklist), full editor collapsed below
 - `/assets`, `/assets/[id]`: per-asset tracker — living thesis/levels page + running note thread (composer has an optional AI "Structure" tidy pass)
 - `/lessons`: lesson bank
 - `/import`: CSV import and raw execution linking

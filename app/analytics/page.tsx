@@ -2,22 +2,26 @@ import { format } from "date-fns";
 import { BinColumns, DisciplineLines, DivergingColumns, EmptyChart, Meter, MoneyBars } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
 import { humanize, sessionLabels } from "@/lib/constants";
-import { getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
+import { db, getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
+import { setupSteps } from "@/lib/setups";
 import {
   analyticsLeaks,
   averageProcessScore,
+  checklistPerformance,
   conditionPerformance,
   disciplineCurve,
   exitEfficiency,
   expectancyBreakdown,
   fundingSummary,
   getTradePnl,
+  mechanismPerformance,
   mistakeCostLedger,
   rHistogram,
   sessionPerformance,
   setupPerformance,
   tiltAnalysis,
+  timeframePerformance,
   type BucketStats,
   type LeakInsight,
   type TiltStats,
@@ -27,7 +31,12 @@ import {
 // the one thing hurting me" in plain language. Everything deeper — distributions,
 // tilt, sessions, exit quality, the full tables — sits one tap away.
 export default async function AnalyticsPage() {
-  const [trades, setupNameById, options] = await Promise.all([getTradesWithMistakes(), getSetupNameMap(), getOptionCatalog()]);
+  const [trades, setupNameById, options, playbook] = await Promise.all([
+    getTradesWithMistakes(),
+    getSetupNameMap(),
+    getOptionCatalog(),
+    db.list("setups"),
+  ]);
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const closedWithPnl = closed
     .filter((trade) => getTradePnl(trade) != null)
@@ -42,6 +51,12 @@ export default async function AnalyticsPage() {
   const setups = setupPerformance(trades, setupNameById);
   const sessions = sessionPerformance(trades, sessionLabels);
   const conditions = conditionPerformance(trades, options.labeler("condition"));
+  const timeframes = timeframePerformance(trades, options.labeler("tradeTimeframe"));
+  const mechanisms = mechanismPerformance(trades, options.labeler("mechanism"));
+  // How many steps each setup's checklist has, so a trade can be graded against
+  // the model it was actually taken on.
+  const stepTotals = new Map(playbook.map((setup) => [setup.id, setupSteps(setup.checklist).length]));
+  const checklist = checklistPerformance(trades, (trade) => (trade.setupId ? stepTotals.get(trade.setupId) ?? 0 : 0));
   const leaks = analyticsLeaks(trades, setups, conditions);
 
   const histogram = rHistogram(trades);
@@ -313,6 +328,26 @@ export default async function AnalyticsPage() {
               <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={setups} firstColLabel="Setup" />
               <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={sessions} firstColLabel="Session" />
               <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={conditions} firstColLabel="Condition" />
+              <BucketTable
+                title="By timeframe"
+                subtitle="Which charts you actually make money on. A trade counts in every timeframe it used, so these add up to more than your trade count."
+                rows={timeframes}
+                firstColLabel="Timeframe"
+              />
+              <BucketTable
+                title="By mechanism"
+                subtitle="What the entry was built out of — FVG, order block, sweep. The one table that tells you which part of the model is carrying you."
+                rows={mechanisms}
+                firstColLabel="Mechanism"
+              />
+              {checklist.length ? (
+                <BucketTable
+                  title="Model followed, or not"
+                  subtitle="Closed trades on a setup with a checklist, split by whether every step was actually there. If these two rows look the same, the checklist isn't earning its place yet."
+                  rows={checklist}
+                  firstColLabel="Checklist"
+                />
+              ) : null}
             </div>
           </details>
         </div>

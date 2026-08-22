@@ -108,6 +108,8 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
         ["Notes", trade.notes],
         ["Mistakes", trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")],
         ["Conditions", (trade.conditions ?? []).map(options.labeler("condition")).join(", ")],
+        ["Timeframes", (trade.timeframes ?? []).map(options.labeler("tradeTimeframe")).join(", ")],
+        ["Mechanisms", (trade.mechanisms ?? []).map(options.labeler("mechanism")).join(", ")],
         ["Mind state", options.label("mindState", trade.emotionalState)],
       ]),
     });

@@ -57,6 +57,9 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   · PROCESS · OTHER` (`coreLessonCategories`). Old categories still display on existing lessons.
 - Quick-trade form: only instrument/direction/status/thesis are surfaced; everything else
   (context, market conditions, prices) is in collapsed sections.
+- **Trade execution vocabulary**: `tradeTimeframe` (1m · 5m · 15m · 1H · 4H · 1D) and
+  `mechanism` (12 ICT/SMC concepts, hints on the chips). Both multi-select and extendable;
+  the model checklist comes from the playbook setup, not from a fixed list.
 
 ## Data durability (top priority, resolved)
 - Storage adapter: `lib/store.ts`. `storageStatus()` is the single source of truth:
@@ -584,6 +587,48 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     was missing from every picker in the app — a real bug the moment notes got a tag picker.
   - Deliberately NOT done: AI-suggested categories, a second date-range control on `/notes`
     (the day grouping plus `/daily?date=` covers it), and pinning/archiving notes.
+
+- **How the trade was taken — "Setup & execution"** (`components/TradeSetupFields.tsx`,
+  `lib/setups.ts`, two new option groups). P&L tells you *that* something worked; nothing in
+  the journal said *what*. Three tap-only rows and one checklist now do, and they're the input
+  to every strategy question the analytics can answer.
+  - **Its own fold on the trade page, first under the review**, not buried in "objective" or
+    "subjective" data — the owner barely used those, and this is neither: it's the execution.
+    Collapsed, it still shows a one-line summary (`TradeSetupSummary`): `15m · 5m · FVG ·
+    OTE · 5/5 steps`. It opens by default on a trade that has none of it recorded.
+  - **Timeframes used** (`tradeTimeframe`: 1m/5m/15m/1H/4H/1D) and **mechanisms in the entry**
+    (`mechanism`: HTF bias, market structure shift, displacement, liquidity sweep, FVG, order
+    block, breaker, OTE, premium/discount, equal highs/lows, killzone, retest) are multi-select
+    chips through the existing `OptionChipCheckbox` — so both extend by typing, exactly like
+    every other pill row. Mechanism chips carry **hints** (shown on hover) because the owner is
+    learning the vocabulary. Deliberately the *concepts*, not the strategies: which system you
+    were running is the playbook setup.
+  - **The model checklist is the playbook setup's checklist, read as steps** (`lib/setups.ts`).
+    No new field: write the model one step per line in the setup's *Entry checklist* — TraderMayne's
+    5M model is exactly five lines — and every trade on that setup offers those lines as tick
+    chips with an `n of N` score. One definition of the model, in one place; editing the
+    checklist can never leave the trade form offering a different set of steps than the
+    playbook shows. Lines are tolerant of `-`, `1.` and `[ ]` prefixes; a line over 60 chars is
+    prose, not a step, and still reads on the playbook page without becoming a chip.
+  - **A tick stores the step's normalized value, never its index** — reordering the checklist
+    must not move a tick from one step to another, and fixing a typo in a line must not lose
+    the ticks under it. Same "value frozen, label moves" rule as custom option labels.
+  - **The same fold sits inside the `/trades` inline review**, in that row's *existing* form —
+    a second `<form>` in a row is exactly how you lose half of what you just filled in. One
+    "Save trade" covers the review and the execution tags, so the daily review pass can tag
+    mechanisms without a page load.
+  - **Filter and analyse**: `/trades` gains Setup / Timeframe / Mechanism filters; `/analytics`
+    (advanced) gains **By timeframe**, **By mechanism**, and **Model followed, or not** —
+    closed trades on a setup with a checklist, split by whether every step was actually there.
+    That last table is the whole point of the checklist: if the two rows look the same, the
+    model isn't earning its place yet. Multi-value tables deliberately sum to more than the
+    trade count (`multiValuePerformance` — one trade lands in every bucket it carries).
+  - Fixed on the way: re-typing a built-in label whose value isn't its label normalized
+    ("Just watching" → `OBSERVE_ONLY`) minted a duplicate chip. `register()` now matches on the
+    normalized label too and returns the value already stored.
+  - Deliberately NOT done: mechanisms on the 30-second quick log (it would grow the one path
+    that must stay fast — they're one tap away in the row preview), AI-filled mechanisms from a
+    voice note (a prompt + eval change of its own), and per-step notes.
 
 - **Site password gate** (`lib/site-auth.ts`, `middleware.ts`, `app/login/`). The app was
   fully open at its Vercel URL — anyone with the link had read *and write* access. Vercel's

@@ -756,6 +756,17 @@ export async function saveTradeAction(formData: FormData) {
     setupName: text("setupName", trade.setupName),
     setupId: text("setupId", trade.setupId),
     conditions: present("hasConditions") ? await options.resolveMany("condition", formData, "conditions") : trade.conditions,
+    // What the entry was actually built out of. Multi-select, extendable, and
+    // written only when the row was on screen — same field-presence rule as
+    // everything else here, so the inline review can never blank them.
+    timeframes: presentOption("timeframes") ? await options.resolveMany("tradeTimeframe", formData, "timeframes") : trade.timeframes,
+    mechanisms: presentOption("mechanisms") ? await options.resolveMany("mechanism", formData, "mechanisms") : trade.mechanisms,
+    // Plain checkboxes with no "type another" box, so they need the marker: an
+    // all-unticked checklist posts nothing at all, and "nothing" has to mean
+    // "none ticked" here rather than "not shown".
+    checklistSteps: present("hasChecklistSteps")
+      ? formData.getAll("checklistSteps").map(String).filter(Boolean)
+      : trade.checklistSteps,
     ...texts,
     // The full editor ships a prefilled Tags input, so it can remove a tag;
     // partial surfaces (inline review) can only grow the tag set.

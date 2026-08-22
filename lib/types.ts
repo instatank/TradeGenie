@@ -142,6 +142,18 @@ export type Trade = {
   concern: string | null;
   premortem?: string | null;
   conditions?: string[];
+  /** Chart timeframes this trade was actually worked on — `tradeTimeframe`
+   *  option values (1m / 5m / 15m / 1H / …, or ones the trader typed). */
+  timeframes?: string[];
+  /** The mechanisms/concepts the entry was built on — `mechanism` option values
+   *  (FVG, order block, liquidity sweep, displacement, …). Many per trade:
+   *  a real entry usually stacks two or three. */
+  mechanisms?: string[];
+  /** Which steps of the linked playbook setup's checklist were actually met.
+   *  Stored as normalized step values (`normalizeOptionValue` over the
+   *  checklist line), not indexes: reordering the checklist must not silently
+   *  move a tick from one step to another. */
+  checklistSteps?: string[];
   emotionalState: Extendable<EmotionalState> | null;
   riskPosture: Extendable<RiskPosture> | null;
   confidenceScore: number | null;
