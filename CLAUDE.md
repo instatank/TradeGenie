@@ -88,8 +88,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   journal · `LESSON` → the lesson bank · `WEEKLY_REFLECTION` → a weekly review ·
   `FREE_NOTE` → a plain searchable thought.
 - **`FREE_NOTE` is first class.** A thought that fits nothing else is kept as-is rather than
-  forced into another kind or dropped. Stored in the `freeNotes` collection and indexed by
-  `lib/search.ts` (results link back to the note they came from).
+  forced into another kind or dropped. Stored in the `freeNotes` collection — the same one the
+  hand-typed quick notes use — and indexed by `lib/search.ts` (results link back to the note
+  they came from). Written with `category: null`: the note category is the trader's tap, not
+  the model's guess.
 - **Exits can never duplicate a trade.** A `TRADE_EXIT` must carry a `linkTradeId`; if the
   model can't resolve one confidently it returns null and the card shows an **open-trade
   picker**. Confirm refuses to write *anything* until it's picked — validation runs before the
@@ -140,7 +142,7 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   DayOS's worst tag bug was two tokenizers quietly diverging; never add a second one.
   Tag charset: lowercase `a-z0-9_-`, 2–40 chars; `#` must start a word (`64#200` is not a tag).
 - **Tags are stored** as `tags?: string[]` on trades, transcripts, lessons, daily journals,
-  assets, asset notes, free notes, and setups — derived at save time (`deriveTags`) from inline
+  assets, asset notes, free notes (which also carry a one-of `category`), and setups — derived at save time (`deriveTags`) from inline
   `#hashtags` across the record's text fields plus the tag picker's selection. Zero friction:
   typing `#fomo` in any thesis/note/lesson is enough. No migration; undefined = [].
 - **`components/TagPicker.tsx` is the one way to set tags in the UI** — recent chips + a
@@ -168,8 +170,8 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 ## Navigation (lean header)
 - Primary nav = the daily loop + the asset tracker: **Today · Capture · Trades · Assets ·
   Review** (`primaryNavItems`).
-  Everything else (Calendar, Playbook, Analytics, Lessons, Import, Weekly Review, Settings) is
-  under a **"More"** `<details>` dropdown (`moreNavItems`). Nothing removed.
+  Everything else (Calendar, Notes, Playbook, Analytics, Calculator, Lessons, Import, Weekly
+  Review, Settings) is under a **"More"** `<details>` dropdown (`moreNavItems`). Nothing removed.
 
 ## Transcript → AI structuring (segmented, one call)
 - **`lib/extraction.ts` owns the vocabulary**: entry kinds, their per-kind fields, the raw JSON
@@ -314,6 +316,10 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     Today quick-note bar are the other two); inventing a tag can't be done
     with a plain `<form>`. Enter inside the box adds the tag and never submits the page.
   - `TagsField` (the old free-text tags input) is gone — one tag control, not two.
+  - **`groups` (later)**: optional labelled shortcut rows above the vocabulary, sharing the
+    same picked state and the same hidden field. The quick-note forms pass one — the assets
+    being tracked — so "a note about SOL" is a tap, not a remembered `#sol`. Shortcut chips
+    are ordinary tags; nothing about them is a separate vocabulary.
 
 - **One button saves the page** (owner: "if I hit ONE button it should capture everything on
   that page — I was losing notes"). The old failure was two independent `<form>`s per page:
@@ -535,6 +541,49 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     button is right there, and a silent drop would look like a save that worked.
   - Deliberately NOT done: a separate calendar entry (the owner chose the
     day-review home over a parallel calendar item).
+
+- **Notes got two axes and a home** (`/notes`, `lib/notes.ts`, `components/QuickNoteComposer.tsx`,
+  `components/FreeNoteCard.tsx`). The quick note became the app's universal capture — which
+  meant a growing pile with no way back into it. It now carries two things, both optional,
+  and has a page that filters on them.
+  - **The two axes are deliberately different shapes**: **category** is *one* value per note
+    ("what is this about") and **tags** are *many* ("what does it touch"). One-of and
+    many-of answer different questions, and collapsing them into one list is what makes a
+    tag vocabulary turn to mush.
+  - **Category = a `noteCategory` option group** (`lib/options.ts`), so it extends by typing
+    exactly like every other pill row in the app: `Trade · Asset · Mindset · Market · Lesson
+    · Review`, mirroring the parts of the journal a loose thought usually belongs to, plus a
+    **No category** chip. That chip's empty value is in no group's vocabulary, so `resolve()`
+    stores null for it — radios can't be unticked, and a category you can set but never clear
+    is a trap. Custom ones show up in `/settings → Your own labels` for rename/remove, free.
+  - **The asset picker is tags, not a second vocabulary.** `TagPicker` gained a `groups` prop:
+    labelled shortcut rows above your own vocabulary, sharing the same picked state and the
+    same hidden `tags` field. `/notes` and `/daily` pass one — **Assets**, from
+    `getSymbolTagSuggestions()` (tracked assets, then recently traded instruments, through
+    `normalizeTag`). Tapping **BTC** and typing **#btc** produce the identical tag, so search,
+    pills and the note filter can never disagree about what a coin is called. A separate
+    `symbols[]` field would have been exactly the DayOS two-tokenizer mistake in new clothes.
+  - **Today's bar is untouched** — one line, Enter, saved, no chips. It posts neither field,
+    which is why both had to be optional: the fastest capture path can't grow a decision.
+    Uncategorised notes are first-class and filterable as such.
+  - **`/notes` is the filter surface** (under "More"): a composer on top, then category chips ×
+    tag chips × a text box, then the matches grouped by day. **Filters are links, not client
+    state** — every view is a real URL you can bookmark or come back to, and the chip counts
+    are computed over *all* notes so a chip never vanishes as you narrow. The text box reuses
+    `parseQuery` from `lib/search.ts`: `#tag` exact, words AND-substring, mixable. One query
+    grammar in the app, not two.
+  - **`saveQuickNoteAction` / `updateFreeNoteAction` follow the field-presence rule**
+    (`saveTradeAction`'s): a field is written only if its control was on screen, so the Today
+    bar can never wipe a category or tags set elsewhere. The full card *is* the complete truth
+    for text + category + tags, which is why its Edit fold shows all three — an edit fold with
+    only the text would make "fix a typo" silently drop the tags.
+  - **AI-created notes stay uncategorised.** The capture pipeline's `FREE_NOTE` writes
+    `category: null` on purpose — the vocabulary grows from the trader's own typing, never
+    from model output. Same line already drawn for tags.
+  - `getTagVocabulary()` now counts `freeNotes` too. It didn't, so a tag invented on a note
+    was missing from every picker in the app — a real bug the moment notes got a tag picker.
+  - Deliberately NOT done: AI-suggested categories, a second date-range control on `/notes`
+    (the day grouping plus `/daily?date=` covers it), and pinning/archiving notes.
 
 - **Site password gate** (`lib/site-auth.ts`, `middleware.ts`, `app/login/`). The app was
   fully open at its Vercel URL — anyone with the link had read *and write* access. Vercel's

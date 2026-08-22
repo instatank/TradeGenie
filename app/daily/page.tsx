@@ -9,7 +9,7 @@ import { OptionChipRadio } from "@/components/OptionField";
 import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
 import { humanize } from "@/lib/constants";
-import { db, getFreeNotesForDay, getTagVocabulary, getTodayJournal } from "@/lib/data";
+import { db, getFreeNotesForDay, getSymbolTagSuggestions, getTagVocabulary, getTodayJournal } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { getTradePnl } from "@/lib/metrics";
 
@@ -19,9 +19,9 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
   const params = await searchParams;
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
-  const [journal, allTrades, tagVocabulary, options, freeNotes] = await Promise.all([
+  const [journal, allTrades, tagVocabulary, options, freeNotes, symbolTags] = await Promise.all([
     getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(), getOptionCatalog(),
-    getFreeNotesForDay(selectedDate),
+    getFreeNotesForDay(selectedDate), getSymbolTagSuggestions(),
   ]);
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const dayTrades = allTrades
@@ -105,6 +105,10 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
           notes={freeNotes}
           date={dateParam}
           redirectTo={`/daily?date=${dateParam}`}
+          categoryChoices={options.choices("noteCategory")}
+          categoryLabeler={options.labeler("noteCategory")}
+          tagVocabulary={tagNames}
+          tagGroups={symbolTags.length ? [{ label: "Assets", tags: symbolTags }] : []}
           defaultText={params?.note ?? ""}
           heading="Notes from this day"
           subtitle="Anything that didn't belong to a trade or a lesson. Add one any time — it stays with this day."

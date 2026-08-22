@@ -8,8 +8,10 @@ import {
   upsertBy,
   type StoreShape,
 } from "@/lib/store";
+import { normalizeTag } from "@/lib/tags";
 import type {
   DailyJournal,
+  FreeNote,
   Lesson,
   RawExecution,
   Screenshot,
@@ -36,7 +38,7 @@ export type TagVocabularyEntry = { tag: string; count: number; lastUsed: Date };
 // without the forms ever getting crowded. Recency beats frequency here: the
 // tags you're using this week are the ones you want under your thumb.
 export async function getTagVocabulary(): Promise<TagVocabularyEntry[]> {
-  const [trades, transcripts, lessons, assets, assetNotes, journals, setups] = await Promise.all([
+  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, freeNotes] = await Promise.all([
     listRecords("trades"),
     listRecords("transcripts"),
     listRecords("lessons"),
@@ -44,6 +46,7 @@ export async function getTagVocabulary(): Promise<TagVocabularyEntry[]> {
     listRecords("assetNotes"),
     listRecords("dailyJournals"),
     listRecords("setups"),
+    listRecords("freeNotes"),
   ]);
   const usage = new Map<string, { count: number; lastUsed: Date }>();
   const record = (tags: string[] | undefined, date: Date) => {
@@ -63,6 +66,10 @@ export async function getTagVocabulary(): Promise<TagVocabularyEntry[]> {
   for (const note of assetNotes) record(note.tags, note.updatedAt ?? note.createdAt);
   for (const journal of journals) record(journal.tags, journal.updatedAt ?? journal.date);
   for (const setup of setups) record(setup.tags, setup.updatedAt ?? setup.createdAt);
+  // Quick notes tag as freely as anything else — and now that they carry a tag
+  // picker, they're often where a tag is invented. Leaving them out kept a tag
+  // used only on notes out of every picker in the app.
+  for (const note of freeNotes) record(note.tags, note.updatedAt ?? note.createdAt);
   return [...usage.entries()]
     .map(([tag, entry]) => ({ tag, ...entry }))
     .sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime() || b.count - a.count || a.tag.localeCompare(b.tag));
@@ -198,6 +205,35 @@ export async function getFreeNotesForDay(date: Date) {
   return notes
     .filter((note) => startOfDay(note.createdAt).getTime() === day)
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+}
+
+/** Every quick note, newest first — what /notes filters over. Personal scale:
+ *  a linear scan of a few thousand notes is nothing, and a stored index would
+ *  be one more thing to keep true (same call as lib/search.ts). */
+export async function getFreeNotes(): Promise<FreeNote[]> {
+  const notes = await listRecords("freeNotes");
+  return [...notes].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+/** The symbols worth offering as one-tap tag chips on a note: the assets being
+ *  tracked, then whatever has been traded recently. Tags, not a new vocabulary —
+ *  they go through normalizeTag() like everything else, so tapping "BTC" and
+ *  typing "#btc" produce the very same tag. */
+export async function getSymbolTagSuggestions(limit = 8): Promise<string[]> {
+  const [assets, trades] = await Promise.all([listRecords("assets"), listRecords("trades")]);
+  const symbols = [
+    ...assets.filter((asset) => !asset.isArchived).map((asset) => asset.symbol),
+    ...[...trades]
+      .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
+      .map((trade) => trade.instrument),
+  ];
+  const tags: string[] = [];
+  for (const symbol of symbols) {
+    const tag = normalizeTag(symbol ?? "");
+    if (tag && !tags.includes(tag)) tags.push(tag);
+    if (tags.length >= limit) break;
+  }
+  return tags;
 }
 
 export async function getClosedTradesInRange(start: Date, end: Date): Promise<TradeWithMistakes[]> {

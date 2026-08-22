@@ -36,7 +36,8 @@ export type OptionGroupKey =
   | "lessonCategory"
   | "assetTimeframe"
   | "riskPosture"
-  | "tradingMode";
+  | "tradingMode"
+  | "noteCategory";
 
 export type OptionChoice = { value: string; label: string; hint?: string; isCustom?: boolean };
 
@@ -74,6 +75,18 @@ export const optionGroups: Record<OptionGroupKey, OptionGroupDef> = {
     placeholder: "or type another…",
     builtin: riskPostures.map((value) => ({ value, label: humanize(value) })),
   },
+  noteCategory: {
+    title: "Quick note categories",
+    placeholder: "or type another…",
+    builtin: [
+      { value: "TRADE", label: "Trade", hint: "About a position — one you're in, took or passed on" },
+      { value: "ASSET", label: "Asset", hint: "A read on a coin: levels, bias, what you're waiting for" },
+      { value: "MINDSET", label: "Mindset", hint: "How you're feeling and what it's doing to your trading" },
+      { value: "MARKET", label: "Market", hint: "Conditions, news, the wider tape" },
+      { value: "LESSON", label: "Lesson", hint: "Something you want to remember next time" },
+      { value: "REVIEW", label: "Review", hint: "Looking back at the day, the week or a run of trades" },
+    ],
+  },
   tradingMode: {
     title: "Trading mode (morning check-in)",
     placeholder: "or type another…",
@@ -87,6 +100,12 @@ export const optionGroups: Record<OptionGroupKey, OptionGroupDef> = {
 };
 
 export const optionGroupKeys = Object.keys(optionGroups) as OptionGroupKey[];
+
+/** The opt-out chip for a one-of row that is genuinely optional (a quick note
+ *  doesn't have to be about anything). Its empty value is in no group's
+ *  vocabulary, so resolve() stores null for it — radios can't be unticked, and
+ *  a category you can set but never clear is a trap. */
+export const noOptionChoice: OptionChoice = { value: "", label: "No category" };
 
 const MIN_LENGTH = 2;
 const MAX_LENGTH = 40;

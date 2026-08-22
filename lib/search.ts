@@ -245,10 +245,15 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
       id: note.id,
       href: `/daily?date=${format(note.createdAt, "yyyy-MM-dd")}#note-${note.id}`,
       title: note.text.length > 90 ? `${note.text.slice(0, 90)}…` : note.text,
-      subtitle: format(note.createdAt, "dd MMM yyyy"),
+      subtitle: [note.category ? options.label("noteCategory", note.category) : null, format(note.createdAt, "dd MMM yyyy")]
+        .filter(Boolean)
+        .join(" · "),
       date: note.createdAt,
       tags: note.tags ?? [],
-      fields: fields([["Thought", note.text]]),
+      fields: fields([
+        ["Thought", note.text],
+        ["About", note.category ? options.label("noteCategory", note.category) : null],
+      ]),
     });
   }
 

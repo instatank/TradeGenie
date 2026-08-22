@@ -15,17 +15,26 @@ const VISIBLE_RECENT = 6;
 // vocabulary hides behind "More tags". A tag you just made up is used
 // immediately, so it comes back to the front row on its own next time.
 //
+// `groups` are shortcut rows shown above your own vocabulary — the assets you
+// track, offered as one-tap chips so "a note about SOL" is one tap rather than
+// remembering to type #sol. They are ordinary tags, not a second vocabulary:
+// same picked state, same hidden field, same tokenizer. That is the whole point
+// — a symbol chip and a typed #sol are the same tag, so search and filtering
+// can never disagree about them.
+//
 // Submits one hidden `tags` input (comma separated) — the same field the plain
 // text input used to post, parsed by the one tokenizer in lib/tags.ts.
 export function TagPicker({
   selected = [],
   vocabulary = [],
+  groups = [],
   name = "tags",
   label = "Tags",
   hint = "Tap to tag. #hashtags typed in the text above are picked up automatically.",
 }: {
   selected?: string[];
   vocabulary?: string[];
+  groups?: { label: string; tags: string[] }[];
   name?: string;
   label?: string;
   hint?: string;
@@ -37,19 +46,22 @@ export function TagPicker({
   const [showAll, setShowAll] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // A tag offered by a shortcut row is already on screen, so it never doubles
+  // up in the vocabulary rows below.
+  const grouped = useMemo(() => new Set(groups.flatMap((group) => group.tags)), [groups]);
   // Everything already on this record stays visible even if it's an old tag, so
   // the picker always shows the complete truth — that's what makes it safe for
   // a save to treat this field as the final word on the record's tags.
   const front = useMemo(() => {
-    const rest = vocabulary.filter((tag) => !selected.includes(tag));
-    return [...new Set([...selected, ...rest.slice(0, VISIBLE_RECENT)])];
-  }, [selected, vocabulary]);
+    const rest = vocabulary.filter((tag) => !selected.includes(tag) && !grouped.has(tag));
+    return [...new Set([...selected.filter((tag) => !grouped.has(tag)), ...rest.slice(0, VISIBLE_RECENT)])];
+  }, [grouped, selected, vocabulary]);
   const overflow = useMemo(
-    () => vocabulary.filter((tag) => !front.includes(tag)),
-    [front, vocabulary],
+    () => vocabulary.filter((tag) => !front.includes(tag) && !grouped.has(tag)),
+    [front, grouped, vocabulary],
   );
   // Tags invented in this session live at the end until the page reloads.
-  const invented = picked.filter((tag) => !front.includes(tag) && !overflow.includes(tag));
+  const invented = picked.filter((tag) => !front.includes(tag) && !overflow.includes(tag) && !grouped.has(tag));
 
   const toggle = (tag: string) =>
     setPicked((current) => (current.includes(tag) ? current.filter((entry) => entry !== tag) : [...current, tag]));
@@ -70,6 +82,17 @@ export function TagPicker({
     <fieldset className="field" data-tag-picker={name}>
       <span className="label">{label}</span>
       <input type="hidden" name={name} value={picked.join(", ")} />
+
+      {groups
+        .filter((group) => group.tags.length)
+        .map((group) => (
+          <div key={group.label} className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-forge-muted">{group.label}</span>
+            {group.tags.map((tag) => (
+              <TagChip key={tag} tag={tag} active={picked.includes(tag)} onClick={() => toggle(tag)} />
+            ))}
+          </div>
+        ))}
 
       <div className="flex flex-wrap items-center gap-2">
         {[...front, ...invented].map((tag) => (
