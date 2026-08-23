@@ -593,12 +593,21 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     path returns a reason string, and it renders inside its own `<Suspense>` so a slow lookup
     can't hold up the rest of `/settings`. It is also how a region change gets verified after
     it ships.
-  - **Still open, bigger wins**: function region is US-East while the owner is on IST — but
-    moving to `bom1` is only right if Firestore is also in `asia-south1`, otherwise it just
-    swaps a short function→DB hop for a long one. A save is still two full round trips because
-    every action `redirect()`s (the toast rides in a query param); dropping that would let one
-    action response carry the re-rendered page. Full-collection scans with no `where`/`limit`
-    remain and grow with the journal — irrelevant at 5 trades, not at 1000.
+  - **`vercel.json` pins the function region to `bom1` (Mumbai) — RESOLVED.** Firestore turned
+    out to be in **`asia-south2` (Delhi)** while the functions ran on the US-East default, so
+    *both* hops were transcontinental: the owner (IST) reached a US datacentre, which then
+    reached back to Delhi for every read. Vercel has no Delhi region; Mumbai is ~1,150km from
+    it, so `bom1` puts the browser→function and function→database hops both inside India. This
+    is only correct because the database is in India — with Firestore in the US, moving to
+    `bom1` would have traded a short database hop for a long one and could have been *worse*.
+    Migrating Firestore itself to `asia-south1` to sit exactly beside Mumbai is not worth it:
+    the location is fixed at creation, so it would mean a new database plus a restore, to save
+    a hop already down to tens of milliseconds. Verify after any deploy on `/settings` →
+    "Where this runs", which reads the live `VERCEL_REGION`.
+  - **Still open**: a save is two full round trips because every action `redirect()`s (the
+    toast rides in a query param); dropping that would let one action response carry the
+    re-rendered page. Full-collection scans with no `where`/`limit` remain and grow with the
+    journal — irrelevant at 5 trades, not at 1000.
 
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
