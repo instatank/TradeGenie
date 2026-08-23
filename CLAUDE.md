@@ -585,6 +585,14 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     call flips `/`, `/analytics`, `/assets`, `/playbook`, `/trades/new` from HIT to MISS, and
     they re-cache on the next visit. Same reasoning as one tag tokenizer and one search index —
     the moment two places have to agree about what a save touched, they stop agreeing.
+  - **`lib/deployment-info.ts` + a "Where this runs" panel on `/settings`** answers the one
+    question the region decision turns on: which Vercel region the function ran in
+    (`VERCEL_REGION`) and where the Firestore database actually lives (asked of the Firestore
+    admin API with the credentials the app already holds), plus a plain-English verdict on
+    whether the two are on the same continent. Never load-bearing — 3s timeout, every failure
+    path returns a reason string, and it renders inside its own `<Suspense>` so a slow lookup
+    can't hold up the rest of `/settings`. It is also how a region change gets verified after
+    it ships.
   - **Still open, bigger wins**: function region is US-East while the owner is on IST — but
     moving to `bom1` is only right if Firestore is also in `asia-south1`, otherwise it just
     swaps a short function→DB hop for a long one. A save is still two full round trips because

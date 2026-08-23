@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Download, Lock, Pencil, Stethoscope, X } from "lucide-react";
 import { logoutAction } from "@/app/login/actions";
 import {
@@ -17,6 +18,7 @@ import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
 import { siteAuthConfigured } from "@/lib/site-auth";
 import { storageStatus } from "@/lib/store";
+import { colocation, deploymentInfo } from "@/lib/deployment-info";
 
 // One template now — the capture pipeline makes a single call that returns every
 // entry, so there is no per-note-type routing left to configure.
@@ -70,6 +72,13 @@ export default async function SettingsPage({
             Export backup
           </a>
         </div>
+      </section>
+
+      <section className="panel mb-5 space-y-3">
+        <h2 className="font-semibold">Where this runs</h2>
+        <Suspense fallback={<div className="rounded-lg bg-forge-panel p-3 text-sm text-forge-muted">Checking…</div>}>
+          <DeploymentPanel />
+        </Suspense>
       </section>
 
       <section className="panel mb-5 space-y-3">
@@ -158,6 +167,39 @@ function AiCheckResult({ ok, detail, model }: { ok: boolean; detail: string; mod
           Until this passes, captured notes are saved as a single plain thought instead of being split into
           trades, lessons and journal entries.
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Two numbers that decide most of the page-load latency: the distance from the
+// browser to the function, and from the function to the database. Both are
+// invisible from inside the app otherwise, and after a region change this is
+// how we confirm it actually took effect.
+async function DeploymentPanel() {
+  const info = await deploymentInfo();
+  const proximity = colocation(info);
+  const tone =
+    proximity.verdict === "together"
+      ? "border-forge-green"
+      : proximity.verdict === "apart"
+        ? "border-amber-500"
+        : "border-forge-line";
+  return (
+    <div className={`rounded-lg border-l-4 ${tone} bg-forge-panel p-3 text-sm`}>
+      <dl className="grid gap-2 sm:grid-cols-2">
+        <div>
+          <dt className="text-forge-muted">Function region</dt>
+          <dd className="font-medium">{info.functionRegion ?? "Not on Vercel (local)"}</dd>
+        </div>
+        <div>
+          <dt className="text-forge-muted">Firestore location</dt>
+          <dd className="font-medium">{info.firestoreLocation ?? "Unknown"}</dd>
+        </div>
+      </dl>
+      <div className="mt-2 text-forge-muted">{proximity.detail}</div>
+      {info.firestoreLocationNote ? (
+        <div className="mt-1 text-xs text-forge-muted">{info.firestoreLocationNote}</div>
       ) : null}
     </div>
   );
