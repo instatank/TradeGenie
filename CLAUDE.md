@@ -791,3 +791,13 @@ npm run smoke      # after a build: start the app, assert every route (incl. dyn
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
 npm run check:capture  # offline: do the prompt's examples survive parse + normalize?
 ```
+
+## Autonomous runs ("autopilot")
+When the owner hands over control — "run this end to end", "autopilot", "take it from here",
+"run the roadmap" — follow `.claude/skills/autopilot/SKILL.md`. It encodes the protocol that
+produced the page-load work: measure a baseline before theorising, verify against primary
+sources rather than recall, prove each fix at runtime, one commit per concern behind the full
+`typecheck + lint + test + build + smoke` gate, then report honestly including what was
+deliberately *not* built. The line it draws: decide all technical means yourself; bring back
+only what changes the product, spends money, faces outward, or can't be undone.
+`PENDING_TASKS.md` is the owner's roadmap, never a self-assigned task list.
