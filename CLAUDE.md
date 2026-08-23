@@ -754,6 +754,13 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     production. The dedupe itself was verified by instrumenting `fetchRecords` and counting
     reads through a real render; what the suite adds is a **source-level guard** that every
     mutator still invalidates. Unusual, but it guards the failure that actually threatens data.
+  - **Drift guards on `app/actions.ts`** (`tests/unit/actions.test.ts`): no action may call
+    `revalidatePath` directly, every action that writes must call `revalidateEverything()`, and
+    the helper must use the `"layout"` tag rather than the default (which would silently cover
+    only `/`). The 40-call fan-out grew one action at a time and rotted before anyone noticed;
+    in a codebase where new actions arrive regularly, stopping it growing back matters more
+    than the one-time cleanup. Verified by reintroducing a `revalidatePath` call and confirming
+    the guard fails.
   - **`npm run smoke`** is the gate that `next build` cannot be: build only prerenders the
     *static* routes, so a crash in a dynamic page (`/trades`, `/inbox`, a bad enum on a real
     record) ships silently. It seeds a throwaway store, starts the built app and asserts all 19
