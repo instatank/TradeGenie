@@ -238,6 +238,17 @@ export function sessionForDate(date: Date): "ASIA" | "EU" | "US" | "LATE" {
   return "LATE";
 }
 
+// How many closed trades a bucket needs before its numbers mean anything.
+// Below this, a 100% win rate is one lucky trade, not an edge — every table
+// that groups trades greys those rows out and says how many more are needed,
+// so the journal never hands back a confident-looking number it can't support.
+// Five is the same line the session chart already drew.
+export const MIN_SAMPLE = 5;
+
+export function isThinSample(count: number) {
+  return count < MIN_SAMPLE;
+}
+
 export type BucketStats = {
   key: string;
   label: string;
@@ -440,8 +451,11 @@ export function analyticsLeaks(trades: MetricTrade[], setups: BucketStats[], con
     });
   }
 
+  // MIN_SAMPLE, not 3: "this setup loses money" is a verdict, and three trades
+  // can't support one. The mistake-frequency leak above stays at 3 because
+  // counting how often you do something is an observation, not an inference.
   const worstSetup = [...setups]
-    .filter((setup) => setup.expectancyR != null && setup.count >= 3)
+    .filter((setup) => setup.expectancyR != null && setup.count >= MIN_SAMPLE)
     .sort((a, b) => (a.expectancyR ?? 0) - (b.expectancyR ?? 0))[0];
   if (worstSetup && (worstSetup.expectancyR ?? 0) < 0) {
     insights.push({
@@ -452,7 +466,7 @@ export function analyticsLeaks(trades: MetricTrade[], setups: BucketStats[], con
   }
 
   const worstCondition = [...conditions]
-    .filter((condition) => condition.expectancyR != null && condition.count >= 3)
+    .filter((condition) => condition.expectancyR != null && condition.count >= MIN_SAMPLE)
     .sort((a, b) => (a.expectancyR ?? 0) - (b.expectancyR ?? 0))[0];
   if (worstCondition && (worstCondition.expectancyR ?? 0) < 0) {
     insights.push({

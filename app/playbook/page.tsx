@@ -1,11 +1,12 @@
-import { Pencil, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ClipboardCheck, Pencil, Trash2 } from "lucide-react";
 import { createSetupAction, deleteSetupAction, toggleSetupActiveAction, updateSetupAction } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { TagPicker } from "@/components/TagPicker";
 import { humanize, setupDirectionBiases } from "@/lib/constants";
 import { db, getTagVocabulary, getTradesWithMistakes } from "@/lib/data";
-import { setupPerformance } from "@/lib/metrics";
-import { setupSteps } from "@/lib/setups";
+import { isThinSample, MIN_SAMPLE, setupPerformance } from "@/lib/metrics";
+import { checklistLines, setupSteps } from "@/lib/setups";
 
 export default async function PlaybookPage() {
   const [setups, trades, tagVocabulary] = await Promise.all([db.list("setups"), getTradesWithMistakes(), getTagVocabulary()]);
@@ -50,6 +51,16 @@ export default async function PlaybookPage() {
                   </div>
                   <SetupStat stats={stats} />
                 </summary>
+
+                {setupSteps(setup.checklist).length ? (
+                  <Link
+                    href={`/playbook/${setup.id}/run`}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg border border-forge-blue/40 bg-sky-50 px-3 py-2 text-sm font-medium text-forge-blue transition hover:border-forge-blue hover:bg-sky-100"
+                  >
+                    <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
+                    Run this setup — tick the model before you enter
+                  </Link>
+                ) : null}
 
                 <div className="mt-4 space-y-3 text-sm">
                   {setup.rules ? <Block label="Rules" body={setup.rules} /> : null}
@@ -99,35 +110,45 @@ export default async function PlaybookPage() {
   );
 }
 
-function SetupStat({ stats }: { stats?: { expectancyR: number | null; netPnl: number } }) {
+function SetupStat({ stats }: { stats?: { expectancyR: number | null; netPnl: number; count: number } }) {
   if (!stats) return null;
+  // Same honesty rule as the analytics tables: under MIN_SAMPLE closed trades
+  // the number is shown, but not in a colour that reads as a verdict.
+  const light = isThinSample(stats.count);
   const positive = (stats.expectancyR ?? 0) >= 0;
   return (
     <div className="text-right">
-      <div className={`text-lg font-semibold ${positive ? "text-forge-green" : "text-forge-red"}`}>
+      <div className={`text-lg font-semibold ${light ? "text-forge-muted" : positive ? "text-forge-green" : "text-forge-red"}`}>
         {stats.expectancyR == null ? "NA" : `${stats.expectancyR.toFixed(2)}R`}
       </div>
-      <div className="text-xs text-forge-muted">expectancy / trade</div>
+      <div className="text-xs text-forge-muted">
+        {light ? `too few trades to read (${stats.count}/${MIN_SAMPLE})` : "expectancy / trade"}
+      </div>
     </div>
   );
 }
 
 // The checklist, shown as the steps a trade will actually tick — so what you
 // see here is exactly what the trade form offers. A line too long to be a step
-// (a paragraph of prose) still reads, it just isn't numbered.
+// (a paragraph of prose) still reads, it just isn't numbered; a line that reads
+// like a step but is too long to tokenize says so, rather than disappearing.
 function Checklist({ checklist }: { checklist: string }) {
-  const steps = setupSteps(checklist);
-  if (!steps.length) return <Block label="Checklist" body={checklist} />;
+  const lines = checklistLines(checklist);
+  const tickable = lines.filter((line) => line.value).length;
+  if (!tickable) return <Block label="Checklist" body={checklist} />;
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-forge-muted">
-        Checklist · {steps.length} step{steps.length === 1 ? "" : "s"} you can tick on a trade
+        Checklist · {tickable} step{tickable === 1 ? "" : "s"} you can tick on a trade
       </div>
       <ol className="mt-1 space-y-1">
-        {steps.map((step, index) => (
-          <li key={step.value} className="flex gap-2">
+        {lines.map((line, index) => (
+          <li key={line.label} className={`flex gap-2 ${line.value ? "" : "text-forge-muted"}`}>
             <span className="text-forge-muted">{index + 1}.</span>
-            <span>{step.label}</span>
+            <span>
+              {line.label}
+              {line.value ? null : <span className="ml-2 text-xs">· too long to tick — shorten it to make it a chip</span>}
+            </span>
           </li>
         ))}
       </ol>

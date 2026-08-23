@@ -15,7 +15,9 @@ import {
   expectancyBreakdown,
   fundingSummary,
   getTradePnl,
+  isThinSample,
   mechanismPerformance,
+  MIN_SAMPLE,
   mistakeCostLedger,
   rHistogram,
   sessionPerformance,
@@ -392,6 +394,7 @@ function TiltCard({ title, stats, highlight = false }: { title: string; stats: T
 }
 
 function BucketTable({ title, subtitle, rows, firstColLabel }: { title: string; subtitle: string; rows: BucketStats[]; firstColLabel: string }) {
+  const thin = rows.filter((row) => isThinSample(row.count)).length;
   return (
     <section>
       <h3 className="font-semibold">{title}</h3>
@@ -399,31 +402,54 @@ function BucketTable({ title, subtitle, rows, firstColLabel }: { title: string; 
       {!rows.length ? (
         <p className="muted">Not enough tagged closed trades yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-forge-line">
-          <table className="min-w-full text-sm">
-            <thead className="bg-forge-panel">
-              <tr>
-                {[firstColLabel, "Trades", "Win rate", "Expectancy (R)", "Net P&L", "Process"].map((header) => (
-                  <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.key} className="border-t border-forge-line">
-                  <td className="px-3 py-2 font-medium">{row.label}</td>
-                  <td className="px-3 py-2">{row.count}</td>
-                  <td className="px-3 py-2">{row.winRate == null ? "NA" : `${(row.winRate * 100).toFixed(0)}%`}</td>
-                  <td className={`px-3 py-2 font-medium ${row.expectancyR == null ? "" : row.expectancyR >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                    {row.expectancyR == null ? "NA" : `${row.expectancyR.toFixed(2)}R`}
-                  </td>
-                  <td className={`px-3 py-2 ${row.netPnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>{row.netPnl.toFixed(2)}</td>
-                  <td className="px-3 py-2">{row.avgProcessScore == null ? "NA" : `${row.avgProcessScore.toFixed(0)}`}</td>
+        <>
+          <div className="overflow-x-auto rounded-lg border border-forge-line">
+            <table className="min-w-full text-sm">
+              <thead className="bg-forge-panel">
+                <tr>
+                  {[firstColLabel, "Trades", "Win rate", "Expectancy (R)", "Net P&L", "Process"].map((header) => (
+                    <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  // A thin row keeps its numbers but loses the colour and the
+                  // weight: green/red is what makes a number read as a verdict,
+                  // and three trades don't earn a verdict.
+                  const light = isThinSample(row.count);
+                  const tone = (positive: boolean) =>
+                    light ? "text-forge-muted" : positive ? "text-forge-green" : "text-forge-red";
+                  return (
+                    <tr key={row.key} className={`border-t border-forge-line ${light ? "bg-forge-panel/30" : ""}`}>
+                      <td className={`px-3 py-2 font-medium ${light ? "text-forge-muted" : ""}`}>
+                        {row.label}
+                        {light ? (
+                          <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-[11px] font-normal text-forge-muted ring-1 ring-forge-line">
+                            {MIN_SAMPLE - row.count} more to read this
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className={`px-3 py-2 ${light ? "text-forge-muted" : ""}`}>{row.count}</td>
+                      <td className={`px-3 py-2 ${light ? "text-forge-muted" : ""}`}>{row.winRate == null ? "NA" : `${(row.winRate * 100).toFixed(0)}%`}</td>
+                      <td className={`px-3 py-2 font-medium ${row.expectancyR == null ? (light ? "text-forge-muted" : "") : tone(row.expectancyR >= 0)}`}>
+                        {row.expectancyR == null ? "NA" : `${row.expectancyR.toFixed(2)}R`}
+                      </td>
+                      <td className={`px-3 py-2 ${tone(row.netPnl >= 0)}`}>{row.netPnl.toFixed(2)}</td>
+                      <td className={`px-3 py-2 ${light ? "text-forge-muted" : ""}`}>{row.avgProcessScore == null ? "NA" : `${row.avgProcessScore.toFixed(0)}`}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {thin ? (
+            <p className="mt-2 text-[11px] text-forge-muted">
+              {thin === rows.length ? "Every row here is" : `${thin} row${thin === 1 ? " here is" : "s here are"}`} under {MIN_SAMPLE} closed
+              trades — greyed out because that isn&apos;t enough to conclude anything yet. Keep logging; they colour in on their own.
+            </p>
+          ) : null}
+        </>
       )}
     </section>
   );

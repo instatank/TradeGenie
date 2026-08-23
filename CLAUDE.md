@@ -630,6 +630,40 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     that must stay fast — they're one tap away in the row preview), AI-filled mechanisms from a
     voice note (a prompt + eval change of its own), and per-step notes.
 
+- **The checklist, before the trade** (`/playbook/[id]/run`, `startTradeFromSetupAction`,
+  `components/RunSetupBar.tsx`). Ticking the model afterwards grades a decision already made;
+  this is the same five taps at the only moment they can change anything.
+  - **It never blocks a trade.** A missing step gets a plain-English warning and is recorded as
+    what it was — a journal that refuses to record what you actually did is a journal you stop
+    using. The confirmation names the missing steps ("Missing: Displacement.") so the half-model
+    trades are countable later, which is the point.
+  - **What it logs is an ordinary trade**, through the same `trades` collection, arriving with
+    the setup, the ticked steps, the timeframes and the mechanisms already on it — so a trade
+    taken this way needs no tagging pass afterwards at all.
+  - **The live "n of N" is CSS, not client JS** (`.checklist-gate` in `globals.css`): a counter
+    over `input[name="checklistSteps"]:checked` (name-scoped, so the mechanism chips in the same
+    form can't inflate it), rendered by a `.steps-met::after` that sits *after* the boxes because
+    counters flow in document order. The "something's missing" warning is a `:has()` progressive
+    enhancement — base CSS hides it, so a browser without `:has()` loses the nudge and nothing
+    else. This is why the page ships zero client JS despite being live.
+  - **Entry points**: `RunSetupBar` sits under the quick log on Today and `/trades/new`, and each
+    playbook card with a checklist gets a "Run this setup" button. Only setups whose checklist
+    actually parses into steps are offered (`getRunnableSetups`) — one with nothing to tick would
+    be a dead end.
+  - **No tag picker on the gate** on purpose: it stays about the model. A `#hashtag` in the
+    thesis still becomes a tag, as everywhere else.
+  - Fixed on the way: a checklist line can read like a step and still fail to tokenize
+    (`normalizeOptionValue` caps at 40 chars). Those lines now show on the playbook as
+    "too long to tick — shorten it" (`checklistLines`) instead of silently vanishing.
+
+- **The tables refuse to sound confident at small samples** (`MIN_SAMPLE` = 5, `isThinSample`).
+  A mechanism with three trades and a 100% win rate is one lucky week, and a beginner will read
+  it as an edge. Every grouped table now greys a thin row, strips the green/red — colour is what
+  makes a number read as a verdict — badges it "4 more to read this", and footnotes why. Same
+  rule on the playbook's per-setup expectancy. `analyticsLeaks` raised its setup/condition
+  verdicts from 3 trades to `MIN_SAMPLE`; the mistake-frequency leak stays at 3, because counting
+  how often you did something is an observation, not an inference.
+
 - **Site password gate** (`lib/site-auth.ts`, `middleware.ts`, `app/login/`). The app was
   fully open at its Vercel URL — anyone with the link had read *and write* access. Vercel's
   own Deployment Protection (password or SSO) is a paid Pro feature; for one trader that

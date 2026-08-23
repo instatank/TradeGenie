@@ -8,6 +8,7 @@ import {
   upsertBy,
   type StoreShape,
 } from "@/lib/store";
+import { setupSteps } from "@/lib/setups";
 import { normalizeTag } from "@/lib/tags";
 import type {
   DailyJournal,
@@ -199,6 +200,18 @@ export async function getTodayJournal(date: Date) {
 
 // The day's loose thoughts, newest last so the list reads like a running log.
 // Filed by createdAt — a free note has no other date of its own.
+/** Active setups whose checklist actually parses into steps — the ones you can
+ *  "run" as a pre-trade gate (/playbook/[id]/run). A setup without a checklist
+ *  has nothing to tick, so offering it there would be a dead end. */
+export async function getRunnableSetups(): Promise<Array<{ id: string; name: string; stepCount: number }>> {
+  const setups = await listRecords("setups");
+  return setups
+    .filter((setup) => setup.isActive)
+    .map((setup) => ({ id: setup.id, name: setup.name, stepCount: setupSteps(setup.checklist).length }))
+    .filter((setup) => setup.stepCount > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function getFreeNotesForDay(date: Date) {
   const notes = await listRecords("freeNotes");
   const day = startOfDay(date).getTime();

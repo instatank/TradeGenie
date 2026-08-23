@@ -2,14 +2,15 @@ import Link from "next/link";
 import { Lightbulb, Mic } from "lucide-react";
 import { PageTitle } from "@/components/Fields";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
-import { db, getResurfacedLessons, getTagVocabulary } from "@/lib/data";
+import { RunSetupBar } from "@/components/RunSetupBar";
+import { db, getResurfacedLessons, getRunnableSetups, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
 
 // One clean card. Symbol + direction is a complete log; the trade's own page
 // holds every detail (prices, screenshots, playbook, conditions) after saving.
 export default async function NewTradePage() {
-  const [trades, lessons, tagVocabulary, options] = await Promise.all([
-    db.list("trades"), getResurfacedLessons(1), getTagVocabulary(), getOptionCatalog(),
+  const [trades, lessons, tagVocabulary, options, runnableSetups] = await Promise.all([
+    db.list("trades"), getResurfacedLessons(1), getTagVocabulary(), getOptionCatalog(), getRunnableSetups(),
   ]);
   const recentSymbols = [...new Set(trades
     .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
@@ -34,6 +35,9 @@ export default async function NewTradePage() {
           redirectTo="/trades"
           submitLabel="Log trade"
         />
+        <div className="mt-3">
+          <RunSetupBar setups={runnableSetups} />
+        </div>
       </div>
 
       <Link href="/inbox" className="mt-4 flex items-start gap-2 rounded-lg border border-dashed border-forge-line bg-white p-3 text-sm text-forge-muted transition hover:border-forge-blue">

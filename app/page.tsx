@@ -4,9 +4,10 @@ import { ArrowRight, CheckCircle2, Circle, Flame, GraduationCap, Lightbulb, Mic,
 import { DisciplineLines, DivergingColumns, EquityCurve, HBarList, MoneyBars } from "@/components/Charts";
 import { QuickNoteBar } from "@/components/QuickNoteBar";
 import { QuickTradeForm } from "@/components/QuickTradeForm";
+import { RunSetupBar } from "@/components/RunSetupBar";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { humanize } from "@/lib/constants";
-import { db, getFreeNotesForDay, getResurfacedLessons, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
+import { db, getFreeNotesForDay, getResurfacedLessons, getRunnableSetups, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
 import {
   analyticsLeaks,
@@ -27,7 +28,7 @@ import {
 export default async function TodayPage() {
   const now = new Date();
   const today = startOfDay(now);
-  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes] = await Promise.all([
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes, runnableSetups] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
     db.list("transcripts"),
@@ -38,6 +39,7 @@ export default async function TodayPage() {
     getTagVocabulary(),
     getOptionCatalog(),
     getFreeNotesForDay(now),
+    getRunnableSetups(),
   ]);
 
   // Streak counts showing up in any form — never profitability.
@@ -209,6 +211,10 @@ export default async function TodayPage() {
               mindStateChoices={options.choices("mindState")}
               redirectTo="/"
             />
+            {/* The deliberate path, next to the fast one. */}
+            <div className="mt-3">
+              <RunSetupBar setups={runnableSetups} />
+            </div>
           </div>
 
           <div className="panel">
