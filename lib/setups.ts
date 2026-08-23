@@ -27,8 +27,16 @@ const MAX_STEPS = 12;
 
 export type SetupStep = { value: string; label: string };
 
-export function setupSteps(checklist: string | null | undefined): SetupStep[] {
-  const steps: SetupStep[] = [];
+/** One line of the checklist. `value` is null when the line reads like a step
+ *  but can't be turned into a stable token (normalizeOptionValue caps at 40
+ *  characters). Those lines are surfaced as "too long to tick" on the playbook
+ *  rather than silently vanishing — a step you wrote and can't see is the kind
+ *  of thing you'd never think to look for. */
+export type ChecklistLine = { label: string; value: string | null };
+
+/** Every line of a checklist that reads like a step, tickable or not. */
+export function checklistLines(checklist: string | null | undefined): ChecklistLine[] {
+  const lines: ChecklistLine[] = [];
   const seen = new Set<string>();
   for (const line of String(checklist ?? "").split(/\r?\n/)) {
     // Tolerate the ways a checklist actually gets typed: "- ", "1. ", "[ ] ".
@@ -40,12 +48,19 @@ export function setupSteps(checklist: string | null | undefined): SetupStep[] {
       .trim();
     if (label.length < 2 || label.length > MAX_STEP_LENGTH) continue;
     const value = normalizeOptionValue(label);
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    steps.push({ value, label });
-    if (steps.length >= MAX_STEPS) break;
+    if (value && seen.has(value)) continue;
+    if (value) seen.add(value);
+    lines.push({ label, value });
+    if (lines.length >= MAX_STEPS) break;
   }
-  return steps;
+  return lines;
+}
+
+/** The steps a trade can actually tick. */
+export function setupSteps(checklist: string | null | undefined): SetupStep[] {
+  return checklistLines(checklist)
+    .filter((line): line is { label: string; value: string } => Boolean(line.value))
+    .map((line) => ({ value: line.value, label: line.label }));
 }
 
 /** How much of the model a trade actually followed. `null` when the setup has

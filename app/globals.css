@@ -64,6 +64,33 @@ button {
     @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-forge-red transition hover:bg-red-100;
   }
 
+  /* Pre-trade checklist gate (/playbook/[id]/run). The live "n of N" is a CSS
+     counter over the ticked steps — no client JS, and the count sits after the
+     chips in the DOM because counters flow in document order. The "steps are
+     missing" warning is a :has() progressive enhancement: base CSS hides it, so
+     a browser without :has() shows the form exactly as before, minus the nudge.
+     Only inputs named checklistSteps count, so the mechanism and timeframe
+     chips in the same form can't inflate the score. */
+  .checklist-gate {
+    counter-reset: steps-met;
+  }
+
+  .checklist-gate input[name="checklistSteps"]:checked {
+    counter-increment: steps-met;
+  }
+
+  .steps-met::after {
+    content: counter(steps-met);
+  }
+
+  .checklist-gate .when-incomplete {
+    display: none;
+  }
+
+  .checklist-gate:has(input[name="checklistSteps"]:not(:checked)) .when-incomplete {
+    display: flex;
+  }
+
   .metric {
     @apply rounded-xl border border-forge-line bg-white p-4 shadow-soft;
   }

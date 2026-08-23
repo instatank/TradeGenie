@@ -21,6 +21,7 @@ import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWee
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { captureMarketContext } from "@/lib/market-context";
+import { setupSteps } from "@/lib/setups";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
@@ -701,6 +702,100 @@ export async function quickLogTradeAction(formData: FormData) {
     redirect(withFeedback(`/trades/${trade.id}`, `${label} logged. Take one minute to review it below.`));
   }
   redirect(withFeedback(redirectTo, `${label} logged. Review it when you close it.`));
+}
+
+// The pre-trade path: /playbook/[id]/run. Same trade record as the quick log,
+// but it arrives already carrying the model it was taken on, which of that
+// model's steps were genuinely there, the timeframes and the mechanisms — so a
+// trade taken this way needs no tagging pass afterwards at all.
+//
+// It never refuses a trade for a missing step. The gate is the looking, not a
+// lock: a journal that won't record what you actually did is a journal you stop
+// using. What it does instead is say which steps were missing, in the
+// confirmation and on the record, so the half-model trades can be counted later.
+export async function startTradeFromSetupAction(formData: FormData) {
+  const setupId = String(formData.get("setupId") ?? "");
+  const backTo = `/playbook/${setupId}/run`;
+  const instrument = (String(formData.get("instrument") ?? "").trim() || String(formData.get("instrumentChip") ?? "").trim()).toUpperCase();
+  if (!instrument) {
+    redirect(withFeedback(backTo, "Type a symbol (like BTC) to log the trade.", "error"));
+  }
+  const now = new Date();
+  // Started before the awaits below so it overlaps them. Capped at 2s, never
+  // throws — a trade must save whether or not SignalDesk answers.
+  const marketContext = captureMarketContext(instrument, now);
+  const [setup, settings, options] = await Promise.all([db.get("setups", setupId), getSettings(), getOptionCatalog()]);
+  if (!setup) {
+    redirect(withFeedback("/playbook", "That setup no longer exists.", "error"));
+  }
+
+  const steps = setupSteps(setup.checklist);
+  const ticked = formData.getAll("checklistSteps").map(String).filter(Boolean);
+  const missing = steps.filter((step) => !ticked.includes(step.value));
+  const direction = enumValue(Direction, formData.get("direction"), Direction.UNKNOWN);
+  // Only OPEN or IDEA reach this page — you are standing in front of the trade,
+  // not writing one up after the fact.
+  const status = enumValue(TradeStatus, formData.get("status"), TradeStatus.OPEN);
+  const entryPrice = toNumber(formData.get("entryPrice"));
+  const stopPrice = toNumber(formData.get("stopPrice"));
+  const entryThesis = toText(formData.get("entryThesis"));
+
+  const trade = await db.create("trades", {
+    createdAt: now,
+    updatedAt: now,
+    tradeDateTime: now,
+    marketContext: await marketContext,
+    marketType: enumValue(MarketType, settings.defaultMarketType, MarketType.CRYPTO_PERP),
+    instrument,
+    direction,
+    status,
+    setupId: setup.id,
+    setupName: setup.name,
+    entryThesis,
+    // No tag picker on this form on purpose — the gate stays about the model.
+    // A #hashtag typed into the thesis still becomes a tag, as everywhere else.
+    tags: deriveTags([entryThesis]),
+    premortem: null,
+    conditions: [],
+    timeframes: await options.resolveMany("tradeTimeframe", formData, "timeframes"),
+    mechanisms: await options.resolveMany("mechanism", formData, "mechanisms"),
+    checklistSteps: ticked,
+    invalidation: null,
+    concern: null,
+    emotionalState: null,
+    riskPosture: null,
+    confidenceScore: null,
+    entryGrade: EntryGrade.NA,
+    exitReason: null,
+    followedPlan: null,
+    lesson: null,
+    notes: null,
+    entryPrice,
+    stopPrice,
+    targetPrice: toNumber(formData.get("targetPrice")),
+    exitPrice: null,
+    maePrice: null,
+    mfePrice: null,
+    quantity: null,
+    totalOrderValue: null,
+    leverage: null,
+    realizedPnl: null,
+    fees: null,
+    funding: null,
+    netPnl: null,
+    rMultiple: null,
+  });
+
+  revalidatePath("/trades");
+  revalidatePath("/playbook");
+  revalidatePath("/");
+  const score = steps.length ? ` — ${ticked.length} of ${steps.length} steps` : "";
+  const gap = missing.length ? ` Missing: ${missing.slice(0, 3).map((step) => step.label).join(", ")}.` : "";
+  redirect(withFeedback(
+    `/trades/${trade.id}`,
+    `${instrument}${direction === "UNKNOWN" ? "" : ` ${direction.toLowerCase()}`} logged on ${setup.name}${score}.${gap}`,
+    missing.length ? "error" : "success",
+  ));
 }
 
 // ONE save for a trade, wherever it is edited from: the review panel and the
