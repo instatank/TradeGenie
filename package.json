@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
     "eval:capture": "tsx scripts/eval-capture.ts",
-    "check:capture": "tsx scripts/check-capture.ts"
+    "check:capture": "tsx scripts/check-capture.ts",
+    "test": "tsx --test \"tests/unit/*.test.ts\" \"tests/unit/*.test.mts\"",
+    "smoke": "tsx scripts/smoke.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",

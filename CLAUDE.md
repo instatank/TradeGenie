@@ -737,6 +737,28 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     re-rendered page. Full-collection scans with no `where`/`limit` remain and grow with the
     journal — irrelevant at 5 trades, not at 1000.
 
+- **Tests, finally** (`npm run test`, `npm run smoke`). The repo had no test runner at all, which
+  was tolerable while everything was UI, and stopped being tolerable the moment the storage
+  adapter grew a cache. Uses **`node:test` via `tsx`** — zero new dependencies, no framework.
+  - **`npm run test`** covers the pure, consequential code: the **calculator** (the owner's own
+    worked example is pinned — a 0.3% move at 2R with 0.045% fees is 0.87R needing a 53% win
+    rate, and 0.61R/62% once 0.02% slippage is on; also that sizing makes a stop-out cost exactly
+    the risk budget, and that break-even is *solved* rather than `entry + costs`), the **tag
+    tokenizer** (`64#200` is not a tag; `mergeTags` only ever grows), the **search grammar**
+    (`#win` must never match `#winner`), the **option normalizer** (four spellings of
+    "chased breakout" must collapse to one value), and the **store** against a throwaway
+    `TRADEGENIE_LOCAL_STORE`.
+  - **The read cache needed a different kind of test.** `React.cache()` only memoizes inside a
+    React request, so in a plain node test `listRecords` never caches — meaning a mutator that
+    forgot `invalidateRead()` would pass every behavioural test while serving stale data in
+    production. The dedupe itself was verified by instrumenting `fetchRecords` and counting
+    reads through a real render; what the suite adds is a **source-level guard** that every
+    mutator still invalidates. Unusual, but it guards the failure that actually threatens data.
+  - **`npm run smoke`** is the gate that `next build` cannot be: build only prerenders the
+    *static* routes, so a crash in a dynamic page (`/trades`, `/inbox`, a bad enum on a real
+    record) ships silently. It seeds a throwaway store, starts the built app and asserts all 19
+    routes — dynamic ids included — return 200. Run it after `build`, before pushing.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -757,6 +779,8 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
+npm run test       # unit tests — calculator math, tag tokenizer, search grammar, options, store
+npm run smoke      # after a build: start the app, assert every route (incl. dynamic) renders 200
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
 npm run check:capture  # offline: do the prompt's examples survive parse + normalize?
 ```
