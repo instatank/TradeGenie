@@ -786,9 +786,7 @@ export async function startTradeFromSetupAction(formData: FormData) {
     rMultiple: null,
   });
 
-  revalidatePath("/trades");
-  revalidatePath("/playbook");
-  revalidatePath("/");
+  revalidateEverything();
   const score = steps.length ? ` — ${ticked.length} of ${steps.length} steps` : "";
   const gap = missing.length ? ` Missing: ${missing.slice(0, 3).map((step) => step.label).join(", ")}.` : "";
   redirect(withFeedback(
