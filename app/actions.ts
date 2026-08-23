@@ -55,6 +55,7 @@ import {
   TradeStatus,
   TranscriptType,
   TradingMode,
+  type FreeNote,
   type Lesson,
 } from "@/lib/types";
 
@@ -350,6 +351,10 @@ export async function confirmTranscriptAction(formData: FormData) {
           updatedAt: new Date(),
           text: entry.text,
           linkedTranscriptId: id,
+          // Left uncategorised on purpose: the category vocabulary grows from
+          // the trader's own typing, never from AI output — the same line we
+          // drew for tags. Categorise it from /notes or the day's review.
+          category: null,
           tags: mergeTags(transcript.tags, deriveTags([entry.text])),
         });
         break;
@@ -501,10 +506,13 @@ export async function saveDailyJournalAction(formData: FormData) {
   redirect(withFeedback(`/daily?date=${format(date, "yyyy-MM-dd")}`, "Daily journal saved."));
 }
 
-// The quick-note box on Today and on the day's review. One field, one button —
-// no type, no category, nothing to choose. #hashtags in the text become tags
-// through the same tokenizer as everywhere else, so a note is searchable and
-// tappable without any extra step.
+// The quick-note box on Today and on the day's review. On Today it is still one
+// field and one button — type, Enter, saved. The bigger box on the day's review
+// (and on /notes) adds two optional taps: what the note is **about** (a
+// noteCategory option, extendable by typing one) and its **tags** (the same
+// vocabulary as everywhere else, with tracked assets offered as chips). Both are
+// what make /notes filterable; neither is ever required. #hashtags in the text
+// still become tags through the same tokenizer, with no extra step at all.
 export async function saveQuickNoteAction(formData: FormData) {
   const text = toText(formData.get("text"));
   const redirectTo = toText(formData.get("redirectTo")) ?? "/";
@@ -517,19 +525,24 @@ export async function saveQuickNoteAction(formData: FormData) {
   const now = new Date();
   const day = startOfDay(dateFromForm(formData.get("date"), now));
   const createdAt = isSameDay(day, now) ? now : new Date(day.getTime() + 12 * 60 * 60 * 1000);
+  // Both optional, and both absent from the Today bar — which posts nothing but
+  // the text, exactly as it did before categories existed. A note with neither
+  // is still a saved note; the taps are for finding it again later.
+  const options = await getOptionCatalog();
   const note = await db.create("freeNotes", {
     createdAt,
     updatedAt: now,
     text,
     linkedTranscriptId: null,
-    tags: deriveTags([text]),
+    category: await options.resolve("noteCategory", formData, "category"),
+    tags: deriveTags([text], toText(formData.get("tags"))),
   });
   revalidateEverything();
   redirect(withFeedback(`${redirectTo}#note-${note.id}`, "Note saved to today's review."));
 }
 
-// Editing a saved quick note. Same "nothing to decide" shape as writing one:
-// one text field, tags re-derived from its #hashtags. The note keeps its id and
+// Editing a saved quick note. Same shape as writing one — text, category, tags.
+// The note keeps its id and
 // its `createdAt`, so it stays filed to the same day and every deep link into it
 // (search results, the `#note-<id>` anchor) still lands.
 export async function updateFreeNoteAction(formData: FormData) {
@@ -541,7 +554,19 @@ export async function updateFreeNoteAction(formData: FormData) {
     // there, and silently dropping the text would look like a save that worked.
     redirect(withFeedback(`${redirectTo}#note-${id}`, "A note can't be emptied — use delete if you want it gone.", "error"));
   }
-  await db.update("freeNotes", id, { text, tags: deriveTags([text]), updatedAt: new Date() });
+  // Field-presence rule, same as saveTradeAction: the full card shows text,
+  // category and tags, so it is the complete truth for all three. A surface that
+  // renders only the text (nothing does today, but the Today bar is one edit
+  // away from it) can never wipe what it didn't show.
+  const options = await getOptionCatalog();
+  const patch: Partial<FreeNote> = { text, updatedAt: new Date() };
+  if (formData.has("category") || formData.has("categoryCustom")) {
+    patch.category = await options.resolve("noteCategory", formData, "category");
+  }
+  patch.tags = formData.has("tags")
+    ? deriveTags([text], toText(formData.get("tags")))
+    : mergeTags((await db.get("freeNotes", id))?.tags, deriveTags([text]));
+  await db.update("freeNotes", id, patch);
   revalidateEverything();
   redirect(withFeedback(`${redirectTo}#note-${id}`, "Note updated."));
 }
@@ -730,6 +755,17 @@ export async function saveTradeAction(formData: FormData) {
     setupName: text("setupName", trade.setupName),
     setupId: text("setupId", trade.setupId),
     conditions: present("hasConditions") ? await options.resolveMany("condition", formData, "conditions") : trade.conditions,
+    // What the entry was actually built out of. Multi-select, extendable, and
+    // written only when the row was on screen — same field-presence rule as
+    // everything else here, so the inline review can never blank them.
+    timeframes: presentOption("timeframes") ? await options.resolveMany("tradeTimeframe", formData, "timeframes") : trade.timeframes,
+    mechanisms: presentOption("mechanisms") ? await options.resolveMany("mechanism", formData, "mechanisms") : trade.mechanisms,
+    // Plain checkboxes with no "type another" box, so they need the marker: an
+    // all-unticked checklist posts nothing at all, and "nothing" has to mean
+    // "none ticked" here rather than "not shown".
+    checklistSteps: present("hasChecklistSteps")
+      ? formData.getAll("checklistSteps").map(String).filter(Boolean)
+      : trade.checklistSteps,
     ...texts,
     // The full editor ships a prefilled Tags input, so it can remove a tag;
     // partial surfaces (inline review) can only grow the tag set.

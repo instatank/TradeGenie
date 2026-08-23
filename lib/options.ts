@@ -36,7 +36,10 @@ export type OptionGroupKey =
   | "lessonCategory"
   | "assetTimeframe"
   | "riskPosture"
-  | "tradingMode";
+  | "tradingMode"
+  | "noteCategory"
+  | "tradeTimeframe"
+  | "mechanism";
 
 export type OptionChoice = { value: string; label: string; hint?: string; isCustom?: boolean };
 
@@ -74,6 +77,53 @@ export const optionGroups: Record<OptionGroupKey, OptionGroupDef> = {
     placeholder: "or type another…",
     builtin: riskPostures.map((value) => ({ value, label: humanize(value) })),
   },
+  noteCategory: {
+    title: "Quick note categories",
+    placeholder: "or type another…",
+    builtin: [
+      { value: "TRADE", label: "Trade", hint: "About a position — one you're in, took or passed on" },
+      { value: "ASSET", label: "Asset", hint: "A read on a coin: levels, bias, what you're waiting for" },
+      { value: "MINDSET", label: "Mindset", hint: "How you're feeling and what it's doing to your trading" },
+      { value: "MARKET", label: "Market", hint: "Conditions, news, the wider tape" },
+      { value: "LESSON", label: "Lesson", hint: "Something you want to remember next time" },
+      { value: "REVIEW", label: "Review", hint: "Looking back at the day, the week or a run of trades" },
+    ],
+  },
+  tradeTimeframe: {
+    title: "Chart timeframes (trades)",
+    placeholder: "or type another, e.g. 3m…",
+    builtin: [
+      { value: "1M", label: "1m" },
+      { value: "5M", label: "5m" },
+      { value: "15M", label: "15m" },
+      { value: "1H", label: "1H" },
+      { value: "4H", label: "4H" },
+      { value: "1D", label: "1D" },
+    ],
+  },
+  mechanism: {
+    title: "Setup mechanisms",
+    placeholder: "add your own mechanism…",
+    // Deliberately the concepts, not the strategies. WHICH system you were
+    // running is the playbook setup on the trade; these are the pieces the
+    // entry was actually built out of, and a real entry stacks two or three.
+    // Hints are here because the owner is learning this vocabulary — they show
+    // as tooltips on the chip.
+    builtin: [
+      { value: "HTF_BIAS", label: "HTF bias", hint: "Higher-timeframe direction the trade agreed with" },
+      { value: "MARKET_STRUCTURE_SHIFT", label: "Market structure shift", hint: "MSS / BOS / CHoCH — structure broke in your direction" },
+      { value: "DISPLACEMENT", label: "Displacement", hint: "An aggressive, one-sided move away from a level" },
+      { value: "LIQUIDITY_SWEEP", label: "Liquidity sweep", hint: "Stops taken above highs / below lows before the real move" },
+      { value: "FVG", label: "FVG", hint: "Fair value gap — the imbalance displacement leaves behind" },
+      { value: "ORDER_BLOCK", label: "Order block", hint: "The last opposing candle before displacement" },
+      { value: "BREAKER", label: "Breaker", hint: "A failed order block that price reclaims and respects" },
+      { value: "OTE", label: "OTE", hint: "Optimal trade entry — the 0.62–0.79 retracement pocket" },
+      { value: "PREMIUM_DISCOUNT", label: "Premium / discount", hint: "Entered on the right side of the range's midpoint" },
+      { value: "EQUAL_HIGHS_LOWS", label: "Equal highs / lows", hint: "The obvious resting liquidity the move was drawn to" },
+      { value: "KILLZONE_SESSION", label: "Killzone / session", hint: "The entry sat inside a session window you trade" },
+      { value: "RETEST", label: "Retest", hint: "Entered on the return to a broken level, not on the break" },
+    ],
+  },
   tradingMode: {
     title: "Trading mode (morning check-in)",
     placeholder: "or type another…",
@@ -87,6 +137,12 @@ export const optionGroups: Record<OptionGroupKey, OptionGroupDef> = {
 };
 
 export const optionGroupKeys = Object.keys(optionGroups) as OptionGroupKey[];
+
+/** The opt-out chip for a one-of row that is genuinely optional (a quick note
+ *  doesn't have to be about anything). Its empty value is in no group's
+ *  vocabulary, so resolve() stores null for it — radios can't be unticked, and
+ *  a category you can set but never clear is a trap. */
+export const noOptionChoice: OptionChoice = { value: "", label: "No category" };
 
 const MIN_LENGTH = 2;
 const MAX_LENGTH = 40;
@@ -171,7 +227,15 @@ export async function getOptionCatalog(): Promise<OptionCatalog> {
     const label = cleanOptionLabel(rawLabel);
     const value = normalizeOptionValue(label);
     if (!value) return null;
-    if (choicesFor(group).some((choice) => choice.value === value)) return value;
+    // Match on the normalized VALUE or on the normalized existing LABEL, and
+    // return the value that is already stored. A couple of built-ins carry a
+    // value that isn't their label normalized ("Just watching" → OBSERVE_ONLY);
+    // without the label check, typing one of those would quietly mint a second
+    // chip reading exactly the same thing.
+    const existing = choicesFor(group).find(
+      (choice) => choice.value === value || normalizeOptionValue(choice.label) === value,
+    );
+    if (existing) return existing.value;
     const now = new Date();
     const created = await createRecord("customOptions", {
       createdAt: now,

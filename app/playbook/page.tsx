@@ -5,6 +5,7 @@ import { TagPicker } from "@/components/TagPicker";
 import { humanize, setupDirectionBiases } from "@/lib/constants";
 import { db, getTagVocabulary, getTradesWithMistakes } from "@/lib/data";
 import { setupPerformance } from "@/lib/metrics";
+import { setupSteps } from "@/lib/setups";
 
 export default async function PlaybookPage() {
   const [setups, trades, tagVocabulary] = await Promise.all([db.list("setups"), getTradesWithMistakes(), getTagVocabulary()]);
@@ -24,7 +25,8 @@ export default async function PlaybookPage() {
           <SelectField label="Direction bias" name="directionBias" options={setupDirectionBiases} defaultValue="BOTH" />
           <TextField label="Ideal risk:reward (e.g. 2)" name="idealRiskReward" type="number" step="0.1" />
           <TextAreaField label="Rules (what must be true to take it)" name="rules" rows={4} />
-          <TextAreaField label="Entry checklist" name="checklist" rows={3} />
+          <TextAreaField label="Entry checklist — one step per line" name="checklist" rows={5} placeholder={"HTF bias / trend\nMTF + LTF market structure\nDisplacement\nLiquidity taken\nEntry (OTE, OB, FVG)"} />
+          <p className="-mt-1 text-xs text-forge-muted">Each line becomes a tick chip on every trade you take on this setup.</p>
           <TextAreaField label="Notes" name="notes" rows={2} />
           <TagPicker vocabulary={tagNames} />
           <button className="button" type="submit">Add setup</button>
@@ -51,7 +53,7 @@ export default async function PlaybookPage() {
 
                 <div className="mt-4 space-y-3 text-sm">
                   {setup.rules ? <Block label="Rules" body={setup.rules} /> : null}
-                  {setup.checklist ? <Block label="Checklist" body={setup.checklist} /> : null}
+                  {setup.checklist ? <Checklist checklist={setup.checklist} /> : null}
                   {setup.notes ? <Block label="Notes" body={setup.notes} /> : null}
                 </div>
 
@@ -80,7 +82,8 @@ export default async function PlaybookPage() {
                     <SelectField label="Direction bias" name="directionBias" options={setupDirectionBiases} defaultValue={setup.directionBias} />
                     <TextField label="Ideal risk:reward" name="idealRiskReward" type="number" step="0.1" defaultValue={setup.idealRiskReward} />
                     <TextAreaField label="Rules" name="rules" defaultValue={setup.rules} rows={4} />
-                    <TextAreaField label="Entry checklist" name="checklist" defaultValue={setup.checklist} rows={3} />
+                    <TextAreaField label="Entry checklist — one step per line" name="checklist" defaultValue={setup.checklist} rows={5} placeholder={"HTF bias / trend\nMTF + LTF market structure\nDisplacement\nLiquidity taken\nEntry (OTE, OB, FVG)"} />
+                    <p className="-mt-1 text-xs text-forge-muted">Each line becomes a tick chip on every trade you take on this setup.</p>
                     <TextAreaField label="Notes" name="notes" defaultValue={setup.notes} rows={2} />
                     <TagPicker selected={setup.tags ?? []} vocabulary={tagNames} />
                     <button className="button-secondary" type="submit">Save setup</button>
@@ -105,6 +108,29 @@ function SetupStat({ stats }: { stats?: { expectancyR: number | null; netPnl: nu
         {stats.expectancyR == null ? "NA" : `${stats.expectancyR.toFixed(2)}R`}
       </div>
       <div className="text-xs text-forge-muted">expectancy / trade</div>
+    </div>
+  );
+}
+
+// The checklist, shown as the steps a trade will actually tick — so what you
+// see here is exactly what the trade form offers. A line too long to be a step
+// (a paragraph of prose) still reads, it just isn't numbered.
+function Checklist({ checklist }: { checklist: string }) {
+  const steps = setupSteps(checklist);
+  if (!steps.length) return <Block label="Checklist" body={checklist} />;
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-forge-muted">
+        Checklist · {steps.length} step{steps.length === 1 ? "" : "s"} you can tick on a trade
+      </div>
+      <ol className="mt-1 space-y-1">
+        {steps.map((step, index) => (
+          <li key={step.value} className="flex gap-2">
+            <span className="text-forge-muted">{index + 1}.</span>
+            <span>{step.label}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

@@ -10,6 +10,7 @@ export const primaryNavItems = [
 
 export const moreNavItems = [
   { href: "/calendar", label: "Calendar" },
+  { href: "/notes", label: "Notes" },
   { href: "/playbook", label: "Playbook" },
   { href: "/analytics", label: "Analytics" },
   { href: "/calculator", label: "Calculator" },

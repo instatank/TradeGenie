@@ -6,11 +6,14 @@ import { PageTitle, SelectField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { TagPills } from "@/components/TagPills";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
+import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, isPrimaryMistakeTag, marketTypes, tradeStatuses } from "@/lib/constants";
 import { db, getTradesWithMistakes } from "@/lib/data";
-import { getOptionCatalog } from "@/lib/options";
+import { getOptionCatalog, type OptionChoice } from "@/lib/options";
 import { calculateTotalR, calculateWinRate, getTradePnl, tradeNeedsReview } from "@/lib/metrics";
+import { checklistScore, setupSteps } from "@/lib/setups";
+import type { Setup } from "@/lib/types";
 
 const tradeViews = [
   { label: "All", value: "all" },
@@ -23,8 +26,8 @@ const tradeViews = [
 // day with the day's P&L, one clean row per trade, tap anywhere to open it.
 export default async function TradesPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
-  const [mistakeTags, allTrades, options] = await Promise.all([
-    db.list("mistakeTags"), getTradesWithMistakes(), getOptionCatalog(),
+  const [mistakeTags, allTrades, options, setups] = await Promise.all([
+    db.list("mistakeTags"), getTradesWithMistakes(), getOptionCatalog(), db.list("setups"),
   ]);
   // Filtering has to reach every mind state ever stored, so the filter list is
   // the old full enum plus whatever the trader has added since.
@@ -50,6 +53,9 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
     .filter((trade) => !from || trade.tradeDateTime >= from)
     .filter((trade) => !to || trade.tradeDateTime <= to)
     .filter((trade) => !params.mistakeTagId || trade.mistakeTags.some((link) => link.mistakeTagId === params.mistakeTagId))
+    .filter((trade) => !params.setupId || trade.setupId === params.setupId)
+    .filter((trade) => !params.timeframe || (trade.timeframes ?? []).includes(params.timeframe))
+    .filter((trade) => !params.mechanism || (trade.mechanisms ?? []).includes(params.mechanism))
     .sort((a, b) => compareTrades(a, b, sort));
 
   const closed = trades.filter((trade) => trade.status === "CLOSED");
@@ -102,6 +108,35 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
             <SelectField label="Grade" name="entryGrade" options={entryGrades} includeBlank defaultValue={params.entryGrade} />
             <SelectField label="Followed plan" name="followedPlan" options={followedPlanOptions} includeBlank defaultValue={params.followedPlan} />
             <SelectField label="Mind state" name="emotionalState" options={mindStateFilters} includeBlank defaultValue={params.emotionalState} />
+            {/* Strategy filters: which system, which chart, which mechanism.
+                This is what the whole "Setup & execution" fold is for. */}
+            <label className="field">
+              <span className="label">Setup</span>
+              <select name="setupId" defaultValue={params.setupId ?? ""} className="input">
+                <option value="">Any</option>
+                {[...setups].sort((a, b) => a.name.localeCompare(b.name)).map((setup) => (
+                  <option key={setup.id} value={setup.id}>{setup.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span className="label">Timeframe</span>
+              <select name="timeframe" defaultValue={params.timeframe ?? ""} className="input">
+                <option value="">Any</option>
+                {options.choices("tradeTimeframe").map((choice) => (
+                  <option key={choice.value} value={choice.value}>{choice.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span className="label">Mechanism</span>
+              <select name="mechanism" defaultValue={params.mechanism ?? ""} className="input">
+                <option value="">Any</option>
+                {options.choices("mechanism").map((choice) => (
+                  <option key={choice.value} value={choice.value}>{choice.label}</option>
+                ))}
+              </select>
+            </label>
             <label className="field">
               <span className="label">Mistake tag</span>
               <select name="mistakeTagId" defaultValue={params.mistakeTagId ?? ""} className="input">
@@ -167,6 +202,11 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
                   trade={trade}
                   primaryTags={primaryTags}
                   mindStateLabel={options.label("mindState", trade.emotionalState)}
+                  timeframeLabel={options.labeler("tradeTimeframe")}
+                  mechanismLabel={options.labeler("mechanism")}
+                  setups={setups}
+                  timeframeChoices={options.choices("tradeTimeframe")}
+                  mechanismChoices={options.choices("mechanism")}
                   open={openRowId === trade.id}
                   backTo={rowUrl(params, trade.id)}
                 />
@@ -196,12 +236,22 @@ function TradeRow({
   trade,
   primaryTags,
   mindStateLabel,
+  timeframeLabel,
+  mechanismLabel,
+  setups,
+  timeframeChoices,
+  mechanismChoices,
   open,
   backTo,
 }: {
   trade: TradeRowData;
   primaryTags: ReviewTag[];
   mindStateLabel: string;
+  timeframeLabel: (value: string) => string;
+  mechanismLabel: (value: string) => string;
+  setups: Setup[];
+  timeframeChoices: OptionChoice[];
+  mechanismChoices: OptionChoice[];
   open: boolean;
   backTo: string;
 }) {
@@ -256,7 +306,19 @@ function TradeRow({
           <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
         </Link>
       </summary>
-      <TradePreview trade={trade} pnl={pnl} needsReview={needsReview} primaryTags={primaryTags} mindStateLabel={mindStateLabel} backTo={backTo} />
+      <TradePreview
+        trade={trade}
+        pnl={pnl}
+        needsReview={needsReview}
+        primaryTags={primaryTags}
+        mindStateLabel={mindStateLabel}
+        timeframeLabel={timeframeLabel}
+        mechanismLabel={mechanismLabel}
+        setups={setups}
+        timeframeChoices={timeframeChoices}
+        mechanismChoices={mechanismChoices}
+        backTo={backTo}
+      />
     </details>
   );
 }
@@ -270,6 +332,11 @@ function TradePreview({
   needsReview,
   primaryTags,
   mindStateLabel,
+  timeframeLabel,
+  mechanismLabel,
+  setups,
+  timeframeChoices,
+  mechanismChoices,
   backTo,
 }: {
   trade: TradeRowData;
@@ -277,6 +344,11 @@ function TradePreview({
   needsReview: boolean;
   primaryTags: ReviewTag[];
   mindStateLabel: string;
+  timeframeLabel: (value: string) => string;
+  mechanismLabel: (value: string) => string;
+  setups: Setup[];
+  timeframeChoices: OptionChoice[];
+  mechanismChoices: OptionChoice[];
   backTo: string;
 }) {
   const notes = [
@@ -324,6 +396,14 @@ function TradePreview({
           {!notes.length ? <p className="text-sm text-forge-muted">No notes on this trade yet — open it to add the story.</p> : null}
           <div className="flex flex-wrap gap-1.5 pt-1">
             {trade.setupName ? <InfoChip label={`Setup: ${trade.setupName}`} /> : null}
+            {(trade.timeframes ?? []).map((value) => (
+              <InfoChip key={`tf-${value}`} label={timeframeLabel(value)} />
+            ))}
+            {(trade.mechanisms ?? []).map((value) => (
+              <span key={`mech-${value}`} className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-forge-blue">
+                {mechanismLabel(value)}
+              </span>
+            ))}
             {trade.emotionalState && trade.emotionalState !== "UNKNOWN" ? <InfoChip label={`Mind: ${mindStateLabel}`} /> : null}
             {trade.mistakeTags.map((link) => (
               <span key={link.id} className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red">{link.mistakeTag.label}</span>
@@ -341,13 +421,37 @@ function TradePreview({
         <form action={saveTradeAction} className="mt-3 space-y-4">
           <input type="hidden" name="id" value={trade.id} />
           <input type="hidden" name="redirectTo" value={backTo} />
+          {/* Inside the review's own form on purpose: a second <form> in the
+              row is exactly how you lose half of what you just filled in. One
+              button saves the review AND the execution tags. */}
+          <details className="rounded-lg border border-forge-line bg-forge-panel/40 p-3">
+            <summary className="cursor-pointer text-sm font-semibold">
+              Setup &amp; execution{" "}
+              <TradeSetupSummary
+                trade={trade}
+                timeframeLabel={timeframeLabel}
+                mechanismLabel={mechanismLabel}
+                score={checklistScore(setupSteps(setups.find((setup) => setup.id === trade.setupId)?.checklist), trade.checklistSteps)}
+                className="ml-1"
+              />
+            </summary>
+            <div className="mt-3">
+              <TradeSetupFields
+                trade={trade}
+                setups={setups.filter((setup) => setup.isActive || setup.id === trade.setupId)}
+                steps={setupSteps(setups.find((setup) => setup.id === trade.setupId)?.checklist)}
+                timeframeChoices={timeframeChoices}
+                mechanismChoices={mechanismChoices}
+              />
+            </div>
+          </details>
           <TradeReviewFields
             trade={trade}
             mistakeTags={primaryTags}
             selectedMistakes={trade.mistakeTags.map((link) => link.mistakeTagId)}
             compact
           />
-          <button className="button" type="submit">Save review</button>
+          <button className="button" type="submit">Save trade</button>
         </form>
       </details>
     </div>
@@ -445,7 +549,7 @@ function pickEnum(options: readonly string[], value: string | undefined) {
 }
 
 function hasAdvancedFilters(params: Record<string, string | undefined>) {
-  return ["marketType", "direction", "status", "entryGrade", "followedPlan", "emotionalState", "mistakeTagId", "sort", "pageSize"].some(
+  return ["marketType", "direction", "status", "entryGrade", "followedPlan", "emotionalState", "mistakeTagId", "setupId", "timeframe", "mechanism", "sort", "pageSize"].some(
     (key) => params[key] && !(key === "sort" && params[key] === "date-desc") && !(key === "pageSize" && params[key] === "25"),
   );
 }

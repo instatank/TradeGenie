@@ -9,10 +9,12 @@ import { SaveBar } from "@/components/SaveBar";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
+import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { directions, humanize, isPrimaryMistakeTag, marketTypes } from "@/lib/constants";
-import { db, getActiveSetups, getTagVocabulary, getTradeDetail } from "@/lib/data";
+import { db, getTagVocabulary, getTradeDetail } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metrics";
+import { checklistScore, setupSteps } from "@/lib/setups";
 import type { MarketContext } from "@/lib/market-context";
 
 // One trade, one form, one Save. The review ritual sits on top; every other
@@ -24,11 +26,20 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
     getTradeDetail(id),
     db.list("mistakeTags"),
     db.list("rawExecutions"),
-    getActiveSetups(),
+    db.list("setups"),
     getTagVocabulary(),
     getOptionCatalog(),
   ]);
   if (!trade) throw new Error("Trade not found");
+  // Active setups to choose from, plus this trade's own even if it's been
+  // archived since — a trade must never look unlinked because you retired the
+  // setup it was taken on.
+  const linkedSetup = setups.find((setup) => setup.id === trade.setupId) ?? null;
+  const setupChoices = setups
+    .filter((setup) => setup.isActive || setup.id === trade.setupId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const steps = setupSteps(linkedSetup?.checklist);
+  const score = checklistScore(steps, trade.checklistSteps);
   const sortedMistakeTags = mistakeTags.sort((a, b) => a.label.localeCompare(b.label));
   const processScore = tradeProcessScore(trade);
   const efficiency = exitEfficiency(trade);
@@ -102,6 +113,29 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
 
         <h2 className="text-sm font-semibold text-forge-muted">Everything else — open only what you need</h2>
 
+        {/* How the trade was taken — the half that makes filtered analysis
+            possible later. Open by default when nothing has been recorded yet,
+            because an empty one is the whole point of having it. */}
+        <details className="panel space-y-4" open={!trade.mechanisms?.length && !trade.timeframes?.length}>
+          <summary className="cursor-pointer font-semibold">
+            Setup &amp; execution{" "}
+            <TradeSetupSummary
+              trade={trade}
+              timeframeLabel={options.labeler("tradeTimeframe")}
+              mechanismLabel={options.labeler("mechanism")}
+              score={score}
+              className="ml-1"
+            />
+          </summary>
+          <TradeSetupFields
+            trade={trade}
+            setups={setupChoices}
+            steps={steps}
+            timeframeChoices={options.choices("tradeTimeframe")}
+            mechanismChoices={options.choices("mechanism")}
+          />
+        </details>
+
         <details className="panel space-y-4">
           <summary className="cursor-pointer font-semibold">Core idea</summary>
           <div className="grid gap-4 sm:grid-cols-3">
@@ -109,17 +143,8 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Instrument" name="instrument" defaultValue={trade.instrument} />
             <SelectField label="Direction" name="direction" options={directions} defaultValue={trade.direction} />
             <SelectField label="Market type" name="marketType" options={marketTypes} defaultValue={trade.marketType} />
-            <label className="field">
-              <span className="label">Playbook setup</span>
-              <select name="setupId" defaultValue={trade.setupId ?? ""} className="input">
-                <option value="">None / freeform</option>
-                {setups.map((setup) => (
-                  <option key={setup.id} value={setup.id}>{setup.name}</option>
-                ))}
-              </select>
-            </label>
-            <TextField label="Setup name (freeform)" name="setupName" defaultValue={trade.setupName} />
           </div>
+          <p className="text-xs text-forge-muted">Setup, timeframes and mechanisms live in &ldquo;Setup &amp; execution&rdquo; above.</p>
           <p className="text-xs text-forge-muted">Status lives in the review panel above — one control, one place.</p>
           <TagPicker selected={trade.tags ?? []} vocabulary={tagVocabulary.map((entry) => entry.tag)} />
         </details>

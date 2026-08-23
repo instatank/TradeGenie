@@ -10,6 +10,9 @@ export type MetricTrade = {
   entryGrade?: string | null;
   invalidation?: string | null;
   conditions?: string[];
+  timeframes?: string[];
+  mechanisms?: string[];
+  checklistSteps?: string[];
   emotionalState?: string | null;
   followedPlan?: string | null;
   entryPrice?: number | null;
@@ -286,17 +289,60 @@ export function setupPerformance(
     .sort((a, b) => (b.expectancyR ?? Number.NEGATIVE_INFINITY) - (a.expectancyR ?? Number.NEGATIVE_INFINITY));
 }
 
-export function conditionPerformance(trades: MetricTrade[], labelFor: (value: string) => string): BucketStats[] {
+// Group closed trades by a field that holds SEVERAL values at once (conditions,
+// timeframes, mechanisms). A trade lands in every bucket it carries, so the
+// counts deliberately sum to more than the number of trades — the question
+// being asked is "how do I do when X is involved", not "how do I split my
+// trades up".
+export function multiValuePerformance(
+  trades: MetricTrade[],
+  valuesOf: (trade: MetricTrade) => string[] | undefined,
+  labelFor: (value: string) => string,
+): BucketStats[] {
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const groups = new Map<string, MetricTrade[]>();
   for (const trade of closed) {
-    for (const condition of trade.conditions ?? []) {
-      groups.set(condition, [...(groups.get(condition) ?? []), trade]);
+    for (const value of valuesOf(trade) ?? []) {
+      groups.set(value, [...(groups.get(value) ?? []), trade]);
     }
   }
   return Array.from(groups.entries())
     .map(([key, group]) => bucketStats(key, labelFor(key), group))
     .sort((a, b) => b.count - a.count);
+}
+
+export function conditionPerformance(trades: MetricTrade[], labelFor: (value: string) => string): BucketStats[] {
+  return multiValuePerformance(trades, (trade) => trade.conditions, labelFor);
+}
+
+export function timeframePerformance(trades: MetricTrade[], labelFor: (value: string) => string): BucketStats[] {
+  return multiValuePerformance(trades, (trade) => trade.timeframes, labelFor);
+}
+
+export function mechanismPerformance(trades: MetricTrade[], labelFor: (value: string) => string): BucketStats[] {
+  return multiValuePerformance(trades, (trade) => trade.mechanisms, labelFor);
+}
+
+// Did following the model actually pay? Two buckets over the closed trades that
+// were taken on a setup with a checklist: every step ticked, versus some step
+// missing. Trades on a setup with no checklist are not graded at all — an
+// untracked trade is not a failed one, and lumping them in would make the
+// "incomplete" bucket meaningless.
+export function checklistPerformance(
+  trades: MetricTrade[],
+  stepTotalFor: (trade: MetricTrade) => number,
+): BucketStats[] {
+  const complete: MetricTrade[] = [];
+  const partial: MetricTrade[] = [];
+  for (const trade of trades.filter((entry) => entry.status === "CLOSED")) {
+    const total = stepTotalFor(trade);
+    if (!total) continue;
+    ((trade.checklistSteps?.length ?? 0) >= total ? complete : partial).push(trade);
+  }
+  return [
+    ...(complete.length ? [bucketStats("complete", "Full model — every step", complete)] : []),
+    ...(partial.length ? [bucketStats("partial", "Something was missing", partial)] : []),
+  ];
 }
 
 // --- Funding drag: the silent killer of "profitable" perp strategies ---

@@ -33,6 +33,9 @@ export const LessonSourceType = { TRADE: "TRADE", DAILY_REVIEW: "DAILY_REVIEW", 
 export const LessonCategory = { ENTRY_DISCIPLINE: "ENTRY_DISCIPLINE", EXIT_DISCIPLINE: "EXIT_DISCIPLINE", RISK_MANAGEMENT: "RISK_MANAGEMENT", PSYCHOLOGY: "PSYCHOLOGY", MARKET_CONDITION: "MARKET_CONDITION", SETUP_SPECIFIC: "SETUP_SPECIFIC", PROCESS: "PROCESS", OTHER: "OTHER" } as const;
 export const SetupDirectionBias = { LONG: "LONG", SHORT: "SHORT", BOTH: "BOTH" } as const;
 export const AssetTimeframe = { HTF: "HTF", MTF: "MTF", LTF: "LTF", GENERAL: "GENERAL" } as const;
+// What a quick note is about. Six built-ins mirroring the parts of the journal
+// a loose thought usually belongs to; the trader can type their own (lib/options.ts).
+export const NoteCategory = { TRADE: "TRADE", ASSET: "ASSET", MINDSET: "MINDSET", MARKET: "MARKET", LESSON: "LESSON", REVIEW: "REVIEW" } as const;
 
 export type TranscriptType = ValueOf<typeof TranscriptType>;
 export type ProcessingStatus = ValueOf<typeof ProcessingStatus>;
@@ -50,6 +53,7 @@ export type LessonSourceType = ValueOf<typeof LessonSourceType>;
 export type LessonCategory = ValueOf<typeof LessonCategory>;
 export type SetupDirectionBias = ValueOf<typeof SetupDirectionBias>;
 export type AssetTimeframe = ValueOf<typeof AssetTimeframe>;
+export type NoteCategory = ValueOf<typeof NoteCategory>;
 
 type ValueOf<T> = T[keyof T];
 
@@ -138,6 +142,18 @@ export type Trade = {
   concern: string | null;
   premortem?: string | null;
   conditions?: string[];
+  /** Chart timeframes this trade was actually worked on — `tradeTimeframe`
+   *  option values (1m / 5m / 15m / 1H / …, or ones the trader typed). */
+  timeframes?: string[];
+  /** The mechanisms/concepts the entry was built on — `mechanism` option values
+   *  (FVG, order block, liquidity sweep, displacement, …). Many per trade:
+   *  a real entry usually stacks two or three. */
+  mechanisms?: string[];
+  /** Which steps of the linked playbook setup's checklist were actually met.
+   *  Stored as normalized step values (`normalizeOptionValue` over the
+   *  checklist line), not indexes: reordering the checklist must not silently
+   *  move a tick from one step to another. */
+  checklistSteps?: string[];
   emotionalState: Extendable<EmotionalState> | null;
   riskPosture: Extendable<RiskPosture> | null;
   confidenceScore: number | null;
@@ -232,6 +248,12 @@ export type FreeNote = {
   updatedAt: Date;
   text: string;
   linkedTranscriptId: string | null;
+  /** Which part of the journal this thought is about — a `noteCategory` option
+   *  value (TRADE / ASSET / MINDSET / …, or one the trader typed themselves).
+   *  null = uncategorised, which is what every note written before this existed
+   *  (and every note lifted out of a captured voice note) still is. Stored as
+   *  null rather than left undefined: Firestore rejects undefined on write. */
+  category: Extendable<NoteCategory> | null;
   tags?: string[];
 };
 
