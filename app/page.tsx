@@ -9,8 +9,10 @@ import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay }
 import { humanize } from "@/lib/constants";
 import { db, getFreeNotesForDay, getResurfacedLessons, getRunnableSetups, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
+import { stepResolver } from "@/lib/setups";
 import {
   analyticsLeaks,
+  checklistGaps,
   calculateRuleAdherenceRate,
   calculateTotalR,
   conditionPerformance,
@@ -28,7 +30,7 @@ import {
 export default async function TodayPage() {
   const now = new Date();
   const today = startOfDay(now);
-  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes, runnableSetups] = await Promise.all([
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes, runnableSetups, playbook] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
     db.list("transcripts"),
@@ -40,6 +42,7 @@ export default async function TodayPage() {
     getOptionCatalog(),
     getFreeNotesForDay(now),
     getRunnableSetups(),
+    db.list("setups"),
   ]);
 
   // Streak counts showing up in any form — never profitability.
@@ -132,7 +135,16 @@ export default async function TodayPage() {
   let mistakeCosts = mistakeCostLedger(trades.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo)).slice(0, 5);
   if (!mistakeCosts.length) mistakeCosts = mistakeCostLedger(trades).slice(0, 5);
 
-  const insight = analyticsLeaks(trades, setupPerformance(trades, setupNames), conditionPerformance(trades, options.labeler("condition")))[0];
+  // The step you skip most is a leak like any other — it rides into the coach's
+  // corner through the same ranked list, so it competes with funding drag and
+  // repeated mistakes rather than needing its own panel.
+  const gaps = checklistGaps(trades, stepResolver(playbook));
+  const insight = analyticsLeaks(
+    trades,
+    setupPerformance(trades, setupNames),
+    conditionPerformance(trades, options.labeler("condition")),
+    gaps,
+  )[0];
   const tip = tipOfTheDay(now);
   const recentSymbols = [...new Set(trades
     .slice()

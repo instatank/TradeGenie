@@ -656,6 +656,44 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     (`normalizeOptionValue` caps at 40 chars). Those lines now show on the playbook as
     "too long to tick — shorten it" (`checklistLines`) instead of silently vanishing.
 
+- **Four follow-ups from the same review** — the loop from *record* → *read* → *do
+  differently* had three gaps left in it, and the pickers had started to crowd.
+  - **The step you skip is a leak** (`checklistGaps` + `analyticsLeaks`). Ticking a model was
+    only feeding tables nobody opens twice. The gap analysis asks a sharper question — which
+    step is missing most, and what do those trades return against the ones that had it — and
+    rides into the coach's corner through the same ranked leak list, so it competes with
+    funding drag and repeated mistakes instead of needing its own panel. Held to `MIN_SAMPLE`
+    like every other verdict.
+  - **The morning check-in offers it back** (`practiceSuggestion` in `lib/coach.ts`). "One thing
+    to practice" is now prefillable in one tap from what the journal already knows you skip.
+    Deliberately a *lower* bar than the leak (2 misses, not 5): "you missed this three times"
+    is an observation about what you did, not a claim about what it earns, and the field is one
+    keystroke to overwrite. The prefill rides in `?focus=` — zero client JS — and the field uses
+    `||` not `??`, because a journal saved with an empty focus stores `""` and `??` would let
+    that beat the suggestion.
+  - **Saved views** (`savedViews` collection, `components/SavedViews.tsx`). A filter you built
+    once, kept as *its URL*. Nothing about a view is structured — on `/trades` and `/notes` the
+    filters ARE the query string — so there is no second representation to keep in sync and a
+    saved view keeps working when those pages grow a filter it has never heard of. Saving the
+    same name twice updates that view rather than minting a duplicate chip; `safeViewPath()`
+    reduces anything with a host to its path so a saved view can never send you off-site.
+  - **Retiring a tag is picker-only** (`hiddenTags` in settings, "Your tags" on `/settings`).
+    The vocabulary grows forever and the pickers were going to crowd; the panel lists every tag
+    with count, last-used and where it's used, and retiring one takes it out of
+    `getTagVocabulary()` and nothing else. **Deliberately NOT a "remove this tag everywhere"
+    button**: tags are re-derived from the text on every full save, so a tag typed as an inline
+    `#hashtag` would come straight back and look like the delete had failed. A retired tag still
+    matches in search, still renders as a pill, and still appears in the picker on a record that
+    already carries it — which is what makes it safe.
+  - **`/mechanisms` is the concept library, built from your own trades** (`lib/mechanisms.ts`).
+    Each concept: what it means (the chip's hint, which used to vanish with the tooltip), what
+    it has actually returned for you, which concepts you stack it with, your best and worst
+    trade on it, and your own notes. The notes are ordinary `freeNotes` carrying the concept's
+    own tag through `normalizeTag(label)` — so `#fvg` typed anywhere lands on the FVG page, and a
+    note written there is findable from search like any other. No parallel library, no second
+    vocabulary, and a concept you typed yourself gets a page for free. The analytics
+    "By mechanism" rows link straight into it.
+
 - **The tables refuse to sound confident at small samples** (`MIN_SAMPLE` = 5, `isThinSample`).
   A mechanism with three trades and a 100% win rate is one lucky week, and a beginner will read
   it as an edge. Every grouped table now greys a thin row, strips the green/red — colour is what

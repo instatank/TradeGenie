@@ -18,6 +18,7 @@ export function QuickNoteComposer({
   tagGroups = [],
   defaultText = "",
   defaultCategory = null,
+  defaultTags = [],
   /** Changes when the note list changes, so a save leaves the chips clean for
    *  the next thought — a server-action redirect re-renders the form without
    *  remounting it, and the picker's state would otherwise survive. */
@@ -35,6 +36,9 @@ export function QuickNoteComposer({
    *  costs you what you had already typed. */
   defaultText?: string;
   defaultCategory?: string | null;
+  /** Pre-ticked tags — the mechanism reference uses it so a note written there
+   *  is filed against that concept without you remembering the hashtag. */
+  defaultTags?: string[];
   resetKey?: string;
 }) {
   return (
@@ -69,7 +73,7 @@ export function QuickNoteComposer({
 
       <TagPicker
         key={`tags-${resetKey}`}
-        selected={[]}
+        selected={defaultTags}
         vocabulary={tagVocabulary}
         groups={tagGroups}
         label="Tags (optional)"

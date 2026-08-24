@@ -1,18 +1,21 @@
 import { Suspense } from "react";
-import { Download, Lock, Pencil, Stethoscope, X } from "lucide-react";
+import { format } from "date-fns";
+import { Download, Eye, EyeOff, Lock, Pencil, Stethoscope, Tags, X } from "lucide-react";
 import { logoutAction } from "@/app/login/actions";
 import {
+  hideTagAction,
   removeCustomMistakeTagAction,
   removeCustomOptionAction,
   renameCustomMistakeTagAction,
   renameCustomOptionAction,
   saveSettingsAction,
+  showTagAction,
   testAiConnectionAction,
 } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { activeModel } from "@/lib/ai-status";
 import { defaultMistakeTagNames, marketTypes } from "@/lib/constants";
-import { db } from "@/lib/data";
+import { db, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
 import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getSettings } from "@/lib/settings-store";
@@ -112,6 +115,10 @@ export default async function SettingsPage({
       </section>
 
       <CustomLabelsPanel />
+
+      <Suspense fallback={<section className="panel mb-5"><p className="text-sm text-forge-muted">Reading your tags…</p></section>}>
+        <TagVocabularyPanel />
+      </Suspense>
 
       <form action={saveSettingsAction} className="space-y-5">
         <section className="panel space-y-4">
@@ -298,6 +305,94 @@ async function CustomLabelsPanel() {
           </p>
         </div>
       )}
+    </section>
+  );
+}
+
+
+// The tag vocabulary, and the one piece of housekeeping it needs: keeping the
+// pickers uncrowded. Hiding is picker-only — a hidden tag still matches in
+// search, still shows as a pill, and still appears in the picker on a record
+// that already carries it, so nothing you wrote is ever changed here.
+//
+// Deliberately NOT a "remove this tag everywhere" button: tags are derived from
+// the text on every full save, so a tag typed as an inline #hashtag would come
+// straight back and look like the delete had failed.
+async function TagVocabularyPanel() {
+  const vocabulary = await getTagVocabulary({ includeHidden: true });
+  const visible = vocabulary.filter((entry) => !entry.hidden);
+  const hidden = vocabulary.filter((entry) => entry.hidden);
+
+  return (
+    <section className="panel mb-5 space-y-3">
+      <div>
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Tags className="h-4 w-4 text-forge-blue" aria-hidden="true" />
+          Your tags
+        </h2>
+        <p className="mt-1 text-sm text-forge-muted">
+          Every tag you&apos;ve used, most recent first. Retiring one takes it out of the tag pickers so they stay
+          uncrowded — it changes nothing on your records, and search still finds it.
+        </p>
+      </div>
+
+      {!vocabulary.length ? (
+        <p className="rounded-lg bg-forge-panel px-3 py-2 text-sm text-forge-muted">
+          No tags yet. Type <span className="font-medium">#something</span> in any note, thesis or lesson.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-forge-line">
+          <table className="min-w-full text-sm">
+            <thead className="bg-forge-panel">
+              <tr>
+                {["Tag", "Used", "Last used", "Where", ""].map((header) => (
+                  <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...visible, ...hidden].map((entry) => (
+                <tr key={entry.tag} className={`border-t border-forge-line ${entry.hidden ? "bg-forge-panel/40 text-forge-muted" : ""}`}>
+                  <td className="px-3 py-2 font-medium">#{entry.tag}</td>
+                  <td className="px-3 py-2">
+                    {entry.count === 1 ? "once" : `${entry.count}×`}
+                  </td>
+                  <td className="px-3 py-2">{format(entry.lastUsed, "d MMM yyyy")}</td>
+                  <td className="px-3 py-2 text-forge-muted">{entry.kinds.join(", ")}</td>
+                  <td className="px-3 py-2 text-right">
+                    <form action={entry.hidden ? showTagAction : hideTagAction}>
+                      <input type="hidden" name="tag" value={entry.tag} />
+                      <button
+                        type="submit"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink"
+                      >
+                        {entry.hidden ? (
+                          <>
+                            <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                            Bring back
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                            Retire
+                          </>
+                        )}
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {hidden.length ? (
+        <p className="text-xs text-forge-muted">
+          {hidden.length} retired tag{hidden.length === 1 ? "" : "s"} — still on every record that carried them, just not
+          offered as chips any more.
+        </p>
+      ) : null}
     </section>
   );
 }

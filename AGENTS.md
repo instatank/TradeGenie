@@ -62,6 +62,8 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `lib/setups.ts`: a playbook setup's "Entry checklist" read as tickable steps (one per line), the `n of N` score for a trade, and the label lookup. No new field — the checklist text IS the model definition. `checklistLines()` also returns the lines that read like a step but can't be tokenized, so the playbook can flag them instead of dropping them silently.
 - `components/RunSetupBar.tsx`: the way into the pre-trade gate — one chip per setup that has a checklist, shown under the quick log on Today and `/trades/new`.
 - `components/TradeSetupFields.tsx`: the "Setup & execution" controls — playbook setup chips, timeframes used, mechanisms in the entry, and the linked setup's checklist as tick chips. Shared by the trade page fold and the `/trades` inline review (inside that row's existing form).
+- `lib/mechanisms.ts`: the mechanism reference — per-concept summary over the trades tagged with it (stats, what it's stacked with, best/worst), and `mechanismTag()`, the one tokenizer's tag for a concept so notes and pages find each other.
+- `components/SavedViews.tsx`: saved-view chips plus the "name this view" box. A view is stored as the page's own URL (`savedViews`), so nothing here knows what a filter is.
 - `lib/notes.ts`: the `/notes` filter — category (one per note) × tags (many) × free text in the search grammar. Pure functions over the note list, no store access.
 - `lib/transcript-processor.ts`: one Claude call per captured note (official SDK; the shape is taught by the prompt and enforced by parseJsonLoose + normalizeExtraction, not by a JSON schema — see CLAUDE.md) returning an array of typed entries; single-FREE_NOTE fallback when the AI is off, unkeyed, or erroring — the reason always rides along.
 - `lib/ai-status.ts`: turns a thrown Anthropic error into an actionable sentence, and backs the `/settings` "Test AI connection" check. Every AI path reads its model from `activeModel()`.
@@ -79,6 +81,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/notes`: every quick note, filterable — category chips × tag chips × text box (search grammar), day-grouped, with a composer on top; filters are links, so every view is a real URL
 - `/trades`: day-grouped journal rows (day P&L headers, direction/status chips, mistake badges); quick symbol/date filter row, advanced filters folded
 - `/trades/new`: chip-based 30-second quick log (`components/QuickTradeForm.tsx`, shared with Today)
+- `/mechanisms`, `/mechanisms/[value]`: the concept library built from your own trades — definition, your win rate/expectancy (greyed under `MIN_SAMPLE`), what you stack it with, best and worst example, every trade with it, and your own notes pre-tagged to it
 - `/playbook/[id]/run`: the pre-trade gate — tick the model's steps, then log the trade with the setup, steps, timeframes and mechanisms already on it. Live `n of N` is a pure-CSS counter (`.checklist-gate` in `globals.css`); it warns on a missing step but never blocks the trade.
 - `/trades/[id]`: review-first trade page — one-minute close & review panel on top, then "Setup & execution" (setup / timeframes / mechanisms / model checklist), full editor collapsed below
 - `/assets`, `/assets/[id]`: per-asset tracker — living thesis/levels page + running note thread (composer has an optional AI "Structure" tidy pass)
@@ -86,7 +89,7 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - `/import`: CSV import and raw execution linking
 - `/weekly-review`: generated/saved weekly reviews
 - `/calculator`: pre-trade profitability scratchpad — net-of-fees R, break-even price, required win rate, position size (nothing is saved)
-- `/settings`: AI status + connection test, custom labels, and the single capture prompt template
+- `/settings`: AI status + connection test, custom labels, the tag vocabulary (retire a tag from the pickers without touching a record), and the single capture prompt template
 - `/search`: global search — one box over every collection (words = AND substring, `#tags` = exact), type filter tabs, highlighted anchored snippets; empty state doubles as the browsable tag index
 
 ## UX Principles

@@ -257,6 +257,20 @@ export type FreeNote = {
   tags?: string[];
 };
 
+// A filter you built once and want back with one tap: the exact URL of a
+// /trades or /notes view. Stored as a path + query rather than as structured
+// filters on purpose — the filters ARE the URL on those pages, so there is
+// nothing to keep in sync, and a view keeps working when a page grows a new
+// filter it has never heard of.
+export type SavedView = {
+  id: string;
+  createdAt: Date;
+  updatedAt: Date;
+  name: string;
+  /** Root-relative, e.g. "/trades?mechanism=FVG&timeframe=5M". */
+  path: string;
+};
+
 // One dated entry in an asset's running thread — a free-form thought dump.
 export type AssetNote = {
   id: string;

@@ -259,6 +259,12 @@ export type BucketStats = {
   avgProcessScore: number | null;
 };
 
+/** Exported so a page can score an arbitrary slice of trades (the mechanism
+ *  reference does) with exactly the same maths the tables use. */
+export function bucketStatsFor(key: string, label: string, trades: MetricTrade[]): BucketStats {
+  return bucketStats(key, label, trades);
+}
+
 function bucketStats(key: string, label: string, trades: MetricTrade[]): BucketStats {
   const netPnl = trades.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0);
   return {
@@ -383,13 +389,63 @@ export function calculateExpectancyR(trades: MetricTrade[]) {
 // --- "What's hurting me": plain-language leak detection for the lean summary ---
 // Turns the same numbers the tables show into prioritized, readable findings so a
 // non-technical trader sees the few things worth fixing without reading a grid.
+// Which step of a model you skip, and what skipping it costs. The input is a
+// resolver rather than the store, so metrics stays store-free: the caller maps
+// a trade to the steps of the setup it was taken on.
+export type ChecklistGap = {
+  value: string;
+  label: string;
+  /** Closed trades on a setup carrying this step, where it wasn't ticked. */
+  missed: number;
+  /** Closed trades on a setup carrying this step at all. */
+  tracked: number;
+  avgRMissed: number | null;
+  avgRMet: number | null;
+};
+
+export function checklistGaps(
+  trades: MetricTrade[],
+  stepsFor: (trade: MetricTrade) => Array<{ value: string; label: string }>,
+): ChecklistGap[] {
+  const buckets = new Map<string, { label: string; missed: MetricTrade[]; met: MetricTrade[] }>();
+  for (const trade of trades.filter((entry) => entry.status === "CLOSED")) {
+    const ticked = new Set(trade.checklistSteps ?? []);
+    for (const step of stepsFor(trade)) {
+      const bucket = buckets.get(step.value) ?? { label: step.label, missed: [], met: [] };
+      (ticked.has(step.value) ? bucket.met : bucket.missed).push(trade);
+      buckets.set(step.value, bucket);
+    }
+  }
+  return [...buckets.entries()]
+    .map(([value, bucket]) => ({
+      value,
+      label: bucket.label,
+      missed: bucket.missed.length,
+      tracked: bucket.missed.length + bucket.met.length,
+      avgRMissed: averageR(bucket.missed),
+      avgRMet: averageR(bucket.met),
+    }))
+    .sort((a, b) => b.missed - a.missed || a.label.localeCompare(b.label));
+}
+
+function averageR(trades: MetricTrade[]): number | null {
+  const values = trades.map((trade) => trade.rMultiple).filter((value): value is number => value != null);
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 export type LeakInsight = {
   severity: "high" | "medium" | "good";
   title: string;
   detail: string;
 };
 
-export function analyticsLeaks(trades: MetricTrade[], setups: BucketStats[], conditions: BucketStats[]): LeakInsight[] {
+export function analyticsLeaks(
+  trades: MetricTrade[],
+  setups: BucketStats[],
+  conditions: BucketStats[],
+  gaps: ChecklistGap[] = [],
+): LeakInsight[] {
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const insights: LeakInsight[] = [];
 
@@ -474,6 +530,29 @@ export function analyticsLeaks(trades: MetricTrade[], setups: BucketStats[], con
       title: `You lose in "${worstCondition.label}" conditions`,
       detail: `${(worstCondition.expectancyR ?? 0).toFixed(2)}R over ${worstCondition.count} trades. This context isn't for you yet — stand aside or size down.`,
     });
+  }
+
+  // The step you skip most, and what skipping it costs. This is the whole
+  // payoff of ticking a model: it turns "follow your process" into a specific
+  // sentence about one step. Held to MIN_SAMPLE like every other verdict — one
+  // skipped step in three trades is a Tuesday, not a leak.
+  const gap = gaps.find((entry) => entry.missed >= MIN_SAMPLE);
+  if (gap) {
+    const share = gap.tracked ? gap.missed / gap.tracked : 0;
+    const worseWithout = gap.avgRMissed != null && gap.avgRMet != null && gap.avgRMissed < gap.avgRMet;
+    if (worseWithout) {
+      insights.push({
+        severity: (gap.avgRMissed ?? 0) < 0 ? "high" : "medium",
+        title: `Skipping "${gap.label}" is costing you`,
+        detail: `Missing on ${gap.missed} of ${gap.tracked} model trades, and those averaged ${(gap.avgRMissed ?? 0).toFixed(2)}R against ${(gap.avgRMet ?? 0).toFixed(2)}R when it was there. It is the one step to stop skipping.`,
+      });
+    } else if (share >= 0.4) {
+      insights.push({
+        severity: "medium",
+        title: `You skip "${gap.label}" a lot`,
+        detail: `It was missing on ${gap.missed} of ${gap.tracked} trades taken on a model that asks for it. The results don't clearly punish it yet — but a step you skip most of the time isn't really in your model.`,
+      });
+    }
   }
 
   const order = { high: 0, medium: 1, good: 2 };

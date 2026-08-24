@@ -1,13 +1,15 @@
+import Link from "next/link";
 import { format } from "date-fns";
 import { BinColumns, DisciplineLines, DivergingColumns, EmptyChart, Meter, MoneyBars } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
 import { humanize, sessionLabels } from "@/lib/constants";
 import { db, getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
-import { setupSteps } from "@/lib/setups";
+import { setupSteps, stepResolver } from "@/lib/setups";
 import {
   analyticsLeaks,
   averageProcessScore,
+  checklistGaps,
   checklistPerformance,
   conditionPerformance,
   disciplineCurve,
@@ -59,7 +61,7 @@ export default async function AnalyticsPage() {
   // the model it was actually taken on.
   const stepTotals = new Map(playbook.map((setup) => [setup.id, setupSteps(setup.checklist).length]));
   const checklist = checklistPerformance(trades, (trade) => (trade.setupId ? stepTotals.get(trade.setupId) ?? 0 : 0));
-  const leaks = analyticsLeaks(trades, setups, conditions);
+  const leaks = analyticsLeaks(trades, setups, conditions, checklistGaps(trades, stepResolver(playbook)));
 
   const histogram = rHistogram(trades);
   const tilt = tiltAnalysis(trades);
@@ -341,6 +343,7 @@ export default async function AnalyticsPage() {
                 subtitle="What the entry was built out of — FVG, order block, sweep. The one table that tells you which part of the model is carrying you."
                 rows={mechanisms}
                 firstColLabel="Mechanism"
+                hrefFor={(row) => `/mechanisms/${row.key}`}
               />
               {checklist.length ? (
                 <BucketTable
@@ -393,7 +396,20 @@ function TiltCard({ title, stats, highlight = false }: { title: string; stats: T
   );
 }
 
-function BucketTable({ title, subtitle, rows, firstColLabel }: { title: string; subtitle: string; rows: BucketStats[]; firstColLabel: string }) {
+function BucketTable({
+  title,
+  subtitle,
+  rows,
+  firstColLabel,
+  hrefFor,
+}: {
+  title: string;
+  subtitle: string;
+  rows: BucketStats[];
+  firstColLabel: string;
+  /** Optional: makes the first column a link (mechanisms have their own page). */
+  hrefFor?: (row: BucketStats) => string;
+}) {
   const thin = rows.filter((row) => isThinSample(row.count)).length;
   return (
     <section>
@@ -423,7 +439,13 @@ function BucketTable({ title, subtitle, rows, firstColLabel }: { title: string; 
                   return (
                     <tr key={row.key} className={`border-t border-forge-line ${light ? "bg-forge-panel/30" : ""}`}>
                       <td className={`px-3 py-2 font-medium ${light ? "text-forge-muted" : ""}`}>
-                        {row.label}
+                        {hrefFor ? (
+                          <Link href={hrefFor(row)} className="transition hover:text-forge-blue hover:underline">
+                            {row.label}
+                          </Link>
+                        ) : (
+                          row.label
+                        )}
                         {light ? (
                           <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-[11px] font-normal text-forge-muted ring-1 ring-forge-line">
                             {MIN_SAMPLE - row.count} more to read this

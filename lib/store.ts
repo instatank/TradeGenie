@@ -15,6 +15,7 @@ import type {
   Lesson,
   MistakeTag,
   RawExecution,
+  SavedView,
   Screenshot,
   Setup,
   Trade,
@@ -41,6 +42,7 @@ export type StoreShape = {
   assetNotes: AssetNote[];
   customOptions: CustomOption[];
   freeNotes: FreeNote[];
+  savedViews: SavedView[];
 };
 
 const emptyStore: StoreShape = {
@@ -59,6 +61,7 @@ const emptyStore: StoreShape = {
   assetNotes: [],
   customOptions: [],
   freeNotes: [],
+  savedViews: [],
 };
 
 // Derived from the store shape itself so a new collection can never be left out

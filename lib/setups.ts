@@ -80,3 +80,10 @@ export function checklistScore(
 export function stepLabel(steps: SetupStep[], value: string) {
   return steps.find((step) => step.value === value)?.label ?? humanize(value);
 }
+
+/** Maps a trade to the steps of the setup it was taken on. Built once per
+ *  request from the playbook, so the metrics helpers can stay store-free. */
+export function stepResolver(setups: Array<{ id: string; checklist: string | null }>) {
+  const byId = new Map(setups.map((setup) => [setup.id, setupSteps(setup.checklist)]));
+  return (trade: { setupId?: string | null }): SetupStep[] => (trade.setupId ? byId.get(trade.setupId) ?? [] : []);
+}

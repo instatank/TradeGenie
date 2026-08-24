@@ -22,7 +22,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const STATIC_ROUTES = [
   "/", "/trades", "/trades/new", "/daily", "/inbox", "/lessons", "/notes",
   "/search", "/calendar", "/analytics", "/assets", "/playbook", "/settings",
-  "/calculator", "/weekly-review", "/import", "/login",
+  "/calculator", "/weekly-review", "/import", "/login", "/mechanisms",
 ];
 
 async function main() {
@@ -81,6 +81,9 @@ async function dynamicRoutes(storePath: string): Promise<string[]> {
     first("trades") && `/trades/${first("trades")}`,
     first("assets") && `/assets/${first("assets")}`,
     first("setups") && `/playbook/${first("setups")}/run`,
+    // A mechanism page keyed by an option value, not a record id — FVG is a
+    // built-in, so it exists in every store.
+    "/mechanisms/FVG",
   ].filter((route): route is string => Boolean(route));
 }
 

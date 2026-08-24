@@ -12,6 +12,7 @@ export const moreNavItems = [
   { href: "/calendar", label: "Calendar" },
   { href: "/notes", label: "Notes" },
   { href: "/playbook", label: "Playbook" },
+  { href: "/mechanisms", label: "Mechanisms" },
   { href: "/analytics", label: "Analytics" },
   { href: "/calculator", label: "Calculator" },
   { href: "/lessons", label: "Lessons" },

@@ -11,18 +11,24 @@ import { TagPills } from "@/components/TagPills";
 import { humanize } from "@/lib/constants";
 import { db, getFreeNotesForDay, getSymbolTagSuggestions, getTagVocabulary, getTodayJournal } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
-import { getTradePnl } from "@/lib/metrics";
+import { checklistGaps, getTradePnl } from "@/lib/metrics";
+import { practiceSuggestion } from "@/lib/coach";
+import { stepResolver } from "@/lib/setups";
 
 // Two rituals, two small cards. Morning: mood + guardrails, under a minute.
 // Evening: three taps and two lines, 2–4 minutes. Everything else is optional.
-export default async function DailyPage({ searchParams }: { searchParams?: Promise<{ date?: string; note?: string }> }) {
+export default async function DailyPage({ searchParams }: { searchParams?: Promise<{ date?: string; note?: string; focus?: string }> }) {
   const params = await searchParams;
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
-  const [journal, allTrades, tagVocabulary, options, freeNotes, symbolTags] = await Promise.all([
+  const [journal, allTrades, tagVocabulary, options, freeNotes, symbolTags, playbook] = await Promise.all([
     getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(), getOptionCatalog(),
-    getFreeNotesForDay(selectedDate), getSymbolTagSuggestions(),
+    getFreeNotesForDay(selectedDate), getSymbolTagSuggestions(), db.list("setups"),
   ]);
+  // What the journal already knows you keep skipping. Offered, never imposed:
+  // the link prefills the field through the URL (zero client JS) and one
+  // keystroke overwrites it.
+  const suggestion = practiceSuggestion(checklistGaps(allTrades, stepResolver(playbook)));
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const dayTrades = allTrades
     .filter((trade) => isSameDay(trade.tradeDateTime, selectedDate))
@@ -78,7 +84,26 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
           </label>
           <label className="field">
             <span className="label">One thing to practice</span>
-            <input name="learningFocus" defaultValue={journal?.learningFocus ?? ""} placeholder="e.g. wait for the retest" className="input" />
+            <input
+              name="learningFocus"
+              // `||`, not `??`: a journal saved with an empty focus stores "",
+              // and ?? would let that empty string win over the suggestion the
+              // link just carried in.
+              defaultValue={journal?.learningFocus || params?.focus || ""}
+              placeholder="e.g. wait for the retest"
+              className="input"
+            />
+            {suggestion && !journal?.learningFocus ? (
+              <span className="text-xs text-forge-muted">
+                {suggestion.detail}{" "}
+                <Link
+                  href={`/daily?date=${dateParam}&focus=${encodeURIComponent(suggestion.text)}`}
+                  className="font-medium text-forge-blue hover:underline"
+                >
+                  Practice &ldquo;{suggestion.text}&rdquo;
+                </Link>
+              </span>
+            ) : null}
           </label>
         </div>
 

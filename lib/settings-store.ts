@@ -5,6 +5,11 @@ import { getFirestoreDb, usesFirebase } from "@/lib/store";
 
 export type AppSettings = {
   aiEnabled: boolean;
+  /** Tags kept out of the pickers to stop them crowding, without touching a
+   *  single record. A hidden tag still works everywhere else: it still matches
+   *  in search, still shows as a pill, and still appears in the picker on a
+   *  record that already carries it — it just stops being offered as a chip. */
+  hiddenTags: string[];
   defaultMarketType: string;
   defaultSourceTool: string;
   promptTemplatesVersion: number;
@@ -17,6 +22,7 @@ const localSettingsPath = path.join(process.cwd(), "data", "settings.json");
 
 export const defaultSettings: AppSettings = {
   aiEnabled: true,
+  hiddenTags: [],
   defaultMarketType: "CRYPTO_PERP",
   defaultSourceTool: "Voice memo",
   promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,

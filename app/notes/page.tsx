@@ -4,7 +4,8 @@ import { NotebookPen, Search, X } from "lucide-react";
 import { PageTitle } from "@/components/Fields";
 import { FreeNoteCard } from "@/components/FreeNoteCard";
 import { QuickNoteComposer } from "@/components/QuickNoteComposer";
-import { getFreeNotes, getSymbolTagSuggestions, getTagVocabulary } from "@/lib/data";
+import { SavedViews } from "@/components/SavedViews";
+import { db, getFreeNotes, getSymbolTagSuggestions, getTagVocabulary } from "@/lib/data";
 import {
   UNCATEGORIZED,
   filterNotes,
@@ -42,11 +43,12 @@ export default async function NotesPage({
     q: params.q ?? "",
   };
 
-  const [notes, options, tagVocabulary, symbolTags] = await Promise.all([
+  const [notes, options, tagVocabulary, symbolTags, savedViews] = await Promise.all([
     getFreeNotes(),
     getOptionCatalog(),
     getTagVocabulary(),
     getSymbolTagSuggestions(),
+    db.list("savedViews"),
   ]);
 
   const visible = filterNotes(notes, filters);
@@ -88,6 +90,13 @@ export default async function NotesPage({
       </div>
 
       {/* ---- Narrow it down ---- */}
+      <SavedViews
+        views={savedViews.filter((view) => view.path.startsWith("/notes"))}
+        currentPath={selfHref}
+        hasFilters={active}
+        emptyHint="Narrow the notes, then name it to keep it one tap away."
+      />
+
       <div className="panel mb-5 space-y-3">
         <form action="/notes" className="flex flex-col gap-2 sm:flex-row">
           {filters.category ? <input type="hidden" name="category" value={filters.category} /> : null}

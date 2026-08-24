@@ -122,3 +122,24 @@ export function tipOfTheDay(today = new Date()): MentorTip {
   const daysSinceEpoch = differenceInCalendarDays(startOfDay(today), new Date(2024, 0, 1));
   return mentorTips[((daysSinceEpoch % mentorTips.length) + mentorTips.length) % mentorTips.length];
 }
+
+// --- One thing to practice ---
+// The morning check-in asks what you'll work on today; the journal already
+// knows. This is deliberately NOT held to MIN_SAMPLE the way a performance
+// verdict is: "you missed this step three times recently" is an observation
+// about what you did, not a claim about what it earns you, and the field it
+// fills in is a nudge you can overwrite in one keystroke.
+const SUGGEST_AFTER = 2;
+
+export type PracticeSuggestion = { text: string; detail: string };
+
+export function practiceSuggestion(
+  gaps: Array<{ label: string; missed: number; tracked: number }>,
+): PracticeSuggestion | null {
+  const gap = gaps.find((entry) => entry.missed >= SUGGEST_AFTER);
+  if (!gap) return null;
+  return {
+    text: `Wait for: ${gap.label}`,
+    detail: `Missing on ${gap.missed} of your last ${gap.tracked} trades on a model that asks for it.`,
+  };
+}

@@ -4,6 +4,7 @@ import { ArrowUpRight, CalendarDays, ChevronRight, ClipboardCheck, Plus, X } fro
 import { saveTradeAction } from "@/app/actions";
 import { PageTitle, SelectField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
+import { SavedViews } from "@/components/SavedViews";
 import { TagPills } from "@/components/TagPills";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
@@ -26,8 +27,8 @@ const tradeViews = [
 // day with the day's P&L, one clean row per trade, tap anywhere to open it.
 export default async function TradesPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
-  const [mistakeTags, allTrades, options, setups] = await Promise.all([
-    db.list("mistakeTags"), getTradesWithMistakes(), getOptionCatalog(), db.list("setups"),
+  const [mistakeTags, allTrades, options, setups, savedViews] = await Promise.all([
+    db.list("mistakeTags"), getTradesWithMistakes(), getOptionCatalog(), db.list("setups"), db.list("savedViews"),
   ]);
   // Filtering has to reach every mind state ever stored, so the filter list is
   // the old full enum plus whatever the trader has added since.
@@ -71,6 +72,10 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
     .filter((tag) => isPrimaryMistakeTag(tag.name))
     .map((tag) => ({ id: tag.id, label: tag.label, description: tag.description }));
   const openRowId = params.open ?? null;
+  // What a saved view would store: this page's own URL, minus the transient
+  // bits (which row is expanded, which page you're on, the toast).
+  const currentPath = viewPath(params);
+  const tradeViewsSaved = savedViews.filter((view) => view.path.startsWith("/trades"));
 
   return (
     <main className="page-shell max-w-5xl">
@@ -82,6 +87,13 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
       <ViewTabs basePath="/trades" current={view} params={params} tabs={tradeViews} />
 
       {calendarRange.active ? <RangeChip basePath="/trades" params={params} label={calendarRange.label} /> : null}
+
+      <SavedViews
+        views={tradeViewsSaved}
+        currentPath={currentPath}
+        hasFilters={hasSavableFilters(params)}
+        emptyHint="Filter the list, then name it to keep it one tap away."
+      />
 
       <form className="mb-4 flex flex-wrap items-end gap-2">
         <input type="hidden" name="view" value={view} />
@@ -535,6 +547,26 @@ function groupByDay(trades: TradeRowData[]) {
 
 // Where an inline review returns to: the same filtered list, same row still
 // expanded and scrolled to, so a review pass is one continuous flow.
+// The page's own URL as a saved view would store it: the filters, without the
+// transient bits (expanded row, page number, toast).
+const TRANSIENT_PARAMS = ["open", "page", "feedback", "feedbackType"];
+
+function viewPath(params: Record<string, string | undefined>) {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value && !TRANSIENT_PARAMS.includes(key)) next.set(key, value);
+  }
+  const query = next.toString();
+  return query ? `/trades?${query}` : "/trades";
+}
+
+/** Is there anything here worth keeping? An unfiltered list is just the page. */
+function hasSavableFilters(params: Record<string, string | undefined>) {
+  return Object.entries(params).some(
+    ([key, value]) => value && !TRANSIENT_PARAMS.includes(key) && !(key === "view" && value === "all"),
+  );
+}
+
 function rowUrl(params: Record<string, string | undefined>, tradeId: string) {
   const next = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

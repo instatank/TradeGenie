@@ -25,7 +25,7 @@ import { setupSteps } from "@/lib/setups";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
-import { deriveTags, mergeTags } from "@/lib/tags";
+import { deriveTags, mergeTags, normalizeTag } from "@/lib/tags";
 import {
   entryKindLabels,
   entrySummary,
@@ -577,6 +577,52 @@ export async function deleteFreeNoteAction(formData: FormData) {
   await db.deleteWhere("freeNotes", (note) => note.id === id);
   revalidateEverything();
   await redirectBackWithFeedback("Note deleted.", toText(formData.get("redirectTo")) ?? "/");
+}
+
+// --- Saved views ------------------------------------------------------------
+// A filter you built once, kept as its URL. Nothing about a view is structured:
+// on /trades and /notes the filters ARE the query string, so storing the path
+// means a saved view keeps working when those pages grow a filter it has never
+// heard of — and there is no second representation to keep in sync.
+
+/** Root-relative path + query only. A saved view must never be able to send you
+ *  off-site, so anything with a host is reduced to its path. */
+function safeViewPath(input: string | null | undefined): string | null {
+  const raw = String(input ?? "").trim();
+  if (!raw.startsWith("/")) return null;
+  try {
+    const url = new URL(raw, "http://tradeforge.local");
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveViewAction(formData: FormData) {
+  const name = toText(formData.get("name"));
+  const path = safeViewPath(toText(formData.get("path")));
+  const redirectTo = toText(formData.get("redirectTo")) ?? "/trades";
+  if (!name || !path) {
+    redirect(withFeedback(redirectTo, "Give the view a name first.", "error"));
+  }
+  const now = new Date();
+  const existing = (await db.list("savedViews")).find((view) => view.name.toLowerCase() === name.toLowerCase());
+  // Saving the same name twice updates that view rather than growing a second
+  // chip reading the same thing — the same rule the option registry follows.
+  if (existing) {
+    await db.update("savedViews", existing.id, { path, updatedAt: now });
+  } else {
+    await db.create("savedViews", { createdAt: now, updatedAt: now, name, path });
+  }
+  revalidateEverything();
+  redirect(withFeedback(redirectTo, existing ? `Updated the "${name}" view.` : `Saved "${name}". It's one tap from now on.`));
+}
+
+export async function deleteSavedViewAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  await db.deleteWhere("savedViews", (view) => view.id === id);
+  revalidateEverything();
+  await redirectBackWithFeedback("View removed.", toText(formData.get("redirectTo")) ?? "/trades");
 }
 
 export async function deleteDailyJournalAction(formData: FormData) {
@@ -1239,7 +1285,11 @@ export async function removeCustomMistakeTagAction(formData: FormData) {
 }
 
 export async function saveSettingsAction(formData: FormData) {
+  // hiddenTags isn't on this form — it's toggled from the tag panel — so it has
+  // to be carried through rather than defaulted away by a save of the others.
+  const current = await getSettings();
   const settings: AppSettings = {
+    ...current,
     aiEnabled: formData.get("aiEnabled") === "on",
     defaultMarketType: String(formData.get("defaultMarketType") ?? "CRYPTO_PERP"),
     defaultSourceTool: String(formData.get("defaultSourceTool") ?? "Voice memo"),
@@ -1847,4 +1897,28 @@ function enumFromText<T extends Record<string, string>>(enumObject: T, value: un
 
 function formatMaybe(value: number | null | undefined) {
   return value == null ? "not available" : value.toFixed(2);
+}
+
+// --- Tag housekeeping -------------------------------------------------------
+// Hiding is picker-only and touches no record: the tag still matches in search,
+// still shows as a pill, and still appears in the picker on a record that
+// already carries it. Deliberately NOT a bulk delete across records — a tag
+// typed as an inline #hashtag is re-derived from the text on the next save, so
+// "remove it everywhere" would quietly come back and look like a bug.
+export async function hideTagAction(formData: FormData) {
+  const tag = normalizeTag(String(formData.get("tag") ?? ""));
+  if (!tag) return;
+  const settings = await getSettings();
+  await saveSettings({ ...settings, hiddenTags: [...new Set([...(settings.hiddenTags ?? []), tag])].sort() });
+  revalidateEverything();
+  await redirectBackWithFeedback(`#${tag} is out of the pickers. Nothing on your records changed.`, "/settings");
+}
+
+export async function showTagAction(formData: FormData) {
+  const tag = normalizeTag(String(formData.get("tag") ?? ""));
+  if (!tag) return;
+  const settings = await getSettings();
+  await saveSettings({ ...settings, hiddenTags: (settings.hiddenTags ?? []).filter((entry) => entry !== tag) });
+  revalidateEverything();
+  await redirectBackWithFeedback(`#${tag} is back in the pickers.`, "/settings");
 }

@@ -8,6 +8,7 @@ import {
   upsertBy,
   type StoreShape,
 } from "@/lib/store";
+import { getSettings } from "@/lib/settings-store";
 import { setupSteps } from "@/lib/setups";
 import { normalizeTag } from "@/lib/tags";
 import type {
@@ -32,14 +33,29 @@ export const db = {
   upsertBy,
 };
 
-export type TagVocabularyEntry = { tag: string; count: number; lastUsed: Date };
+export type TagVocabularyEntry = { tag: string; count: number; lastUsed: Date; kinds: string[]; hidden: boolean };
+
+// Human names for where a tag is in use, shown in the settings tidy-up panel so
+// you can see what retiring one would take out of the pickers.
+const TAG_SOURCE_LABELS = {
+  trades: "Trades",
+  transcripts: "Captured notes",
+  lessons: "Lessons",
+  assets: "Assets",
+  assetNotes: "Asset notes",
+  dailyJournals: "Daily journals",
+  setups: "Playbook",
+  freeNotes: "Quick notes",
+} as const;
 
 // Your own tag vocabulary, most recently used first. Tag pickers show the top
 // handful as one-tap chips and fold the rest away, so the vocabulary can grow
 // without the forms ever getting crowded. Recency beats frequency here: the
 // tags you're using this week are the ones you want under your thumb.
-export async function getTagVocabulary(): Promise<TagVocabularyEntry[]> {
-  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, freeNotes] = await Promise.all([
+export async function getTagVocabulary(
+  { includeHidden = false }: { includeHidden?: boolean } = {},
+): Promise<TagVocabularyEntry[]> {
+  const [trades, transcripts, lessons, assets, assetNotes, journals, setups, freeNotes, settings] = await Promise.all([
     listRecords("trades"),
     listRecords("transcripts"),
     listRecords("lessons"),
@@ -48,31 +64,35 @@ export async function getTagVocabulary(): Promise<TagVocabularyEntry[]> {
     listRecords("dailyJournals"),
     listRecords("setups"),
     listRecords("freeNotes"),
+    getSettings(),
   ]);
-  const usage = new Map<string, { count: number; lastUsed: Date }>();
-  const record = (tags: string[] | undefined, date: Date) => {
+  const hidden = new Set(settings.hiddenTags ?? []);
+  const usage = new Map<string, { count: number; lastUsed: Date; kinds: Set<string> }>();
+  const record = (tags: string[] | undefined, date: Date, kind: keyof typeof TAG_SOURCE_LABELS) => {
     for (const tag of tags ?? []) {
       const entry = usage.get(tag);
-      if (!entry) usage.set(tag, { count: 1, lastUsed: date });
+      if (!entry) usage.set(tag, { count: 1, lastUsed: date, kinds: new Set([TAG_SOURCE_LABELS[kind]]) });
       else {
         entry.count += 1;
+        entry.kinds.add(TAG_SOURCE_LABELS[kind]);
         if (date > entry.lastUsed) entry.lastUsed = date;
       }
     }
   };
-  for (const trade of trades) record(trade.tags, trade.updatedAt ?? trade.tradeDateTime);
-  for (const transcript of transcripts) record(transcript.tags, transcript.updatedAt ?? transcript.createdAt);
-  for (const lesson of lessons) record(lesson.tags, lesson.updatedAt ?? lesson.createdAt);
-  for (const asset of assets) record(asset.tags, asset.updatedAt ?? asset.createdAt);
-  for (const note of assetNotes) record(note.tags, note.updatedAt ?? note.createdAt);
-  for (const journal of journals) record(journal.tags, journal.updatedAt ?? journal.date);
-  for (const setup of setups) record(setup.tags, setup.updatedAt ?? setup.createdAt);
+  for (const trade of trades) record(trade.tags, trade.updatedAt ?? trade.tradeDateTime, "trades");
+  for (const transcript of transcripts) record(transcript.tags, transcript.updatedAt ?? transcript.createdAt, "transcripts");
+  for (const lesson of lessons) record(lesson.tags, lesson.updatedAt ?? lesson.createdAt, "lessons");
+  for (const asset of assets) record(asset.tags, asset.updatedAt ?? asset.createdAt, "assets");
+  for (const note of assetNotes) record(note.tags, note.updatedAt ?? note.createdAt, "assetNotes");
+  for (const journal of journals) record(journal.tags, journal.updatedAt ?? journal.date, "dailyJournals");
+  for (const setup of setups) record(setup.tags, setup.updatedAt ?? setup.createdAt, "setups");
   // Quick notes tag as freely as anything else — and now that they carry a tag
   // picker, they're often where a tag is invented. Leaving them out kept a tag
   // used only on notes out of every picker in the app.
-  for (const note of freeNotes) record(note.tags, note.updatedAt ?? note.createdAt);
+  for (const note of freeNotes) record(note.tags, note.updatedAt ?? note.createdAt, "freeNotes");
   return [...usage.entries()]
-    .map(([tag, entry]) => ({ tag, ...entry }))
+    .map(([tag, entry]) => ({ tag, count: entry.count, lastUsed: entry.lastUsed, kinds: [...entry.kinds].sort(), hidden: hidden.has(tag) }))
+    .filter((entry) => includeHidden || !entry.hidden)
     .sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime() || b.count - a.count || a.tag.localeCompare(b.tag));
 }
 
