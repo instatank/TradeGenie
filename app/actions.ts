@@ -902,6 +902,11 @@ export async function saveTradeAction(formData: FormData) {
     // Plain checkboxes with no "type another" box, so they need the marker: an
     // all-unticked checklist posts nothing at all, and "nothing" has to mean
     // "none ticked" here rather than "not shown".
+    //
+    // The else-branch reads back a field the trade may not have at all (it
+    // predates these), i.e. undefined — which the store treats as "leave this
+    // field alone" on both backends. It used to reach Firestore verbatim and
+    // 500 the save; see the dehydrate() comment in lib/store.ts.
     checklistSteps: present("hasChecklistSteps")
       ? formData.getAll("checklistSteps").map(String).filter(Boolean)
       : trade.checklistSteps,

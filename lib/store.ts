@@ -202,7 +202,7 @@ export async function updateRecord<K extends CollectionName>(
 ): Promise<StoreShape[K][number]> {
   const existing = await getRecord(collection, id);
   if (!existing) throw new Error(`Missing ${collection} record ${id}`);
-  const record = { ...existing, ...patch } as StoreShape[K][number];
+  const record = { ...existing, ...definedOnly(patch) } as StoreShape[K][number];
   if (usesFirebase()) {
     await firestore().collection(collection).doc(id).set(dehydrate(record) as Record<string, unknown>, { merge: true });
     invalidateRead(collection);
@@ -338,15 +338,34 @@ function hydrate(value: unknown): unknown {
   return output;
 }
 
-function dehydrate(value: unknown): unknown {
+// Firestore REFUSES a document containing `undefined` and throws at write time;
+// the local JSON store silently drops it, because that is what JSON.stringify
+// does. That asymmetry is a trap: a patch carrying an optional field that a
+// record predates works perfectly in dev and in the smoke test, then 500s in
+// production the first time a real trader saves. It did exactly that — a review
+// saved on a trade older than `checklistSteps` crashed with digest 516351032.
+//
+// So undefined is dropped here, at the one boundary every write already passes
+// through, rather than guarded field by field at ~40 call sites. The rule this
+// gives the rest of the app is a good one and now holds on BOTH backends:
+// **an undefined value in a patch means "leave this field alone"**. Clearing a
+// field is what `null` is for.
+export function dehydrate(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(dehydrate);
   if (!value || typeof value !== "object") return value;
   const output: Record<string, unknown> = {};
   for (const [key, inner] of Object.entries(value)) {
+    if (inner === undefined) continue;
     output[key] = dehydrate(inner);
   }
   return output;
+}
+
+/** The other half of the same rule, for the local store: an undefined patch
+ *  value must not overwrite what's there, so both backends behave alike. */
+function definedOnly<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as Partial<T>;
 }
 
 function shouldBeDate(key: string) {

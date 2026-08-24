@@ -1,44 +1,60 @@
 # Pending Tasks
 
 Working backlog for TradeGenie, ordered by practical benefit for daily use.
-For the working contract and a log of what changed, see `CLAUDE.md`.
+For the working contract and a log of *why* things were built the way they were, see `CLAUDE.md`;
+for the file map and routes, `AGENTS.md`. This file is the owner's roadmap — an agent updates it
+to match reality, and doesn't promote itself off it.
 
-## Recently completed
-- **Durable persistence** — Firestore wired for dev + Vercel; fail-loud on partial config.
-- **Backup/export** — one-click full JSON export at `/api/export`; storage banner on `/settings`.
-- **Compact expandable rows** — Inbox, Lessons, Import.
-- **Trade detail cleanup** — compact summary + collapsible sections.
-- **Voice-note confirmation flow** — single "Review this draft before saving" card with
-  destination, fields, missing-info/link callouts, color-coded confidence, inline confirm.
-- **Lean defaults** — mind state (6), mistake tags (9 + "More"), lesson categories (5),
-  quick-trade form trimmed; "exhaustive but lean" advanced-panel pattern.
-- **Analytics re-scope** — "What's hurting me" summary up top; heavy tables behind an
-  "Advanced analytics" toggle.
-- **Transcript prompts** — per-type routing, enum-constrained templates, system-injected
-  live mistake-tag list, prompt-template version gate.
-- **Anthropic transcript backend** — swapped from OpenAI to the Anthropic SDK with structured
-  outputs (`ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL`, default `claude-sonnet-4-6`).
-- **Tagging + indexing + search** — free-form `#tags` on everything (one tokenizer,
-  `lib/tags.ts`), unified cross-collection search with exact-`#tag` + AND-word queries,
-  highlighted snippets, tappable tag pills, tag index on the empty `/search` page.
+Last reconciled: 2026-08-24.
 
-## In progress / next up
-1. **Vercel production branch** permanent fix (currently pinned via manual "Promote"; configured
-   branch is still `main`).
-2. **Today workspace** — focused Today panel (check-in status, open trades, notes, EOD status).
-3. **Trade lifecycle prompts** — nudge unfinished loops (CLOSED without exit review, mistake
-   without lesson, transcript structured but unconfirmed, etc.).
-4. **Quick Add** — persistent button/shortcut for voice note, quick trade, EOD, manual lesson.
+## Shipped (short list — the reasoning lives in CLAUDE.md's decisions log)
+- **Durable persistence + backup** — Firestore, fail-loud on partial config, `/api/export`, storage banner.
+- **Lean defaults & analytics re-scope** — trimmed vocabularies, "What's hurting me" up top, heavy tables folded.
+- **Capture pipeline** — one Anthropic call per note returning an array of typed entries, per-entry
+  review cards, exits that can't duplicate a trade, `npm run eval:capture` + 15 fixtures.
+- **Tagging, indexing, search** — one tokenizer, stored `tags[]` everywhere, unified index, `#tag`/word grammar.
+- **Tag picker + custom pill labels** — the vocabularies are the trader's, extendable by typing.
+- **Daily loop, trades and capture UX** — Today ritual, day-grouped trade journal with inline review,
+  one-button-saves-the-page, hero paste box.
+- **Profitability calculator** — net-of-fees R, solved break-even, fee-aware sizing.
+- **SignalDesk bridge (Phase A)** — frozen market snapshot stapled to a trade at entry.
+- **Site password gate** — one env var, one cookie, off until configured.
+- **Page-load latency** — loading skeleton, request read cache, Firestore REST, one revalidation,
+  functions pinned to `bom1` beside the Delhi database.
+- **Tests** — `npm run test` (unit) + `npm run smoke` (every route renders, dynamic ids included).
+- **Quick notes → `/notes`** — categories, tag pickers with asset shortcuts, day-grouped filter page.
+- **Setup & execution on trades** — timeframes, mechanisms, the playbook checklist as tickable steps.
+- **Pre-trade gate** — `/playbook/[id]/run`: tick the model *before* the trade, log it fully tagged.
+- **Small-sample honesty** — `MIN_SAMPLE`; grouped tables grey out and refuse to colour a verdict.
+- **Closing the loop** — the skipped-step leak, morning "one thing to practice", saved views,
+  tag retirement, `/mechanisms`.
+
+## Needs the owner, not an agent
+1. **Split the prose checklists.** *Range reclaim*, *Failed breakout* and *Momentum pullback* each hold
+   their checklist as one long line, so they parse to zero steps: they can't be run as a pre-trade gate
+   and contribute nothing to the skipped-step analysis. One step per line in `/playbook` fixes it.
+   (The playbook now flags a line that's too long to tick.)
+
+## Open — next up
+1. **Trade lifecycle prompts** — nudge unfinished loops (CLOSED without exit review, mistake without
+   lesson, transcript structured but unconfirmed).
+2. **Needs-cleanup view** — missing thesis/invalidation, closed-without-P&L, unlinked execution.
+3. **Quick Add** — persistent button/shortcut for voice note, quick trade, EOD, manual lesson.
+4. **AI-filled mechanisms/timeframes from a voice note** — "I took the FVG on the 5-minute" is exactly
+   what gets dictated. A prompt + eval change of its own; run `npm run eval:capture` before and after.
+5. **Custom labels in the capture review card** — it still offers the *closed* mind-state and
+   risk-posture lists, because `normalizeEntry` validates entries against the closed enum. Reconciling
+   enum discipline with the extendable vocabulary is its own piece of work (known gap, see CLAUDE.md).
 
 ## Later
-- **Weekly review**: extraction schema strips weekly-only fields on the inbox path — enrich
-  schema + confirm flow if weekly voice notes should capture them; upgrade the generated review.
 - **Mistake review page** — frequency over time, examples, linked trades, prevention rule.
-- **Execution linking** — suggest matches by instrument/date, bulk link, totals by selection.
 - **Lesson bank** — lessons-linked-to-mistake/setup views (pinned + active/archived exist).
+- **Execution linking** — suggest matches by instrument/date, bulk link, totals by selection.
 - **Screenshot management** — thumbnails, captions, delete/replace (no AI parsing).
 - **Mobile polish** — paste voice note, quick trade, daily, EOD.
 - **CSV import templates** — saved column mappings per source (Binance, Bybit, broker, manual).
-- **Needs-cleanup view** — missing thesis/invalidation, closed-without-P&L, unlinked execution.
-- **Performance** — avoid loading every collection everywhere as data grows.
 - **Light keyboard shortcuts** — `/` search, `n` new trade, `v` voice, `d` daily, `e` EOD.
+- **Weekly review generator** — the numbers-only synthesis could use the narrative fields a
+  `WEEKLY_REFLECTION` capture now provides.
+- **Performance at size** — full-collection scans with no `where`/`limit` are irrelevant at 5 trades
+  and not at 1000; a save is also two round trips because every action `redirect()`s.

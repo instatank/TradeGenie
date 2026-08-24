@@ -16,7 +16,7 @@ delete process.env.FIREBASE_PRIVATE_KEY;
 delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 const store = await import("@/lib/store");
-const { collectionNames, createRecord, deleteWhere, getRecord, listRecords, storageStatus, updateRecord, upsertBy } =
+const { collectionNames, createRecord, dehydrate, deleteWhere, getRecord, listRecords, storageStatus, updateRecord, upsertBy } =
   store;
 
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -156,5 +156,46 @@ describe("request-scoped read cache — invalidation guard", () => {
       /pending\.set\([^)]*,\s*read\)/.test(body) || body.includes(".set(collection, read)"),
       "listRecords should store the in-flight promise",
     );
+  });
+});
+
+// The bug this pins cost a production 500 (digest 516351032): a review saved on
+// a trade older than `checklistSteps` sent `checklistSteps: undefined`, which
+// Firestore rejects outright while the local JSON store silently drops it — so
+// dev, the tests and the smoke run were all green and only the real database
+// failed. The fix lives at the one boundary every write passes through.
+describe("undefined never reaches the database", () => {
+  it("drops undefined properties instead of writing them", () => {
+    const doc = dehydrate({ kept: 1, missing: undefined, nested: { kept: "yes", missing: undefined } }) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    assert.deepEqual(Object.keys(doc), ["kept", "nested"]);
+    assert.deepEqual(Object.keys(doc.nested), ["kept"]);
+  });
+
+  it("keeps null, which is how a field is actually cleared", () => {
+    const doc = dehydrate({ cleared: null, absent: undefined }) as Record<string, unknown>;
+    assert.deepEqual(doc, { cleared: null });
+  });
+
+  it("still turns Dates into ISO strings on the way out", () => {
+    const doc = dehydrate({ createdAt: new Date("2026-01-01T00:00:00Z") }) as Record<string, unknown>;
+    assert.equal(doc.createdAt, "2026-01-01T00:00:00.000Z");
+  });
+
+  it("treats an undefined patch value as 'leave this field alone', not as a wipe", async () => {
+    const created = await createRecord("lessons", { ...lesson("keep my category"), tags: ["process"] } as never);
+    const patched = await updateRecord("lessons", created.id, {
+      lessonText: "edited",
+      tags: undefined,
+      category: undefined,
+    } as never);
+    assert.equal(patched.lessonText, "edited");
+    assert.deepEqual(patched.tags, ["process"]);
+    assert.equal(patched.category, "PROCESS");
+    const reread = await getRecord("lessons", created.id);
+    assert.deepEqual(reread?.tags, ["process"]);
+    assert.equal(reread?.category, "PROCESS");
   });
 });

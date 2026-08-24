@@ -804,6 +804,23 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     record) ships silently. It seeds a throwaway store, starts the built app and asserts all 19
     routes — dynamic ids included — return 200. Run it after `build`, before pushing.
 
+- **`undefined` never reaches the database** (`dehydrate()` + `definedOnly()` in `lib/store.ts`).
+  A review saved on a trade older than `checklistSteps` sent that field as `undefined`; Firestore
+  **rejects** an undefined value outright, so the save 500'd in production (digest `516351032`,
+  routes `/trades/[id]` and `/trades`). Local dev, the unit tests and `npm run smoke` were all green,
+  because the JSON store silently drops undefined exactly as `JSON.stringify` does — that asymmetry
+  is the whole bug, and it will bite any optional field a record predates.
+  - Fixed at the **one boundary every write already passes through** rather than at ~40 call sites:
+    `dehydrate()` skips undefined properties, and `updateRecord()` strips them from the patch before
+    merging so the local store agrees. The rule this gives the app, now true on both backends:
+    **an undefined value in a patch means "leave this field alone"**; clearing a field is what `null`
+    is for. Nothing in the app wrote `undefined` deliberately, so nothing changed meaning.
+  - Pinned by tests in `tests/unit/store.test.mts` that fail (3 of them) with the fix reverted. That
+    is the gate hole this closes: every other check runs against the local store, which cannot
+    reproduce a Firestore write error.
+  - Rejected: `ignoreUndefinedProperties` on the Firestore client. Same effect for Firestore only,
+    and it would have left the two backends behaving differently on the same patch.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -824,7 +841,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator math, tag tokenizer, search grammar, options, store
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter
 npm run smoke      # after a build: start the app, assert every route (incl. dynamic) renders 200
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
 npm run check:capture  # offline: do the prompt's examples survive parse + normalize?

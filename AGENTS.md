@@ -131,7 +131,7 @@ npm run lint
 npm run typecheck
 npm run build
 npm run seed
-npm run test           # unit tests (node:test via tsx) — calculator, tags, search, options, store
+npm run test           # unit tests (node:test via tsx) — calculator, tags, search, options, store, setups/gaps, notes filter
 npm run smoke          # build first, then: starts the app and asserts every route renders 200
 npm run eval:capture   # capture extraction eval (needs ANTHROPIC_API_KEY to be meaningful)
 ```
@@ -141,10 +141,14 @@ Before saying work is done, run at least:
 ```bash
 npm run lint
 npm run typecheck
+npm run test
 npm run build
+npm run smoke          # after the build — the only check that catches a crash in a dynamic route
 ```
 
-For UI changes, also smoke-check the affected route on the local dev server.
+For UI changes, also drive the affected route in a browser: `build` only prerenders the static
+routes, and the local JSON store is more forgiving than Firestore (see the `dehydrate()` note in
+`lib/store.ts` — undefined is a write error there, and silently dropped here).
 
 ## Deployment Workflow
 
