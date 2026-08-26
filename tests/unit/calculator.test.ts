@@ -4,7 +4,14 @@
 // means a refactor can't quietly change the answer he sizes positions on.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { breakEven, calculateTrade, expectancyAt, type CalcInput } from "@/lib/calculator";
+import {
+  breakEven,
+  calculatePositionSize,
+  calculateTrade,
+  expectancyAt,
+  type CalcInput,
+  type SizeInput,
+} from "@/lib/calculator";
 
 // 0.3% move planned at 2R gross, 0.045% taker each side.
 const worked: CalcInput = {
@@ -110,5 +117,69 @@ describe("expectancyAt", () => {
     assert.ok(expectancyAt(result, breakEvenRate - 0.1).perTradeR < 0, "below break-even loses");
     assert.ok(expectancyAt(result, breakEvenRate + 0.1).perTradeR > 0, "above break-even wins");
     close(expectancyAt(result, breakEvenRate).perTradeR, 0, 0.01, "at break-even is flat");
+  });
+});
+
+// The plain question — "how many units?" — has to be answerable without a
+// target, and it has to agree with the textbook equation the owner already
+// knows once fees are switched off. These pin both.
+describe("calculatePositionSize — the simple question, answered on its own", () => {
+  const free: SizeInput = { ...worked, entryFeePct: 0, exitFeePct: 0 };
+
+  it("is the textbook equation exactly when trading costs nothing", () => {
+    const size = calculatePositionSize(free)!;
+    // 1% of 10,000 = 100, stop is 0.15 away → 666.67 units.
+    close(size.quantity, 100 / 0.15, 1e-9, "size with no fees");
+    close(size.quantity, size.naiveQuantity, 1e-9, "no fees means no correction");
+    close(size.overshoot, 0, 1e-9, "nothing to back out");
+  });
+
+  it("needs no target at all", () => {
+    const size = calculatePositionSize({ ...worked, entry: 100, stop: 99.85 });
+    assert.ok(size, "sizing must work without a target");
+    assert.ok(size.quantity > 0);
+  });
+
+  it("makes a stop-out cost exactly the risk budget, fees included", () => {
+    const size = calculatePositionSize(worked)!;
+    close(size.quantity * size.netRiskPerUnit, size.riskBudget, 1e-9, "loss at stop == budget");
+  });
+
+  it("shows what the textbook size would really have cost", () => {
+    const size = calculatePositionSize(worked)!;
+    assert.ok(size.naiveQuantity > size.quantity, "the textbook size is always the bigger one");
+    assert.ok(size.naiveLoss > size.riskBudget, "and it loses more than the budget");
+    close(size.overshoot, size.naiveLoss - size.riskBudget, 1e-12, "overshoot is the gap");
+    // Two 0.045% fees on a 0.15% stop distance is a ~60% overshoot — the whole
+    // reason the corrected size exists rather than being a rounding detail.
+    assert.ok(size.overshoot / size.riskBudget > 0.5, `overshoot was only ${size.overshoot}`);
+  });
+
+  it("slippage widens the loss, so the size gets smaller again", () => {
+    const dry = calculatePositionSize(worked)!;
+    const slipped = calculatePositionSize({ ...worked, slippagePct: 0.02 })!;
+    assert.ok(slipped.quantity < dry.quantity, "allowing for slippage must shrink the size");
+    close(slipped.quantity * slipped.netRiskPerUnit, slipped.riskBudget, 1e-9, "still exactly the budget");
+  });
+
+  it("agrees with the full trade result, so there is one definition of size", () => {
+    const size = calculatePositionSize(worked)!;
+    const full = calculateTrade(worked)!;
+    close(size.quantity, full.quantity, 1e-12, "sizing must not fork");
+    close(size.notional, full.notional, 1e-12, "notional must not fork");
+    close(size.margin, full.margin, 1e-12, "margin must not fork");
+  });
+
+  it("works symmetrically for a short", () => {
+    const short = calculatePositionSize({ ...worked, direction: "SHORT", stop: 100.15 })!;
+    assert.deepEqual(short.warnings, []);
+    close(short.quantity * short.netRiskPerUnit, short.riskBudget, 1e-9, "short loss at stop == budget");
+  });
+
+  it("refuses nonsense instead of returning a number", () => {
+    assert.equal(calculatePositionSize({ ...worked, stop: 100 }), null, "entry == stop has no size");
+    assert.equal(calculatePositionSize({ ...worked, entry: 0 }), null, "no entry, no size");
+    const wrongSide = calculatePositionSize({ ...worked, stop: 100.5 })!;
+    assert.ok(wrongSide.warnings.length > 0, "a stop above entry on a long must warn");
   });
 });

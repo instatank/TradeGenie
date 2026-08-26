@@ -173,7 +173,7 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 ## Navigation (lean header)
 - Primary nav = the daily loop + the asset tracker: **Today · Capture · Trades · Assets ·
   Review** (`primaryNavItems`).
-  Everything else (Calendar, Notes, Playbook, Analytics, Calculator, Lessons, Import, Weekly
+  Everything else (Calendar, Notes, Playbook, Analytics, Position size, Lessons, Import, Weekly
   Review, Settings) is under a **"More"** `<details>` dropdown (`moreNavItems`). Nothing removed.
 
 ## Transcript → AI structuring (segmented, one call)
@@ -383,8 +383,9 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     captured context. That's Phase B, and the analysis needs ~30 context-carrying
     trades before it says anything true rather than noise that looks like signal.
 
-- **Profitability calculator** (`/calculator`, under "More"). A scratchpad — nothing is saved —
-  that answers one question before a trade: *once fees are paid, is this worth taking?*
+- **Position size & profitability calculator** (`/calculator`, "Position size" under "More").
+  A scratchpad — nothing is saved — answering the two questions in the order they get asked:
+  *how big should this be?* and then *once fees are paid, is it worth taking?*
   - **`lib/calculator.ts` is the math**, pure and store-free. The idea it's built around:
     **fees are charged on notional, not on your risk**, so they shrink the win *and* grow the
     loss. Net R = `(reward − fees) / (risk + fees)`. On the owner's own example — a 0.3% move
@@ -418,6 +419,33 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     `localStorage` (convenience only, never load-bearing); prices don't.
   - Deliberately NOT done: saving scenarios, prefilling from an existing trade, and writing a
     planned-R back onto a trade. All three turn a scratchpad into a record with a migration.
+
+- **Position size is the headline, and it needs no target** (`calculatePositionSize`,
+  `SizeAnswer` on `/calculator`). The maths for it had been in the calculator since day one,
+  but the page couldn't answer the plain question — `calculateTrade` returned `null` without
+  a target, so "risk %, account, entry, stop → how many units?" required inventing a target
+  first, and the answer then sat three panels below R and break-even win rate. That's why it
+  read as missing.
+  - **The size answer is now first on the page** and computes from entry + stop alone. Target
+    is labelled optional; everything downstream of it (net R, break-even win rate, expectancy,
+    the ladders) only renders once a target is there. You size off being wrong, so the target
+    has no business being required.
+  - **`calculatePositionSize` is the one definition of size** — `calculateTrade` calls the same
+    `sizeCore()` rather than sizing again, and a test asserts the two agree to 1e-12. Same
+    reasoning as one tag tokenizer and one search index: the moment two places compute size,
+    they drift.
+  - **The textbook answer is shown next to the real one, because the gap is the lesson.**
+    `size = (account × risk%) ÷ |entry − stop|` is right about the shape and wrong about the
+    amount: it sizes off the chart distance, but a stop-out costs the chart distance **plus**
+    both fees, funding and the tick the stop slips by. On the owner's own numbers (10k, 1%,
+    entry 100, stop 99.85, 0.045% a side) the textbook 666.67 units loses **159.95 on a "100
+    risk" trade — 60% over budget**. The corrected 416.78 units loses exactly 100. That 60% is
+    not a rounding detail, and it's why the panel prints both.
+  - Also: risk-% preset chips (0.5 / 1 / 2), and warnings hoisted above the size panel so a
+    stop on the wrong side is visible before any number is.
+  - Deliberately NOT done: a symbol/contract field (size is in units of whatever you're
+    trading), prefilling from an open trade, or writing a planned size back onto a trade —
+    all three turn the scratchpad into a record, which is the line already drawn above.
 
 - **Custom pill labels — the preset vocabularies are the trader's too**
   (`lib/options.ts` + `components/OptionField.tsx`). Every preset-pill row that

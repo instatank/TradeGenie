@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
+  calculatePositionSize,
   calculateTrade,
   expectancyAt,
   feePresets,
   type CalcDirection,
   type CalcResult,
+  type SizeResult,
 } from "@/lib/calculator";
 
 // The one page in the app that recomputes as you type. Everything else is a
@@ -51,6 +53,10 @@ const baseDefaults: Fields = {
   slippagePct: "0.02",
   winRatePct: "50",
 };
+
+// The three risk sizes a rules-based trader actually alternates between, so the
+// commonest change to the commonest question is one tap.
+const riskPresets = [0.5, 1, 2];
 
 // Only the settings-shaped fields are remembered — your fee tier and account
 // size don't change between sessions, prices do.
@@ -101,11 +107,12 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
 
   const set = (key: keyof Fields) => (value: string) => setFields((current) => ({ ...current, [key]: value }));
 
-  const result = calculateTrade({
+  // Sizing needs no target — you size off being wrong — so it's computed from
+  // its own input and answered on its own, above everything else.
+  const sizeInput = {
     direction: fields.direction,
     entry: num(fields.entry),
     stop: num(fields.stop),
-    target: num(fields.target),
     entryFeePct: num(fields.entryFeePct),
     exitFeePct: num(fields.exitFeePct),
     accountSize: num(fields.accountSize),
@@ -114,7 +121,9 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
     fundingPct: num(fields.fundingPct),
     hoursHeld: num(fields.hoursHeld),
     slippagePct: fields.slippageOn ? num(fields.slippagePct) : 0,
-  });
+  };
+  const size = calculatePositionSize(sizeInput);
+  const result = calculateTrade({ ...sizeInput, target: num(fields.target) });
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:items-start">
@@ -143,10 +152,10 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
         <div className="grid grid-cols-3 gap-2">
           <Num label="Entry" value={fields.entry} onChange={set("entry")} />
           <Num label="Stop" value={fields.stop} onChange={set("stop")} />
-          <Num label="Target" value={fields.target} onChange={set("target")} />
+          <Num label="Target" value={fields.target} onChange={set("target")} hint="optional" />
         </div>
         <p className="text-xs text-forge-muted">
-          Any prices work. Leave entry at 100 and the other two read straight off as percentages.
+          Entry and stop are all your position size needs. A target adds R, break-even win rate and expectancy.
         </p>
 
         <div className="space-y-2 border-t border-forge-line pt-4">
@@ -182,10 +191,29 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 border-t border-forge-line pt-4">
-          <Num label="Account" value={fields.accountSize} onChange={set("accountSize")} />
-          <Num label="Risk %" value={fields.riskPct} onChange={set("riskPct")} />
-          <Num label="Leverage" value={fields.leverage} onChange={set("leverage")} />
+        <div className="space-y-2 border-t border-forge-line pt-4">
+          <span className="label">Your account</span>
+          <div className="grid grid-cols-3 gap-2">
+            <Num label="Account" value={fields.accountSize} onChange={set("accountSize")} />
+            <Num label="Risk %" value={fields.riskPct} onChange={set("riskPct")} />
+            <Num label="Leverage" value={fields.leverage} onChange={set("leverage")} />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {riskPresets.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setFields((current) => ({ ...current, riskPct: String(preset) }))}
+                className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                  num(fields.riskPct) === preset
+                    ? "border-forge-ink bg-forge-ink text-white"
+                    : "border-forge-line bg-white text-forge-muted hover:border-forge-muted"
+                }`}
+              >
+                Risk {preset}%
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-2 rounded-lg border border-forge-line p-3">
@@ -227,6 +255,14 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
       </div>
 
       <div className="space-y-4">
+        <Warnings warnings={result ? result.warnings : (size?.warnings ?? [])} />
+        {size ? (
+          <SizeAnswer size={size} leverage={num(fields.leverage)} />
+        ) : (
+          <div className="panel text-sm text-forge-muted">
+            Put in an entry and a stop to get your position size.
+          </div>
+        )}
         {result ? (
           <Results
             result={result}
@@ -235,10 +271,101 @@ export function TradeCalculator({ journalWinRate, journalTradeCount }: { journal
             journalWinRate={journalWinRate}
             journalTradeCount={journalTradeCount}
           />
-        ) : (
-          <div className="panel text-sm text-forge-muted">Put in an entry, a stop and a target to see the numbers.</div>
-        )}
+        ) : size ? (
+          <div className="panel text-sm text-forge-muted">
+            Add a target to see what this trade is really worth — net R, the win rate it needs, and expectancy.
+          </div>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function Warnings({ warnings }: { warnings: string[] }) {
+  if (!warnings.length) return null;
+  return (
+    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-forge-red">
+      <ul className="list-inside list-disc space-y-1">
+        {warnings.map((warning) => (
+          <li key={warning}>{warning}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The answer to the only question you have to answer before every single trade:
+ * how many units. It sits above everything else because it is the thing you
+ * came for — R, break-even win rate and expectancy are the follow-up questions,
+ * and they need a target this one doesn't.
+ *
+ * The textbook size is shown next to it rather than hidden, because the gap
+ * between them IS the lesson: fees don't come out of your profit, they come out
+ * of your risk budget, so sizing off the chart distance overshoots every time.
+ */
+function SizeAnswer({ size, leverage }: { size: SizeResult; leverage: number }) {
+  const budgeted = size.riskBudget > 0 && size.quantity > 0;
+  const overshootPct = size.riskBudget > 0 ? (size.overshoot / size.riskBudget) * 100 : 0;
+
+  return (
+    <div className="panel space-y-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-forge-muted">Position size</h2>
+        <p className="text-xs text-forge-muted">
+          Risking {money(size.riskBudget)} · stop is {pct(size.stopDistancePct, 3)} away
+        </p>
+      </div>
+
+      {budgeted ? (
+        <>
+          <div>
+            <p className="text-4xl font-semibold tabular-nums text-forge-ink">{qty(size.quantity)}</p>
+            <p className="text-sm text-forge-muted">
+              units — so a stop-out costs you exactly {money(size.riskBudget)},{" "}
+              {size.slippageOn ? "fees and a slipped stop" : "fees"} included rather than on top.
+            </p>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+            <Stat label="Position value" value={money(size.notional)} hint="notional" />
+            <Stat label="Margin needed" value={money(size.margin)} hint={`at ${formatLeverage(leverage)}`} />
+            <Stat label="If it stops out" value={money(size.riskBudget)} tone="red" hint="all costs in" />
+            <Stat
+              label="Rough liquidation"
+              value={size.liquidationPrice != null ? price(size.liquidationPrice) : "—"}
+              hint="excludes maintenance margin"
+            />
+          </dl>
+
+          <div className="rounded-lg border border-forge-line bg-forge-panel p-3 text-xs text-forge-muted">
+            <p>
+              <span className="font-semibold text-forge-ink">The textbook answer</span> —{" "}
+              {money(size.riskBudget)} ÷ {price(size.grossRiskPerUnit)} (entry − stop) —{" "}
+              is <span className="tabular-nums">{qty(size.naiveQuantity)}</span> units.
+            </p>
+            {size.overshoot > 0 ? (
+              <p className="mt-1">
+                At that size a stop-out really costs{" "}
+                <span className="font-semibold text-forge-red tabular-nums">{money(size.naiveLoss)}</span> —{" "}
+                {money(size.overshoot)} over your budget ({pct(overshootPct, 1)}), because{" "}
+                {size.slippageOn ? "fees and slippage are" : "fees are"} charged on position size, not on your risk. The
+                size above already backs that out.
+              </p>
+            ) : (
+              <p className="mt-1">Identical here, because you have no fees, funding or slippage switched on.</p>
+            )}
+          </div>
+        </>
+      ) : size.netRiskPerUnit <= 0 ? (
+        <p className="text-sm text-forge-muted">
+          No size until the stop is fixed — as entered, being &ldquo;stopped out&rdquo; would make you money.
+        </p>
+      ) : (
+        <p className="text-sm text-forge-muted">
+          Put in an account size and a risk % to get a size. Everything else on this page still works without them.
+        </p>
+      )}
     </div>
   );
 }
@@ -262,16 +389,6 @@ function Results({
 
   return (
     <>
-      {result.warnings.length ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-forge-red">
-          <ul className="list-inside list-disc space-y-1">
-            {result.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
       <div className="grid gap-3 sm:grid-cols-3">
         <Tile
           label={result.slippageOn ? "Real R after costs" : "Real R after fees"}
@@ -324,20 +441,8 @@ function Results({
       </div>
 
       <div className="panel space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-forge-muted">Position size</h2>
-        <p className="text-sm text-forge-muted">
-          Sized so a stop-out costs exactly your {money(result.riskBudget)} risk budget —{" "}
-          {result.slippageOn ? "fees and a slipped stop" : "fees"} included, not on top.
-        </p>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-forge-muted">At that size</h2>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          <Stat label="Size" value={qty(result.quantity)} hint="units" />
-          <Stat label="Position value" value={money(result.notional)} />
-          <Stat label="Margin needed" value={money(result.margin)} />
-          <Stat
-            label="Rough liquidation"
-            value={result.liquidationPrice != null ? price(result.liquidationPrice) : "—"}
-            hint="excludes maintenance margin"
-          />
           <Stat label="Win nets you" value={money(result.netWin)} tone="green" hint={`${money(result.grossWin)} before fees`} />
           <Stat label="Loss costs you" value={money(result.netLoss)} tone="red" hint="stop-out, all in" />
           <Stat label="Stop distance" value={pct(result.stopDistancePct, 3)} />
@@ -487,10 +592,23 @@ function Stat({ label, value, hint, tone }: { label: string; value: string; hint
   );
 }
 
-function Num({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function Num({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  hint?: string;
+}) {
   return (
     <label className="field">
-      <span className="text-xs font-medium text-forge-muted">{label}</span>
+      <span className="text-xs font-medium text-forge-muted">
+        {label}
+        {hint ? <span className="font-normal text-forge-muted/70"> ({hint})</span> : null}
+      </span>
       <input
         type="number"
         inputMode="decimal"
@@ -532,6 +650,11 @@ function signed(value: number, decimals: number) {
 
 function pct(value: number, decimals: number) {
   return `${value.toFixed(decimals)}%`;
+}
+
+function formatLeverage(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "1x";
+  return `${Number.isInteger(value) ? value : value.toFixed(1)}x`;
 }
 
 function qty(value: number) {

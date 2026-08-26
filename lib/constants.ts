@@ -14,7 +14,7 @@ export const moreNavItems = [
   { href: "/playbook", label: "Playbook" },
   { href: "/mechanisms", label: "Mechanisms" },
   { href: "/analytics", label: "Analytics" },
-  { href: "/calculator", label: "Calculator" },
+  { href: "/calculator", label: "Position size" },
   { href: "/lessons", label: "Lessons" },
   { href: "/import", label: "Import" },
   { href: "/weekly-review", label: "Weekly Review" },

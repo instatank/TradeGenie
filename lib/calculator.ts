@@ -14,11 +14,15 @@
 
 export type CalcDirection = "LONG" | "SHORT";
 
-export type CalcInput = {
+/**
+ * Everything needed to answer the first question — *how big should this be?* —
+ * which deliberately does NOT include a target. You size a trade off what you
+ * lose when you're wrong, so the target has no business being required here.
+ */
+export type SizeInput = {
   direction: CalcDirection;
   entry: number;
   stop: number;
-  target: number;
   /** Taker/maker fee for the entry order, as a % of notional (0.045 = 0.045%). */
   entryFeePct: number;
   /** Fee for the exit order, as a % of notional. */
@@ -36,6 +40,54 @@ export type CalcInput = {
    * against you: worse entry, worse target, worse stop. 0 turns it off entirely.
    */
   slippagePct: number;
+};
+
+/** Sizing, plus the target — everything the full profitability answer needs. */
+export type CalcInput = SizeInput & {
+  target: number;
+};
+
+export type SizeResult = {
+  /** Things that make the setup nonsense (stop on the wrong side, etc.). */
+  warnings: string[];
+  /** riskPct % of the account — the money you've agreed to lose. */
+  riskBudget: number;
+  /** |entry − stop| per unit: the denominator of the textbook equation. */
+  grossRiskPerUnit: number;
+  /** What a stop-out actually costs per unit — slipped stop distance + fees + funding. */
+  netRiskPerUnit: number;
+  /** Distance entry → stop, as a % of entry. */
+  stopDistancePct: number;
+  /** risk budget ÷ |entry − stop|. The textbook answer, before a cent of costs. */
+  naiveQuantity: number;
+  /** The size to actually use: a stop-out costs exactly the risk budget, all in. */
+  quantity: number;
+  /** What a stop-out really costs at the naive size. Always ≥ the risk budget. */
+  naiveLoss: number;
+  /** naiveLoss − riskBudget: how far past your budget the textbook answer puts you. */
+  overshoot: number;
+  notional: number;
+  margin: number;
+  /** Rough isolated-margin liquidation. Excludes maintenance margin. */
+  liquidationPrice: number | null;
+  /** Fees + funding + slippage on a round trip that ends at the stop. */
+  costAtStop: number;
+  /** Whether slippage is switched on, so callers can label costs honestly. */
+  slippageOn: boolean;
+  entryFill: number;
+  stopFill: number;
+};
+
+/** The per-unit internals `calculateTrade` reuses so sizing is defined once. */
+type SizeCore = SizeResult & {
+  dir: 1 | -1;
+  leverage: number;
+  feeEntry: number;
+  feeExit: number;
+  feeAtEntryPerUnit: number;
+  feeAtStopPerUnit: number;
+  fundingPerUnit: number;
+  slip: number;
 };
 
 export type CostDragRow = {
@@ -146,12 +198,31 @@ function isPositive(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-export function calculateTrade(input: CalcInput): CalcResult | null {
-  const { entry, stop, target, direction } = input;
-  if (!isPositive(entry) || !isPositive(stop) || !isPositive(target)) return null;
+/**
+ * The plain question, answered on its own: **how many units do I buy?**
+ *
+ * The textbook equation everyone starts with is
+ * `size = (account × risk%) ÷ |entry − stop|`, and it is right about the shape
+ * of the problem and wrong about the amount. It sizes off the *chart* distance
+ * to the stop, but a stop-out doesn't cost you the chart distance — it costs
+ * the chart distance **plus** the entry fee, **plus** the exit fee, **plus**
+ * any funding, **plus** the tick the stop slips by. So the textbook size makes
+ * a "1% risk" trade lose more than 1%, every time, by exactly the cost bill.
+ *
+ * This returns both: `naiveQuantity` (the textbook answer) and `quantity` (the
+ * one to use, where a stop-out costs the risk budget and not a rupee more).
+ * No target is needed or wanted — you size off being wrong.
+ */
+export function calculatePositionSize(input: SizeInput): SizeResult | null {
+  return sizeCore(input);
+}
+
+function sizeCore(input: SizeInput): SizeCore | null {
+  const { entry, stop, direction } = input;
+  if (!isPositive(entry) || !isPositive(stop)) return null;
   if (entry === stop) return null;
 
-  const dir = direction === "SHORT" ? -1 : 1;
+  const dir: 1 | -1 = direction === "SHORT" ? -1 : 1;
   const feeEntry = Math.max(input.entryFeePct, 0) / 100;
   const feeExit = Math.max(input.exitFeePct, 0) / 100;
   const leverage = isPositive(input.leverage) ? input.leverage : 1;
@@ -159,7 +230,6 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
   const warnings: string[] = [];
   if (dir === 1 && stop >= entry) warnings.push("Your stop is above your entry on a long — flip it or switch to short.");
   if (dir === -1 && stop <= entry) warnings.push("Your stop is below your entry on a short — flip it or switch to long.");
-  if (dir * (target - entry) <= 0) warnings.push("Your target is on the losing side of your entry.");
 
   // Funding is charged on notional too, and only accrues while the position is
   // open. Treated as a cost on both the winning and the losing side.
@@ -174,48 +244,27 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
   const slip = Math.max(input.slippagePct, 0) / 100;
   const slippageOn = slip > 0;
   const entryFill = entry * (1 + dir * slip);
-  const targetFill = target * (1 - dir * slip);
   const stopFill = stop * (1 - dir * slip);
 
   const feeAtEntryPerUnit = entryFill * feeEntry;
-  const feeAtTargetPerUnit = targetFill * feeExit;
   const feeAtStopPerUnit = stopFill * feeExit;
 
   // Gross stays on the quoted prices on purpose — it's "what the chart says",
-  // the thing net R is being contrasted against.
+  // the thing the net numbers are being contrasted against.
   const grossRiskPerUnit = Math.abs(entry - stop);
-  const grossRewardPerUnit = dir * (target - entry);
-
-  // What the fills alone do, before a single fee: the win shrinks by slippage on
-  // both legs, the loss grows by it on both legs.
-  const filledRewardPerUnit = dir * (targetFill - entryFill);
   const filledRiskPerUnit = dir * (entryFill - stopFill);
-
-  // Costs make the win smaller AND the loss bigger — that double hit is why net R
-  // falls off so much faster than people expect on small moves.
-  const netRewardPerUnit = filledRewardPerUnit - feeAtEntryPerUnit - feeAtTargetPerUnit - fundingPerUnit;
+  // Costs make the loss bigger, which is the half of the problem sizing has to
+  // absorb: the exchange takes its cut whether or not the trade works.
   const netRiskPerUnit = filledRiskPerUnit + feeAtEntryPerUnit + feeAtStopPerUnit + fundingPerUnit;
-
-  const grossR = grossRewardPerUnit / grossRiskPerUnit;
-  const netR = netRewardPerUnit / netRiskPerUnit;
-
-  const grossMovePct = (Math.abs(target - entry) / entry) * 100;
-  const stopDistancePct = (grossRiskPerUnit / entry) * 100;
-  const roundTripFeePct = ((feeAtEntryPerUnit + feeAtTargetPerUnit) / entry) * 100;
-  const slippagePerUnit = slip * (entry + target);
-  const totalCostPerUnit = feeAtEntryPerUnit + feeAtTargetPerUnit + fundingPerUnit + slippagePerUnit;
-  const costBitePct = Math.abs(grossRewardPerUnit) > 0 ? (totalCostPerUnit / Math.abs(grossRewardPerUnit)) * 100 : 0;
-
-  // Quoted price the market has to print, not the fill — the fill will slip off
-  // it again, which the exit multiplier accounts for.
-  const breakEvenPrice = breakEven(entryFill, dir, feeEntry, feeExit, fundingPerUnit, slip);
-  const breakEvenMovePct = (Math.abs(breakEvenPrice - entry) / entry) * 100;
+  const costPerUnitAtStop = netRiskPerUnit - grossRiskPerUnit;
 
   // Size off the *net* loss so a stop-out costs exactly the risk budget. Sizing
   // off the raw stop distance (what most calculators do) quietly overshoots the
   // budget by the fee bill — and by the slipped stop, when slippage is on.
   const riskBudget = Math.max(input.accountSize, 0) * (Math.max(input.riskPct, 0) / 100);
   const quantity = netRiskPerUnit > 0 ? riskBudget / netRiskPerUnit : 0;
+  const naiveQuantity = grossRiskPerUnit > 0 ? riskBudget / grossRiskPerUnit : 0;
+  const naiveLoss = naiveQuantity * netRiskPerUnit;
   const notional = quantity * entryFill;
   const margin = leverage > 0 ? notional / leverage : notional;
   const liquidationPrice = leverage > 1 ? entryFill * (1 - dir / leverage) : null;
@@ -235,38 +284,101 @@ export function calculateTrade(input: CalcInput): CalcResult | null {
 
   return {
     warnings,
+    riskBudget,
     grossRiskPerUnit,
+    netRiskPerUnit,
+    stopDistancePct: (grossRiskPerUnit / entry) * 100,
+    naiveQuantity,
+    quantity,
+    naiveLoss,
+    overshoot: naiveLoss - riskBudget,
+    notional,
+    margin,
+    liquidationPrice,
+    costAtStop: quantity * costPerUnitAtStop,
+    slippageOn,
+    entryFill,
+    stopFill,
+    dir,
+    leverage,
+    feeEntry,
+    feeExit,
+    feeAtEntryPerUnit,
+    feeAtStopPerUnit,
+    fundingPerUnit,
+    slip,
+  };
+}
+
+export function calculateTrade(input: CalcInput): CalcResult | null {
+  const { entry, target } = input;
+  if (!isPositive(target)) return null;
+  const size = sizeCore(input);
+  if (!size) return null;
+
+  const { dir, feeEntry, feeExit, feeAtEntryPerUnit, fundingPerUnit, slip, entryFill, quantity } = size;
+  const targetFill = target * (1 - dir * slip);
+  const feeAtTargetPerUnit = targetFill * feeExit;
+
+  const warnings = [...size.warnings];
+  if (dir * (target - entry) <= 0) warnings.push("Your target is on the losing side of your entry.");
+
+  const grossRewardPerUnit = dir * (target - entry);
+  const filledRewardPerUnit = dir * (targetFill - entryFill);
+
+  // Costs make the win smaller AND the loss bigger — that double hit is why net R
+  // falls off so much faster than people expect on small moves.
+  const netRewardPerUnit = filledRewardPerUnit - feeAtEntryPerUnit - feeAtTargetPerUnit - fundingPerUnit;
+  const netRiskPerUnit = size.netRiskPerUnit;
+
+  const grossR = grossRewardPerUnit / size.grossRiskPerUnit;
+  const netR = netRewardPerUnit / netRiskPerUnit;
+
+  const grossMovePct = (Math.abs(target - entry) / entry) * 100;
+  const roundTripFeePct = ((feeAtEntryPerUnit + feeAtTargetPerUnit) / entry) * 100;
+  const slippagePerUnit = slip * (entry + target);
+  const totalCostPerUnit = feeAtEntryPerUnit + feeAtTargetPerUnit + fundingPerUnit + slippagePerUnit;
+  const costBitePct = Math.abs(grossRewardPerUnit) > 0 ? (totalCostPerUnit / Math.abs(grossRewardPerUnit)) * 100 : 0;
+
+  // Quoted price the market has to print, not the fill — the fill will slip off
+  // it again, which the exit multiplier accounts for.
+  const breakEvenPrice = breakEven(entryFill, dir, feeEntry, feeExit, fundingPerUnit, slip);
+  const breakEvenMovePct = (Math.abs(breakEvenPrice - entry) / entry) * 100;
+
+  return {
+    warnings,
+    grossRiskPerUnit: size.grossRiskPerUnit,
     grossRewardPerUnit,
     netRiskPerUnit,
     netRewardPerUnit,
     grossMovePct,
-    stopDistancePct,
+    stopDistancePct: size.stopDistancePct,
     roundTripFeePct,
     costBitePct,
-    slippageOn,
+    slippageOn: size.slippageOn,
     breakEvenPrice,
     breakEvenMovePct,
     grossR,
     netR,
     grossBreakEvenWinRate: grossR > 0 ? 1 / (1 + grossR) : null,
     netBreakEvenWinRate: netR > 0 ? 1 / (1 + netR) : null,
-    riskBudget,
+    riskBudget: size.riskBudget,
     quantity,
-    notional,
-    margin,
-    liquidationPrice,
+    notional: size.notional,
+    margin: size.margin,
+    liquidationPrice: size.liquidationPrice,
     grossWin: quantity * grossRewardPerUnit,
     netWin: quantity * netRewardPerUnit,
     netLoss: quantity * netRiskPerUnit,
     entryFee: quantity * feeAtEntryPerUnit,
     exitFeeAtTarget: quantity * feeAtTargetPerUnit,
-    exitFeeAtStop: quantity * feeAtStopPerUnit,
+    exitFeeAtStop: quantity * size.feeAtStopPerUnit,
     fundingCost: quantity * fundingPerUnit,
     slippageCostAtTarget: quantity * slippagePerUnit,
     totalCostAtTarget: quantity * totalCostPerUnit,
     entryFill,
     targetFill,
-    stopFill,
+    stopFill: size.stopFill,
     costDrag: costDragLadder(entry, dir, feeEntry, feeExit, slip, fundingPerUnit),
     targetsForNetR: targetLadder(entryFill, dir, feeEntry, feeExit, fundingPerUnit, netRiskPerUnit, slip, entry),
   };
