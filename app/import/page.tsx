@@ -1,217 +1,247 @@
 import Link from "next/link";
 import { format } from "date-fns";
-import { Pencil, Trash2 } from "lucide-react";
-import { deleteImportBatchAction, deleteRawExecutionAction, linkRawExecutionAction, updateRawExecutionAction } from "@/app/actions";
-import { CalendarRangeControls } from "@/components/CalendarRangeControls";
+import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
+import {
+  acceptAllExchangeMatchesAction,
+  deleteImportBatchAction,
+  deleteRawExecutionAction,
+  restoreExchangePositionsAction,
+  syncExchangeAction,
+} from "@/app/actions";
 import { ImportCsvClient } from "@/components/ImportCsvClient";
-import { PageTitle, TextField } from "@/components/Fields";
-import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
-import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
-import { humanize } from "@/lib/constants";
+import { MatchCard, UnmatchedCard } from "@/components/ExchangeReconcile";
+import { PageTitle } from "@/components/Fields";
+import { credentialsFromEnv } from "@/lib/coindcx";
+import { exchangeView, positionKey } from "@/lib/coindcx-sync";
 import { db } from "@/lib/data";
-import type { RawExecution } from "@/lib/types";
+import { changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
+import { getSettings } from "@/lib/settings-store";
+import { listRecords } from "@/lib/store";
 
-const executionViews = [
-  { label: "All", value: "all" },
-  { label: "Unlinked", value: "unlinked" },
-  { label: "Linked", value: "linked" },
-  { label: "With P&L", value: "with-pnl" },
-  { label: "No P&L", value: "no-pnl" },
-];
-
-export default async function ImportPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
-  const params = await searchParams ?? {};
-  const view = params.view ?? "all";
-  const sort = params.sort ?? "date-desc";
-  const page = normalizePage(params.page);
-  const pageSize = normalizePageSize(params.pageSize, [10, 25, 50], 25);
-  const calendarRange = getCalendarRange(params);
-  const [batches, executions, trades] = await Promise.all([
-    db.list("importBatches"),
-    db.list("rawExecutions"),
+// The exchange, reconciled against the journal.
+//
+// This page used to be a CSV mapper, which was the best available answer when
+// the exchange offered no export. It does have an API, so the CSV path moves
+// under a fold rather than being deleted — the exhaustive-but-lean rule — and
+// the top of the page is now the thing actually used daily.
+//
+// Deliberately NOT a new nav item: "Import" was already the home for objective
+// data arriving from outside, and adding "Exchange" beside it would have made
+// two doors to one room.
+export default async function ImportPage() {
+  const [view, trades, settings, storedFills, storedLedger, batches] = await Promise.all([
+    exchangeView(),
     db.list("trades"),
+    getSettings(),
+    listRecords("exchangeFills"),
+    listRecords("exchangeLedger"),
+    db.list("importBatches"),
   ]);
-  const recentBatches = batches.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 12);
-  const filteredExecutions = executions
-    .filter((execution) => applyExecutionView(execution, view))
-    .filter((execution) => isWithinCalendarRange(execution.executionDateTime, calendarRange))
-    .filter((execution) => !params.instrument || execution.instrument.includes(params.instrument.toUpperCase()))
-    .filter((execution) => !params.side || String(execution.side ?? "").toLowerCase().includes(params.side.toLowerCase()))
-    .sort((a, b) => compareExecutions(a, b, sort));
-  const pagedExecutions = paginate(filteredExecutions, page, pageSize);
-  const recentTrades = trades.sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime()).slice(0, 80);
+  const rawExecutions = (await db.list("rawExecutions")).sort(
+    (a, b) => b.executionDateTime.getTime() - a.executionDateTime.getTime(),
+  );
+
+  const configured = Boolean(credentialsFromEnv());
+  const dismissed = new Set(settings.dismissedExchangeKeys ?? []);
+  const { matches, unmatched } = matchPositions(view.positions, trades, positionKey);
+
+  // Only matches that would actually change something need attention. One that
+  // already agrees is a confirmation, not a task, and mixing the two would bury
+  // the handful that matter.
+  const needsReview = matches.filter((match) => changedFields(diffTrade(match.trade, match.position)).length > 0);
+  const agreed = matches.length - needsReview.length;
+  const toJournal = unmatched.filter((position) => !dismissed.has(positionKey(position)));
+  const hiddenCount = unmatched.length - toJournal.length;
+
+  const lastFill = storedFills.length
+    ? new Date(Math.max(...storedFills.map((fill) => fill.executedAt.getTime())))
+    : null;
 
   return (
     <main className="page-shell">
-      <PageTitle title="Import" subtitle="Bring in objective execution rows. Grouping into journal trades stays manual for MVP." />
-      <ViewTabs basePath="/import" current={view} params={params} tabs={executionViews} />
-      <CalendarRangeControls basePath="/import" params={params} range={calendarRange} total={filteredExecutions.length} />
-      <section className="grid gap-5 lg:grid-cols-[420px_1fr]">
-        <div className="space-y-4">
-          <ImportCsvClient />
-          <section className="panel">
-            <h2 className="mb-3 font-semibold">Recent batches</h2>
-            <div className="space-y-2">
-              {recentBatches.map((batch) => (
-                <div key={batch.id} className="flex items-start justify-between gap-3 rounded-md bg-forge-panel p-3 text-sm">
-                  <div>
-                    <div className="font-medium">{batch.fileName ?? "CSV import"}</div>
-                    <div className="text-forge-muted">{format(batch.createdAt, "dd MMM HH:mm")} · {batch.importedCount}/{batch.rowCount} imported · {batch.skippedCount} skipped</div>
-                  </div>
-                  <form action={deleteImportBatchAction}>
-                    <input type="hidden" name="importBatchId" value={batch.id} />
-                    <button className="button-danger min-h-8 px-2" type="submit" title="Delete batch and rows" aria-label="Delete import batch">
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  </form>
-                </div>
-              ))}
-              {!recentBatches.length ? <p className="muted">No imports yet.</p> : null}
+      <PageTitle
+        title="Exchange"
+        subtitle="Your CoinDCX fills, folded into positions and checked against what you wrote down."
+      />
+
+      <section className="panel mb-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="text-sm">
+            <div className="font-medium">
+              CoinDCX:{" "}
+              <span className={configured ? "text-forge-green" : "text-forge-red"}>
+                {configured ? "connected" : "no API key set"}
+              </span>
             </div>
+            <p className="mt-1 text-forge-muted">
+              {storedFills.length
+                ? `${storedFills.length} fills and ${storedLedger.length} ledger rows held${lastFill ? `, latest ${format(lastFill, "dd MMM HH:mm")}` : ""}. ${view.positions.length} positions.`
+                : configured
+                  ? "Nothing pulled yet. Sync to bring your history in."
+                  : "Set COINDCX_API_KEY and COINDCX_API_SECRET in Vercel, then sync."}
+            </p>
+          </div>
+          <form action={syncExchangeAction}>
+            <button className="button" type="submit" disabled={!configured}>
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              Sync now
+            </button>
+          </form>
+        </div>
+
+        {view.positionsMissingFunding.length ? (
+          <p className="mt-3 flex items-start gap-2 rounded-lg border-l-4 border-forge-gold bg-amber-50 px-3 py-2 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-forge-gold" aria-hidden="true" />
+            <span>
+              <span className="font-medium">{view.positionsMissingFunding.length} older position{view.positionsMissingFunding.length === 1 ? "" : "s"}</span>{" "}
+              opened before {view.ledgerFrom ? format(view.ledgerFrom, "dd MMM yyyy") : "the ledger starts"}. CoinDCX&apos;s transaction
+              ledger only reaches back about three weeks, so those have exact prices and fees but no funding — their net P&amp;L
+              understates the real cost. Everything after that date is complete, and stays complete now it is being captured daily.
+            </span>
+          </p>
+        ) : null}
+
+        {view.unattributedFunding.length ? (
+          <p className="mt-3 text-sm text-forge-muted">
+            {view.unattributedFunding.length} funding row{view.unattributedFunding.length === 1 ? "" : "s"} matched no open
+            position — reported rather than folded in silently.
+          </p>
+        ) : null}
+      </section>
+
+      <section className="panel mb-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Needs review</h2>
+            <p className="text-sm text-forge-muted">
+              {needsReview.length
+                ? `${needsReview.length} trade${needsReview.length === 1 ? "" : "s"} where the exchange disagrees with what you logged.`
+                : "Nothing to reconcile."}
+              {agreed ? ` ${agreed} already match.` : ""}
+            </p>
+          </div>
+          {needsReview.length > 1 ? (
+            <form action={acceptAllExchangeMatchesAction}>
+              <button className="button-secondary" type="submit">Accept all {needsReview.length}</button>
+            </form>
+          ) : null}
+        </div>
+        <div className="space-y-3">
+          {needsReview.map((match) => (
+            <MatchCard key={match.trade.id} match={match} positionKey={positionKey(match.position)} />
+          ))}
+          {!needsReview.length && storedFills.length ? (
+            <p className="text-sm text-forge-muted">Your journal agrees with the exchange on every matched trade.</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="panel mb-5">
+        <div className="mb-3">
+          <h2 className="font-semibold">Not journaled</h2>
+          <p className="text-sm text-forge-muted">
+            {toJournal.length
+              ? `${toJournal.length} position${toJournal.length === 1 ? "" : "s"} on the exchange you haven't written up.`
+              : "Every exchange position has a journal entry."}
+          </p>
+        </div>
+        <div className="space-y-3">
+          {toJournal.map((position) => (
+            <UnmatchedCard key={positionKey(position)} position={position} positionKey={positionKey(position)} />
+          ))}
+        </div>
+        {hiddenCount ? (
+          <form action={restoreExchangePositionsAction} className="mt-3">
+            <button className="button-secondary min-h-8 px-2 text-sm" type="submit">
+              Show {hiddenCount} hidden
+            </button>
+          </form>
+        ) : null}
+      </section>
+
+      <details className="panel">
+        <summary className="cursor-pointer font-semibold">CSV import (manual fallback)</summary>
+        <p className="mt-2 text-sm text-forge-muted">
+          From before the API worked. Kept for any broker that only offers a file — nothing here needs it now.
+        </p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <ImportCsvClient />
+          <section>
+            <h3 className="mb-2 text-sm font-semibold">Past batches</h3>
+            <div className="space-y-2">
+              {batches
+                .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+                .slice(0, 8)
+                .map((batch) => (
+                  <div key={batch.id} className="flex items-start justify-between gap-3 rounded-md bg-forge-panel p-3 text-sm">
+                    <div>
+                      <div className="font-medium">{batch.fileName ?? "CSV import"}</div>
+                      <div className="text-forge-muted">
+                        {format(batch.createdAt, "dd MMM HH:mm")} · {batch.importedCount}/{batch.rowCount} imported
+                      </div>
+                    </div>
+                    <form action={deleteImportBatchAction}>
+                      <input type="hidden" name="importBatchId" value={batch.id} />
+                      <button className="button-danger min-h-8 px-2" type="submit" aria-label="Delete import batch">
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              {!batches.length ? <p className="muted">No CSV imports.</p> : null}
+            </div>
+            <Link href="/trades" className="mt-3 inline-block text-sm text-forge-blue hover:underline">
+              Go to the trade journal →
+            </Link>
           </section>
         </div>
 
-        <section className="panel">
-          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="font-semibold">Raw executions</h2>
-              <p className="text-sm text-forge-muted">{filteredExecutions.length} imported row{filteredExecutions.length === 1 ? "" : "s"}</p>
-            </div>
-          </div>
-          <details className="mb-4 rounded-lg border border-forge-line p-3" open={hasActiveExecutionControls(params)}>
-            <summary className="cursor-pointer text-sm font-semibold">Filters & sorting</summary>
-            <form className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <input type="hidden" name="view" value={view} />
-              <TextField label="Instrument" name="instrument" defaultValue={params.instrument} />
-              <TextField label="Side" name="side" defaultValue={params.side} />
-              <label className="field">
-                <span className="label">Sort</span>
-                <select name="sort" defaultValue={sort} className="input">
-                  <option value="date-desc">Newest first</option>
-                  <option value="date-asc">Oldest first</option>
-                  <option value="instrument-asc">Instrument A-Z</option>
-                  <option value="value-desc">Order value high-low</option>
-                  <option value="pnl-desc">P&L high-low</option>
-                  <option value="pnl-asc">P&L low-high</option>
-                </select>
-              </label>
-              <label className="field">
-                <span className="label">Rows</span>
-                <select name="pageSize" defaultValue={String(pageSize)} className="input">
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                </select>
-              </label>
-              <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-4">
-                <button className="button" type="submit">Apply</button>
-                <Link href="/import" className="button-secondary">Clear</Link>
-              </div>
-            </form>
-          </details>
-          <div className="overflow-x-auto rounded-lg border border-forge-line">
-            <table className="min-w-full text-sm">
-              <thead className="bg-forge-panel">
-                <tr>
-                  {["Time", "Instrument", "Side", "Qty", "Price", "Order value", "P&L", "Linked", ""].map((header) => (
-                    <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pagedExecutions.map((execution) => (
-                  <tr key={execution.id} className="border-t border-forge-line">
-                    <td className="whitespace-nowrap px-3 py-2">{format(execution.executionDateTime, "dd MMM HH:mm")}</td>
-                    <td className="px-3 py-2">{execution.instrument}</td>
-                    <td className="px-3 py-2">{execution.side ?? "NA"}</td>
-                    <td className="px-3 py-2">{execution.quantity ?? "NA"}</td>
-                    <td className="px-3 py-2">{execution.price ?? "NA"}</td>
-                    <td className="px-3 py-2">{execution.totalOrderValue ?? "NA"}</td>
-                    <td className="px-3 py-2">{execution.realizedPnl ?? "NA"}</td>
-                    <td className="px-3 py-2">{execution.linkedTradeId ? "Linked" : "Unlinked"}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex justify-end gap-1">
-                        <details className="relative">
-                          <summary className="button-secondary min-h-8 cursor-pointer list-none px-2" title="Manage execution" aria-label="Manage execution">
-                            Manage
-                          </summary>
-                          <div className="absolute right-0 z-10 mt-2 w-[min(720px,calc(100vw-2rem))] rounded-lg border border-forge-line bg-white p-4 shadow-lg">
-                            <form action={linkRawExecutionAction} className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
-                              <input type="hidden" name="rawExecutionId" value={execution.id} />
-                              <label className="field">
-                                <span className="label">Link to trade</span>
-                                <select name="linkedTradeId" defaultValue={execution.linkedTradeId ?? ""} className="input">
-                                  <option value="">Unlinked</option>
-                                  {recentTrades.map((trade) => (
-                                    <option key={trade.id} value={trade.id}>
-                                      {format(trade.tradeDateTime, "dd MMM")} · {trade.instrument} · {humanize(trade.direction)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <button className="button-secondary" type="submit">Save link</button>
-                            </form>
-                            <form action={updateRawExecutionAction} className="grid gap-3 border-t border-forge-line pt-4 sm:grid-cols-3">
-                              <input type="hidden" name="rawExecutionId" value={execution.id} />
-                              <TextField label="Execution time" name="executionDateTime" type="datetime-local" defaultValue={format(execution.executionDateTime, "yyyy-MM-dd'T'HH:mm")} />
-                              <TextField label="Instrument" name="instrument" defaultValue={execution.instrument} />
-                              <TextField label="Side" name="side" defaultValue={execution.side} />
-                              <TextField label="Price" name="price" type="number" step="0.01" defaultValue={execution.price} />
-                              <TextField label="Quantity / size" name="quantity" type="number" step="any" defaultValue={execution.quantity} />
-                              <TextField label="Total order value" name="totalOrderValue" type="number" step="0.01" defaultValue={execution.totalOrderValue} />
-                              <TextField label="Realized P&L" name="realizedPnl" type="number" step="0.01" defaultValue={execution.realizedPnl} />
-                              <TextField label="Fees" name="fees" type="number" step="0.01" defaultValue={execution.fees} />
-                              <TextField label="Funding" name="funding" type="number" step="0.01" defaultValue={execution.funding} />
-                              <TextField label="Broker" name="exchangeBroker" defaultValue={execution.exchangeBroker} />
-                              <TextField label="Order ID" name="orderId" defaultValue={execution.orderId} />
-                              <div className="flex items-end">
-                                <button className="button-secondary w-full" type="submit">
-                                  <Pencil className="h-4 w-4" aria-hidden="true" />
-                                  Save row
-                                </button>
-                              </div>
-                            </form>
-                          </div>
-                        </details>
+        {/* CSV import writes rows here, so they have to remain visible — a path
+            that saves into somewhere you cannot look is worse than no path. The
+            old filter/sort/pagination panel is gone on purpose: it was built for
+            a primary workflow, and this is a fallback. */}
+        <section className="mt-4">
+          <h3 className="mb-2 text-sm font-semibold">Rows from CSV ({rawExecutions.length})</h3>
+          {rawExecutions.length ? (
+            <div className="overflow-x-auto rounded-lg border border-forge-line">
+              <table className="min-w-full text-sm">
+                <thead className="bg-forge-panel">
+                  <tr>
+                    {["Time", "Instrument", "Side", "Qty", "Price", "P&L", ""].map((header) => (
+                      <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawExecutions.slice(0, 25).map((execution) => (
+                    <tr key={execution.id} className="border-t border-forge-line">
+                      <td className="whitespace-nowrap px-3 py-2">{format(execution.executionDateTime, "dd MMM HH:mm")}</td>
+                      <td className="px-3 py-2">{execution.instrument}</td>
+                      <td className="px-3 py-2">{execution.side ?? "—"}</td>
+                      <td className="px-3 py-2">{execution.quantity ?? "—"}</td>
+                      <td className="px-3 py-2">{execution.price ?? "—"}</td>
+                      <td className="px-3 py-2">{execution.realizedPnl ?? "—"}</td>
+                      <td className="px-3 py-2">
                         <form action={deleteRawExecutionAction}>
                           <input type="hidden" name="rawExecutionId" value={execution.id} />
-                          <button className="button-danger min-h-8 px-2" type="submit" title="Delete execution" aria-label="Delete execution">
+                          <button className="button-danger min-h-8 px-2" type="submit" aria-label="Delete row">
                             <Trash2 className="h-4 w-4" aria-hidden="true" />
                           </button>
                         </form>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!filteredExecutions.length ? <p className="p-5 text-sm text-forge-muted">No raw executions match this view.</p> : null}
-          </div>
-          <PaginationControls basePath="/import" params={params} page={page} pageSize={pageSize} total={filteredExecutions.length} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rawExecutions.length > 25 ? (
+                <p className="p-3 text-sm text-forge-muted">Showing the newest 25 of {rawExecutions.length}.</p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="muted">No CSV rows.</p>
+          )}
         </section>
-      </section>
+      </details>
     </main>
   );
-}
-
-function applyExecutionView(execution: RawExecution, view: string) {
-  if (view === "unlinked") return !execution.linkedTradeId;
-  if (view === "linked") return Boolean(execution.linkedTradeId);
-  if (view === "with-pnl") return execution.realizedPnl != null;
-  if (view === "no-pnl") return execution.realizedPnl == null;
-  return true;
-}
-
-function compareExecutions(a: RawExecution, b: RawExecution, sort: string) {
-  if (sort === "date-asc") return a.executionDateTime.getTime() - b.executionDateTime.getTime();
-  if (sort === "instrument-asc") return a.instrument.localeCompare(b.instrument) || b.executionDateTime.getTime() - a.executionDateTime.getTime();
-  if (sort === "value-desc") return (b.totalOrderValue ?? Number.NEGATIVE_INFINITY) - (a.totalOrderValue ?? Number.NEGATIVE_INFINITY);
-  if (sort === "pnl-desc") return (b.realizedPnl ?? Number.NEGATIVE_INFINITY) - (a.realizedPnl ?? Number.NEGATIVE_INFINITY);
-  if (sort === "pnl-asc") return (a.realizedPnl ?? Number.POSITIVE_INFINITY) - (b.realizedPnl ?? Number.POSITIVE_INFINITY);
-  return b.executionDateTime.getTime() - a.executionDateTime.getTime();
-}
-
-function hasActiveExecutionControls(params: Record<string, string | undefined>) {
-  const passiveKeys = new Set(["view", "page", "period", "date"]);
-  return Object.entries(params).some(([key, value]) => Boolean(value) && !passiveKeys.has(key));
 }

@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { revalidateEverything } from "@/lib/revalidate";
 import { endOfDay, format, isSameDay, startOfDay } from "date-fns";
 import { checkAiConnection } from "@/lib/ai-status";
+import { credentialsFromEnv } from "@/lib/coindcx";
+import { exchangeView, positionKey, syncExchange } from "@/lib/coindcx-sync";
+import { acceptPatch, changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { defaultMistakeTagNames } from "@/lib/constants";
 import {
@@ -80,8 +83,8 @@ async function currentPathFallback(fallback: string) {
   }
 }
 
-async function redirectBackWithFeedback(message: string, fallback: string) {
-  redirect(withFeedback(await currentPathFallback(fallback), message));
+async function redirectBackWithFeedback(message: string, fallback: string, type = "success") {
+  redirect(withFeedback(await currentPathFallback(fallback), message, type));
 }
 
 function enumValue<T extends Record<string, string>>(enumObject: T, value: FormDataEntryValue | null, fallback: T[keyof T]) {
@@ -1905,4 +1908,89 @@ export async function showTagAction(formData: FormData) {
   await saveSettings({ ...settings, hiddenTags: (settings.hiddenTags ?? []).filter((entry) => entry !== tag) });
   revalidateEverything();
   await redirectBackWithFeedback(`#${tag} is back in the pickers.`, "/settings");
+}
+
+// ── Exchange reconciliation ─────────────────────────────────────────────────
+//
+// The exchange owns the numbers; the trader owns the words. Every action here
+// respects that line: acceptPatch() is built only from diffTrade()'s field
+// list, so no sync path can reach a thesis, a mood, a grade or a lesson even
+// by accident. See lib/reconcile.ts.
+
+export async function syncExchangeAction() {
+  const credentials = credentialsFromEnv();
+  if (!credentials) {
+    await redirectBackWithFeedback("No CoinDCX key configured — add it in Vercel's environment variables.", "/import");
+    return;
+  }
+  const report = await syncExchange(credentials);
+  revalidateEverything();
+  await redirectBackWithFeedback(report.detail, "/import", report.ok ? "success" : "error");
+}
+
+export async function acceptExchangeMatchAction(formData: FormData) {
+  const tradeId = toText(formData.get("tradeId"));
+  const key = toText(formData.get("exchangeKey"));
+  if (!tradeId || !key) {
+    await redirectBackWithFeedback("Nothing to reconcile.", "/import");
+    return;
+  }
+
+  const [view, trades] = await Promise.all([exchangeView(), db.list("trades")]);
+  const match = matchPositions(view.positions, trades, positionKey).matches.find(
+    (candidate) => candidate.trade.id === tradeId && positionKey(candidate.position) === key,
+  );
+  if (!match) {
+    await redirectBackWithFeedback("That match is no longer current — re-sync and try again.", "/import", "error");
+    return;
+  }
+
+  await db.update("trades", tradeId, { ...acceptPatch(match, key), updatedAt: new Date() });
+  revalidateEverything();
+  await redirectBackWithFeedback(`${match.position.instrument} updated from the exchange.`, "/import");
+}
+
+export async function acceptAllExchangeMatchesAction() {
+  const [view, trades] = await Promise.all([exchangeView(), db.list("trades")]);
+  const { matches } = matchPositions(view.positions, trades, positionKey);
+
+  let applied = 0;
+  for (const match of matches) {
+    const key = positionKey(match.position);
+    // Only the ones that would actually change something — accepting a trade
+    // that already agrees would just bump updatedAt for no reason.
+    if (!changedFields(diffTrade(match.trade, match.position)).length && match.trade.exchangeKey) continue;
+    await db.update("trades", match.trade.id, { ...acceptPatch(match, key), updatedAt: new Date() });
+    applied += 1;
+  }
+
+  revalidateEverything();
+  await redirectBackWithFeedback(applied ? `Reconciled ${applied} trade${applied === 1 ? "" : "s"}.` : "Everything already matches.", "/import");
+}
+
+export async function dismissExchangePositionAction(formData: FormData) {
+  const key = toText(formData.get("exchangeKey"));
+  if (!key) return;
+  const settings = await getSettings();
+  const dismissed = settings.dismissedExchangeKeys ?? [];
+  if (!dismissed.includes(key)) {
+    await saveSettings({ ...settings, dismissedExchangeKeys: [...dismissed, key] });
+  }
+  revalidateEverything();
+  await redirectBackWithFeedback("Hidden. It stays in the exchange data, just not in the nudge.", "/import");
+}
+
+export async function restoreExchangePositionsAction() {
+  const settings = await getSettings();
+  await saveSettings({ ...settings, dismissedExchangeKeys: [] });
+  revalidateEverything();
+  await redirectBackWithFeedback("Hidden exchange trades are back.", "/import");
+}
+
+export async function setDisplayCurrencyAction(formData: FormData) {
+  const value = toText(formData.get("displayCurrency")) === "USDT" ? "USDT" : "INR";
+  const settings = await getSettings();
+  await saveSettings({ ...settings, displayCurrency: value });
+  revalidateEverything();
+  await redirectBackWithFeedback(`Totals now shown in ${value}.`, "/settings");
 }

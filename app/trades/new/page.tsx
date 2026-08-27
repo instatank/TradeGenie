@@ -8,7 +8,10 @@ import { getOptionCatalog } from "@/lib/options";
 
 // One clean card. Symbol + direction is a complete log; the trade's own page
 // holds every detail (prices, screenshots, playbook, conditions) after saving.
-export default async function NewTradePage() {
+export default async function NewTradePage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
+  // Arriving from an unjournaled exchange position prefills the two facts the
+  // exchange already knows. Everything else stays blank on purpose.
+  const params = (await searchParams) ?? {};
   const [trades, lessons, tagVocabulary, options, runnableSetups] = await Promise.all([
     db.list("trades"), getResurfacedLessons(1), getTagVocabulary(), getOptionCatalog(), getRunnableSetups(),
   ]);
@@ -34,6 +37,8 @@ export default async function NewTradePage() {
           mindStateChoices={options.choices("mindState")}
           redirectTo="/trades"
           submitLabel="Log trade"
+          defaultInstrument={params.instrument?.toUpperCase() ?? null}
+          defaultDirection={params.direction === "SHORT" ? "SHORT" : params.direction === "LONG" ? "LONG" : null}
         />
         <div className="mt-3">
           <RunSetupBar setups={runnableSetups} />

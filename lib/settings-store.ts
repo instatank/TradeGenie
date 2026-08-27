@@ -10,6 +10,14 @@ export type AppSettings = {
    *  in search, still shows as a pill, and still appears in the picker on a
    *  record that already carries it — it just stops being offered as a chip. */
   hiddenTags: string[];
+  /** Exchange positions the trader has decided not to journal. Without this an
+   *  unlogged position nags forever, which trains you to ignore the nudge —
+   *  and the nudge is the only thing protecting the logging habit. Stored as
+   *  position keys, so dismissing survives a re-sync. */
+  dismissedExchangeKeys: string[];
+  /** Which currency combined totals are shown in. Per-trade numbers always
+   *  stay in the account they were traded in; only sums are converted. */
+  displayCurrency: "INR" | "USDT";
   defaultMarketType: string;
   defaultSourceTool: string;
   promptTemplatesVersion: number;
@@ -23,6 +31,8 @@ const localSettingsPath = path.join(process.cwd(), "data", "settings.json");
 export const defaultSettings: AppSettings = {
   aiEnabled: true,
   hiddenTags: [],
+  dismissedExchangeKeys: [],
+  displayCurrency: "INR",
   defaultMarketType: "CRYPTO_PERP",
   defaultSourceTool: "Voice memo",
   promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,

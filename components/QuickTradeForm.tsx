@@ -14,12 +14,20 @@ export function QuickTradeForm({
   mindStateChoices,
   redirectTo,
   submitLabel = "Log it",
+  defaultInstrument,
+  defaultDirection,
 }: {
   recentSymbols: string[];
   tagVocabulary?: string[];
   mindStateChoices: OptionChoice[];
   redirectTo: string;
   submitLabel?: string;
+  /** Prefilled when arriving from an exchange position that has no journal
+   *  entry yet. The symbol and direction are facts the exchange already knows,
+   *  so making you retype them would be friction for nothing — but everything
+   *  that matters (why you took it) is still yours to write. */
+  defaultInstrument?: string | null;
+  defaultDirection?: string | null;
 }) {
   return (
     <form action={quickLogTradeAction} className="space-y-4">
@@ -38,6 +46,7 @@ export function QuickTradeForm({
           ))}
           <input
             name="instrument"
+            defaultValue={defaultInstrument ?? ""}
             placeholder={recentSymbols.length ? "or type another…" : "BTC, ETH, SOL…"}
             autoCapitalize="characters"
             className="input w-36 uppercase placeholder:normal-case"
@@ -52,6 +61,7 @@ export function QuickTradeForm({
           { value: "SHORT", label: "Short", hint: "betting it goes down" },
         ]}
         toneByValue={{ LONG: "green", SHORT: "red" }}
+        defaultValue={defaultDirection}
       />
 
       <ChipRadioGroup

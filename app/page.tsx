@@ -8,7 +8,10 @@ import { RunSetupBar } from "@/components/RunSetupBar";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { humanize } from "@/lib/constants";
 import { db, getFreeNotesForDay, getResurfacedLessons, getRunnableSetups, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
+import { exchangeView, positionKey } from "@/lib/coindcx-sync";
 import { getOptionCatalog } from "@/lib/options";
+import { getSettings } from "@/lib/settings-store";
+import { matchPositions } from "@/lib/reconcile";
 import { stepResolver } from "@/lib/setups";
 import {
   analyticsLeaks,
@@ -30,7 +33,7 @@ import {
 export default async function TodayPage() {
   const now = new Date();
   const today = startOfDay(now);
-  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes, runnableSetups, playbook] = await Promise.all([
+  const [trades, journals, transcripts, assetNotes, lessons, setupNames, todayJournal, tagVocabulary, options, freeNotes, runnableSetups, playbook, exchange, settings] = await Promise.all([
     getTradesWithMistakes(),
     db.list("dailyJournals"),
     db.list("transcripts"),
@@ -43,6 +46,8 @@ export default async function TodayPage() {
     getFreeNotesForDay(now),
     getRunnableSetups(),
     db.list("setups"),
+    exchangeView(),
+    getSettings(),
   ]);
 
   // Streak counts showing up in any form — never profitability.
@@ -93,6 +98,14 @@ export default async function TodayPage() {
     .filter((trade) => trade.status === "OPEN")
     .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime())
     .slice(0, 4);
+
+  // Exchange positions with no journal entry. Newest first — an unlogged trade
+  // from this morning is worth writing up; one from three weeks ago is not, and
+  // burying today's under a backlog is how a nudge becomes noise.
+  const dismissedKeys = new Set(settings.dismissedExchangeKeys ?? []);
+  const unjournaled = matchPositions(exchange.positions, trades, positionKey)
+    .unmatched.filter((position) => !dismissedKeys.has(positionKey(position)))
+    .sort((a, b) => b.openedAt.getTime() - a.openedAt.getTime());
 
   // Snapshot data: last 30 days, falling back to all-time while history is thin.
   const thirtyDaysAgo = subDays(today, 29);
@@ -322,10 +335,34 @@ export default async function TodayPage() {
             </div>
           </div>
 
-          {needsReview.length || openTrades.length ? (
+          {needsReview.length || openTrades.length || unjournaled.length ? (
             <div className="panel">
               <h2 className="mb-3 font-semibold">Waiting on you</h2>
               <div className="space-y-2">
+                {/* Trades the exchange has and the journal does not. Shown as a
+                    prompt to WRITE one, never auto-created: an app that filled
+                    these in silently would leave a P&L spreadsheet behind, and
+                    the writing-down is the habit worth protecting. */}
+                {unjournaled.slice(0, 4).map((position) => (
+                  <Link
+                    key={positionKey(position)}
+                    href={`/trades/new?instrument=${encodeURIComponent(position.instrument)}&direction=${position.direction}`}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-forge-line p-3 text-sm transition hover:border-forge-blue"
+                  >
+                    <span>
+                      <span className="font-medium">{position.instrument} · {humanize(position.direction)}</span>
+                      <span className="block text-forge-muted">
+                        Traded {format(position.openedAt, "d MMM HH:mm")} — not journaled
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-forge-blue">Log it →</span>
+                  </Link>
+                ))}
+                {unjournaled.length > 4 ? (
+                  <Link href="/import" className="block text-sm text-forge-blue hover:underline">
+                    {unjournaled.length - 4} more on the exchange →
+                  </Link>
+                ) : null}
                 {needsReview.map((trade) => (
                   <TradeRow key={trade.id} id={trade.id} title={`${trade.instrument} · ${humanize(trade.direction)}`} note="Closed — needs your 1-minute review" cta="Review" />
                 ))}
