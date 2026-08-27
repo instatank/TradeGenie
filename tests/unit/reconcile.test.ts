@@ -7,7 +7,7 @@
 // tries to steal, and the subjective fields that must never be touched.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { acceptPatch, changedFields, diffTrade, matchPositions, MATCH_WINDOW_HOURS } from "@/lib/reconcile";
+import { acceptPatch, changedFields, diffTrade, matchPositions, willCloseTrade, MATCH_WINDOW_HOURS } from "@/lib/reconcile";
 import type { ReconstructedPosition } from "@/lib/positions";
 import type { Trade } from "@/lib/types";
 
@@ -223,5 +223,31 @@ describe("acceptPatch", () => {
     const patch = acceptPatch({ position: exact, trade: already, minutesApart: 0, confirmed: false }, "k");
     assert.deepEqual(Object.keys(patch), ["exchangeKey"]);
     assert.equal(changedFields(diffTrade(already, exact)).length, 0);
+  });
+});
+
+describe("willCloseTrade", () => {
+  const match = (tradeStatus: string, positionStatus: "OPEN" | "CLOSED") => ({
+    position: position({ status: positionStatus, closedAt: positionStatus === "CLOSED" ? new Date() : null }),
+    trade: trade({ status: tradeStatus as Trade["status"] }),
+    minutesApart: 5,
+    confirmed: false,
+  });
+
+  it("is true for the case this whole feature is most useful for", () => {
+    // Open in the journal, closed on the exchange days ago. Without this the
+    // trade sits open forever, and a numbers-only diff would not surface it.
+    assert.equal(willCloseTrade(match("OPEN", "CLOSED")), true);
+    assert.equal(acceptPatch(match("OPEN", "CLOSED"), "k").status, "CLOSED");
+  });
+
+  it("is false when the journal already knows", () => {
+    assert.equal(willCloseTrade(match("CLOSED", "CLOSED")), false);
+    assert.equal(acceptPatch(match("CLOSED", "CLOSED"), "k").status, undefined);
+  });
+
+  it("never closes a trade the exchange still shows open", () => {
+    assert.equal(willCloseTrade(match("OPEN", "OPEN")), false);
+    assert.equal(acceptPatch(match("OPEN", "OPEN"), "k").status, undefined);
   });
 });

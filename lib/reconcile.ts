@@ -190,6 +190,19 @@ export function diffTrade(trade: Trade, position: ReconstructedPosition): FieldD
   }));
 }
 
+/**
+ * Would accepting this match close a trade the journal still shows as open?
+ *
+ * This is the single most consequential thing an accept can do — it is how a
+ * position closed on the exchange days ago finally gets closed in the journal —
+ * and it is not a number, so it cannot live in diffTrade(). It gets its own
+ * function so the card can SAY it will happen rather than doing it quietly
+ * underneath a table of prices.
+ */
+export function willCloseTrade(match: Match): boolean {
+  return match.position.status === "CLOSED" && match.trade.status !== "CLOSED";
+}
+
 /** Just the fields worth writing — the ones that would actually change. */
 export function changedFields(diff: FieldDiff[]): FieldDiff[] {
   return diff.filter((row) => row.changed);
@@ -208,8 +221,6 @@ export function acceptPatch(match: Match, key: string): Partial<Trade> {
     if (row.exchange === null) continue;
     (patch as Record<string, unknown>)[row.field] = row.exchange;
   }
-  if (match.position.status === "CLOSED" && match.trade.status !== "CLOSED") {
-    patch.status = "CLOSED";
-  }
+  if (willCloseTrade(match)) patch.status = "CLOSED";
   return patch;
 }

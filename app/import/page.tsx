@@ -14,7 +14,7 @@ import { PageTitle } from "@/components/Fields";
 import { credentialsFromEnv } from "@/lib/coindcx";
 import { exchangeView, positionKey } from "@/lib/coindcx-sync";
 import { db } from "@/lib/data";
-import { changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
+import { changedFields, diffTrade, matchPositions, willCloseTrade } from "@/lib/reconcile";
 import { getSettings } from "@/lib/settings-store";
 import { listRecords } from "@/lib/store";
 
@@ -55,7 +55,14 @@ export default async function ImportPage() {
   // Only matches that would actually change something need attention. One that
   // already agrees is a confirmation, not a task, and mixing the two would bury
   // the handful that matter.
-  const needsReview = matches.filter((match) => changedFields(diffTrade(match.trade, match.position)).length > 0);
+  //
+  // "Something" includes CLOSING a trade the journal still shows as open, which
+  // is not a numeric diff. Filtering on numbers alone would have hidden exactly
+  // the case this is most useful for: a position closed on the exchange days ago
+  // that the journal never caught up with.
+  const needsReview = matches.filter(
+    (match) => willCloseTrade(match) || changedFields(diffTrade(match.trade, match.position)).length > 0,
+  );
   const agreed = matches.length - needsReview.length;
   const toJournal = unmatched.filter((position) => !dismissed.has(positionKey(position)));
   const hiddenCount = unmatched.length - toJournal.length;

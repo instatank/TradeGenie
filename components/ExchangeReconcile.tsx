@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import { ArrowRight, Check, EyeOff } from "lucide-react";
 import { acceptExchangeMatchAction, dismissExchangePositionAction } from "@/app/actions";
 import { TagPills } from "@/components/TagPills";
-import { changedFields, diffTrade, type Match } from "@/lib/reconcile";
+import { changedFields, diffTrade, willCloseTrade, type Match } from "@/lib/reconcile";
 import type { ReconstructedPosition } from "@/lib/positions";
 
 // What the exchange says, next to what you wrote — and one button to take the
@@ -35,6 +35,7 @@ function money(value: number | null, currency: string): string {
 
 export function MatchCard({ match, positionKey }: { match: Match; positionKey: string }) {
   const changes = changedFields(diffTrade(match.trade, match.position));
+  const closes = willCloseTrade(match);
   const { position, trade } = match;
 
   return (
@@ -62,7 +63,17 @@ export function MatchCard({ match, positionKey }: { match: Match; positionKey: s
         </Link>
       </header>
 
-      {changes.length ? (
+      {closes ? (
+        <p className="mb-3 flex items-start gap-2 rounded-lg border-l-4 border-forge-green bg-emerald-50 px-3 py-2 text-sm">
+          <Check className="mt-0.5 h-4 w-4 shrink-0 text-forge-green" aria-hidden="true" />
+          <span>
+            <span className="font-medium">This trade is still open in your journal but closed on the exchange.</span>{" "}
+            Accepting closes it and fills in the exit — then it will show up for your one-minute review, which is still yours to do.
+          </span>
+        </p>
+      ) : null}
+
+      {changes.length || closes ? (
         <>
           <div className="overflow-x-auto rounded-lg border border-forge-line">
             <table className="min-w-full text-sm">
