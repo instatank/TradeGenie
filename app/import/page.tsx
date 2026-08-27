@@ -28,6 +28,13 @@ import { listRecords } from "@/lib/store";
 // Deliberately NOT a new nav item: "Import" was already the home for objective
 // data arriving from outside, and adding "Exchange" beside it would have made
 // two doors to one room.
+// Never prerendered. This page reports live state — how many fills are held,
+// when the last sync ran, what still disagrees with the journal — and a
+// build-time snapshot of that is worse than useless: it would confidently show
+// a sync status from whenever the app was last deployed. Every other page here
+// can be cached and revalidated on write; this one genuinely cannot.
+export const dynamic = "force-dynamic";
+
 export default async function ImportPage() {
   const [view, trades, settings, storedFills, storedLedger, batches] = await Promise.all([
     exchangeView(),

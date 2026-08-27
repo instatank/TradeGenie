@@ -61,7 +61,10 @@ daily loop is frictionless and the data is safe. Don't gold-plate the dashboard 
 capture flow still has friction or the storage isn't durable.
 
 ## Non-goals (do not build in this phase)
-Exchange/broker API sync · AI screenshot parsing · real-time signals or recommendations ·
+~~Exchange/broker API sync~~ — **lifted by the owner (Aug 2026)**: read-only CoinDCX import is
+built, because entering approximate figures and skipping fees was making the journal's numbers
+untrustworthy. Execution stays a non-goal and is blocked in code, not just in policy.
+AI screenshot parsing · real-time signals or recommendations ·
 any financial advice · full charting · backtesting · trade replay · TradingView integration ·
 auth · multi-user · payments · social sharing · automated execution.
 This app must never give trade recommendations or financial advice.

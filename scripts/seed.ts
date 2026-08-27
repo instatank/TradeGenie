@@ -358,6 +358,62 @@ async function main() {
     });
   }
 
+  // Exchange rows, so `npm run smoke` actually renders the reconcile screen.
+  // Without these, /import and Today draw their empty states and a crash in a
+  // MatchCard, an UnmatchedCard or the missing-funding warning would ship
+  // silently — exactly the gate hole smoke exists to close.
+  //
+  // Shaped to exercise the branches that matter, not just to exist:
+  //   - one position that MATCHES a seeded trade but disagrees on the numbers
+  //     (the reconcile diff),
+  //   - one with no journal entry at all (the Today nudge),
+  //   - one still open, and one in the INR margin account,
+  //   - funding inside a position's window, so attribution runs.
+  const seededTrades = await db.list("trades");
+  const matchable = seededTrades.find((trade) => trade.status === "CLOSED") ?? seededTrades[0];
+  const exchangeNow = new Date();
+
+  async function seedFill(
+    id: string,
+    instrument: string,
+    currency: string,
+    side: "BUY" | "SELL",
+    quantity: number,
+    price: number,
+    fee: number,
+    executedAt: Date,
+  ) {
+    await db.create("exchangeFills", {
+      id, createdAt: exchangeNow, source: "coindcx", instrument, currency,
+      side, quantity, price, fee, executedAt, orderId: `order-${id}`,
+    });
+  }
+
+  if (matchable) {
+    // Opens a few minutes after the journal entry, with prices that differ from
+    // what was logged — this is the row the reconcile diff is built to show.
+    const opened = new Date(matchable.tradeDateTime.getTime() + 4 * 60_000);
+    const closed = new Date(opened.getTime() + 3 * 60 * 60_000);
+    const isLong = matchable.direction === "LONG";
+    await seedFill("seed-fill-1", matchable.instrument, "USDT", isLong ? "BUY" : "SELL", 0.5, 2484.25, 0.124, opened);
+    await seedFill("seed-fill-2", matchable.instrument, "USDT", isLong ? "SELL" : "BUY", 0.5, 2512.5, 0.126, closed);
+    await db.create("exchangeLedger", {
+      id: "seed-funding-1", createdAt: exchangeNow, source: "coindcx",
+      instrument: matchable.instrument, currency: "USDT", stage: "funding", kind: "FUNDING",
+      amount: -0.0312, fee: 0, positionId: "seed-position-1", orderId: null,
+      rateInr: 99.88, rateUsdt: 1,
+      occurredAt: new Date(opened.getTime() + 60 * 60_000),
+    });
+  }
+
+  // Never journaled — becomes the Today nudge and the "Not journaled" list.
+  await seedFill("seed-fill-3", "HYPE", "USDT", "SELL", 1.29, 82.753, 0.0629, new Date(exchangeNow.getTime() - 26 * 3600_000));
+  await seedFill("seed-fill-4", "HYPE", "USDT", "BUY", 1.29, 80.1, 0.0611, new Date(exchangeNow.getTime() - 20 * 3600_000));
+
+  // Still open, and in the other margin account — proves the two accounts stay
+  // apart and that an open position renders without exit numbers.
+  await seedFill("seed-fill-5", "SOL", "INR", "BUY", 4.67, 10740.2, 29.6, new Date(exchangeNow.getTime() - 5 * 3600_000));
+
   console.log("Seed complete.");
 }
 

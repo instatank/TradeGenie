@@ -57,6 +57,18 @@ async function main() {
       console.log(`  ${ok ? "ok  " : "FAIL"}  ${route.padEnd(28)} ${status}`);
       if (!ok) failures.push(`${route} -> ${status}`);
     }
+
+    // A 200 only proves the page did not throw. Several of the most breakable
+    // renders are CONDITIONAL — the reconcile diff, the unjournaled nudge —
+    // and an empty store draws their empty states instead, so a crash in one
+    // would sail through a status check. The seed creates the data that makes
+    // them render; these assert they actually did.
+    for (const [route, needle, what] of CONTENT_CHECKS) {
+      const body = await fetchBody(route);
+      const ok = body.includes(needle);
+      console.log(`  ${ok ? "ok  " : "FAIL"}  ${route.padEnd(28)} renders ${what}`);
+      if (!ok) failures.push(`${route} did not render ${what}`);
+    }
   } catch (error) {
     console.error(`\nServer output:\n${serverLog.slice(-4000)}`);
     throw error;
@@ -71,6 +83,29 @@ async function main() {
     process.exit(1);
   }
   console.log("\nAll routes rendered.");
+}
+
+// [route, string that must appear, what it proves rendered]
+//
+// Only routes that render per-request can be checked this way. A statically
+// prerendered page (most of this app, deliberately) is built BEFORE the seed
+// runs, so `next start` serves HTML generated against whatever store existed at
+// build time and a content assertion against it would be meaningless — which is
+// exactly what happened on the first attempt at this, and is why /import is now
+// force-dynamic rather than why this check was weakened.
+const CONTENT_CHECKS: [string, string, string][] = [
+  ["/import", "Use the exchange", "the reconcile diff + accept button"],
+  ["/import", "Log this trade", "an unjournaled position card"],
+  ["/import", "older position", "the missing-funding warning"],
+];
+
+async function fetchBody(route: string): Promise<string> {
+  try {
+    const response = await fetch(`${BASE}${route}`, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
+    return await response.text();
+  } catch (error) {
+    return `<!-- fetch failed: ${error instanceof Error ? error.message : String(error)} -->`;
+  }
 }
 
 async function dynamicRoutes(storePath: string): Promise<string[]> {

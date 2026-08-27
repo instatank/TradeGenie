@@ -868,6 +868,51 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - Rejected: `ignoreUndefinedProperties` on the Firestore client. Same effect for Firestore only,
     and it would have left the two backends behaving differently on the same patch.
 
+- **Exchange import — CoinDCX, read-only, end to end.** The journal's numbers now come
+  from the exchange; the words stay the trader's. Design record: this section + the module
+  headers, since the exchange's futures API has no usable public docs (`docs.coindcx.com` is
+  JS-rendered and unreadable by any tooling here — three probe rounds against the live API
+  established every shape, and `tests/unit/coindcx.test.ts` fixtures ARE the schema).
+  - **Two endpoints carry everything.** `/derivatives/futures/trades` gives fills (~425 over
+    ten months, 100 per call, newest first — the whole account is five calls).
+    `/derivatives/futures/positions/transactions` is the Transactions tab: `stage` is its type
+    column (measured: funding 47, default 40, tpsl_exit 12, exit 1). `/positions` is useless
+    here (all flat, funding never populated) and the `margin_currency_short_name` filter is
+    **ignored** — both accounts arrive together and the split happens per record.
+  - **Raw rows are stored (`exchangeFills`, `exchangeLedger`); positions are NOT.** Positions
+    are recomputed on read by `reconstructPositions()`. One source of truth, no sync state to
+    drift, and the fold can improve without a migration. Storing raw rows is also the only
+    defence against the exchange's own limit: **the ledger reaches back ~3 weeks while fills
+    reach back ten months**, so funding not captured today is gone for good. Positions
+    predating the ledger are *named* on `/import`, never presented as complete.
+  - **A trap that cost a round:** a transaction's `fill_id` is its OWN id (v1 UUID), not the
+    trades endpoint's `fill_id` (v4). The link to a trade is `parent_id` → `order_id`. Joining
+    on `fill_id` looks right and matches nothing; a test pins it.
+  - **Positions key on instrument AND margin currency.** The trader runs separate INR and USDT
+    accounts, and a SOL long in one against a SOL short in the other would otherwise fold into
+    one position and net out — silent corruption in the one module that decides what a trade was.
+  - **No invented exchange rate.** Every ledger row stamps `price_in_inr` / `price_in_usdt` for
+    its own margin currency, so combined totals convert at the *historical* rate for free
+    (`lib/currency.ts`). A flat 100:1 is the documented fallback only — measured against a real
+    row it was within 0.19% — and any total that used it reports `exact: false` rather than
+    looking precise. Per-trade numbers are never converted; only sums.
+  - **The exchange owns numbers, the trader owns words** (`lib/reconcile.ts`). Enforced
+    structurally: a field absent from `diffTrade()` cannot be written by any sync path, and a
+    test asserts thesis, lesson, notes, mood, grade, setup and tags are absent from it.
+    Matching is nearest-in-time, bucketed by symbol, and an accepted link always beats a closer
+    stranger. Two positions can never claim one trade.
+  - **Nothing auto-creates a trade.** An unjournaled position is a nudge on Today and a card on
+    `/import`, dismissible. Filling them in silently would leave a P&L spreadsheet behind, and
+    the writing-down is the habit the app exists to build. Reviewing a diff is one tap
+    ("Accept all" for a batch); auto-apply is deliberately not built yet.
+  - **`/import` is the exchange page** and is `force-dynamic` — it reports live sync state, and
+    a build-time snapshot of that is worse than useless. CSV import moved under a fold (with its
+    row list, since it still writes them) rather than being deleted.
+  - **The scheduled sync would have silently never run.** `middleware.ts` bounced the cron call
+    to `/login` (307), which a runner counts as success. `CRON_SECRET` + an `/api/cron/*`
+    exemption fixes it and `npm run check:cron` asserts all three cases — this is a gate hole
+    `next build` cannot see, since middleware only runs against a real request.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -889,7 +934,10 @@ npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
 npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter
-npm run smoke      # after a build: start the app, assert every route (incl. dynamic) renders 200
+npm run smoke      # after a build: every route renders 200, and the conditional
+                   #   exchange panels actually render (a 200 alone would hide a
+                   #   crash in a card that only appears when there is data)
+npm run check:cron # can Vercel's scheduled sync get past the site password?
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
 npm run check:capture  # offline: do the prompt's examples survive parse + normalize?
 ```

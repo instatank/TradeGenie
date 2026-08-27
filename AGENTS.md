@@ -7,7 +7,11 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - Product: TradeGenie (tagline: "magic journal")
 - Purpose: low-friction personal trading journal and learning system for one discretionary trader.
 - Core value: help build a daily journaling habit, capture subjective reasoning, review mistakes, and turn trades/voice notes into reusable lessons.
-- This app must not provide financial advice, trade recommendations, signals, broker sync, automated execution, or social/team features.
+- This app must not provide financial advice, trade recommendations, signals, automated execution, or social/team features.
+- **Read-only exchange import IS in scope** (owner's decision, Aug 2026): the journal pulls its
+  objective numbers from CoinDCX so fees and funding stop being guesses. The line that has NOT
+  moved is execution — nothing in this codebase may place, edit, cancel or exit an order, and
+  `lib/coindcx.ts` enforces that with a hard path allowlist rather than a convention.
 
 ## Where This Runs
 
@@ -73,6 +77,11 @@ Development happens entirely in Claude Code cloud containers. There is no local 
 - `lib/ai-status.ts`: turns a thrown Anthropic error into an actionable sentence, and backs the `/settings` "Test AI connection" check. Every AI path reads its model from `activeModel()`.
 - `lib/extraction.ts`: the entry vocabulary — kinds, per-kind fields, the tolerant normalizer used on both the model response and every read of a saved draft.
 - `lib/extraction-context.ts`: the ~300-token trader-context block (open trades, tracked assets, recent instruments, active setups) + open-trade handle resolution.
+- `lib/coindcx.ts`: the CoinDCX wire format — HMAC signing, a hard read-only path allowlist, and parsers for fills and ledger rows. Every shape was learned from the live API; the fixtures in `tests/unit/coindcx.test.ts` are the only schema that exists.
+- `lib/coindcx-sync.ts`: paging, idempotent storage into `exchangeFills`/`exchangeLedger`, and `exchangeView()` which recomputes positions on read. Stores raw rows and derives positions, never the reverse.
+- `lib/reconcile.ts`: matching exchange positions to journal trades and diffing them. THE line: the exchange owns numbers, the trader owns words — a field absent from `diffTrade()` cannot be written by any sync.
+- `lib/currency.ts`: combining the INR and USDT margin accounts using the rate the exchange stamped on each row. Never converts a stored number; only totals.
+- `lib/revalidate.ts`: `revalidateEverything()`. Lives outside `app/actions.ts` because that file is "use server" and route handlers need it too.
 - `lib/market-context.ts`: the SignalDesk bridge — fetches the market snapshot for a trade's entry and returns null on any failure. Design record lives in the other repo: `signaldesk/TRADEGENIE_BRIDGE.md`.
 - `scripts/eval-capture.ts` / `tests/fixtures/capture/`: `npm run eval:capture` scores the capture pipeline against 15 realistic messy notes.
 
@@ -90,7 +99,7 @@ Development happens entirely in Claude Code cloud containers. There is no local 
 - `/trades/[id]`: review-first trade page — one-minute close & review panel on top, then "Setup & execution" (setup / timeframes / mechanisms / model checklist), full editor collapsed below
 - `/assets`, `/assets/[id]`: per-asset tracker — living thesis/levels page + running note thread (composer has an optional AI "Structure" tidy pass)
 - `/lessons`: lesson bank
-- `/import`: CSV import and raw execution linking
+- `/import`: the exchange — CoinDCX sync, the reconcile diff (exchange numbers vs what you logged), and positions you never journaled. `force-dynamic`; CSV import is a fold below it
 - `/weekly-review`: generated/saved weekly reviews
 - `/calculator`: pre-trade profitability scratchpad — net-of-fees R, break-even price, required win rate, position size (nothing is saved)
 - `/settings`: AI status + connection test, custom labels, the tag vocabulary (retire a tag from the pickers without touching a record), and the single capture prompt template
