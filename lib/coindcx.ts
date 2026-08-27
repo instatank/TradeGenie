@@ -44,68 +44,43 @@ export type Probe = {
   summary?: (body: unknown) => string;
 };
 
-// ROUND 2. Round 1 confirmed /trades, /orders and /positions and ruled out
-// three names for the transactions endpoint, so those variants are gone and
-// the remaining unknowns get the space instead:
+// ROUND 3. Rounds 1-2 settled almost everything:
 //
-//   1. Where does funding live? The Transactions tab exists in the UI, so an
-//      endpoint exists; we have only ruled out three spellings of it.
-//   2. How much history can one call carry, and does paging reach back far
-//      enough to import a whole account?
-//   3. Round 1's SOL fill said margin_currency_short_name "INR" while the
-//      request asked for USDT and the price was plainly in USDT. Either the
-//      filter is ignored or that field means something other than what it
-//      looks like. P&L currency depends on the answer, so it is not cosmetic.
-const FUNDING_CANDIDATES = [
-  "/exchange/v1/derivatives/futures/positions/transactions",
-  "/exchange/v1/derivatives/futures/transactions/list",
-  "/exchange/v1/derivatives/futures/transactions/history",
-  "/exchange/v1/derivatives/futures/wallet_transactions",
-  "/exchange/v1/derivatives/futures/wallets",
-  "/exchange/v1/derivatives/futures/funding",
-  "/exchange/v1/derivatives/futures/funding_history",
-  "/exchange/v1/derivatives/futures/account/transactions",
-  "/exchange/v1/derivatives/futures/ledger",
-  "/exchange/v1/derivatives/futures/data/transactions",
-  "/exchange/v1/wallets/transactions",
-];
-
-// Both margin accounts, always. 80%+ of the trading is USDT, but an INR trade
-// that silently never imports is worse than one that imports slowly.
-const BOTH_ACCOUNTS = ["USDT", "INR"];
+//   /trades ................. fills. 425 of them over ~10 months, 100 per call,
+//                             newest first. The whole account is 5 calls.
+//   /positions/transactions . FOUND. Funding, exits and P&L, each row carrying
+//                             position_id AND fill_id, so funding attributes to
+//                             a position exactly rather than by time window.
+//   /positions .............. useless here: 13 rows, all flat, funding never
+//                             populated. Dropped.
+//   margin_currency filter .. IGNORED. Asking for INR alone returns USDT rows
+//                             too, so both accounts arrive together and the
+//                             split has to happen client-side off each record.
+//
+// One unknown left, and it is the one the whole transaction parser turns on:
+// what values does `stage` take? We have seen "tpsl_exit". Which value means a
+// funding payment decides what becomes a FundingEvent, and guessing it would
+// silently drop every funding row — the exact cost the import exists to capture.
+const TRANSACTIONS_PATH = "/exchange/v1/derivatives/futures/positions/transactions";
 
 export const FUTURES_PROBES: Probe[] = [
-  ...FUNDING_CANDIDATES.map((path) => ({
-    label: `Funding hunt: ${path.split("/").slice(-2).join("/")}`,
-    path,
-    payload: { page: "1", size: "10", margin_currency_short_name: BOTH_ACCOUNTS },
-  })),
   {
-    label: "Trades, page 1 at size 100 — how much does one call carry?",
-    path: "/exchange/v1/derivatives/futures/trades",
-    payload: { page: "1", size: "100", margin_currency_short_name: BOTH_ACCOUNTS },
-    summary: summarizeTrades,
+    label: "Transactions p1 — what values does `stage` take?",
+    path: TRANSACTIONS_PATH,
+    payload: { page: "1", size: "100" },
+    summary: summarizeTransactions,
   },
   {
-    label: "Trades, page 5 at size 100 — does paging reach back, and how far?",
-    path: "/exchange/v1/derivatives/futures/trades",
-    payload: { page: "5", size: "100", margin_currency_short_name: BOTH_ACCOUNTS },
-    summary: summarizeTrades,
+    label: "Transactions p3 — same, deeper in (rarer stages surface here)",
+    path: TRANSACTIONS_PATH,
+    payload: { page: "3", size: "100" },
+    summary: summarizeTransactions,
   },
   {
-    label: "Positions at size 50 — is cumulative_funding_fee ever populated?",
-    path: "/exchange/v1/derivatives/futures/positions",
-    payload: { page: "1", size: "50", margin_currency_short_name: BOTH_ACCOUNTS },
-    summary: summarizePositions,
-  },
-  {
-    // If the filter is honoured, this returns only INR fills and settles what
-    // margin_currency_short_name actually means. If it comes back with USDT
-    // rows in it, the filter is being ignored and we must split client-side.
-    label: "Trades, INR account only — is the currency filter honoured?",
-    path: "/exchange/v1/derivatives/futures/trades",
-    payload: { page: "1", size: "50", margin_currency_short_name: ["INR"] },
-    summary: summarizeTrades,
+    label: "Transactions p10 — how far back does the ledger go?",
+    path: TRANSACTIONS_PATH,
+    payload: { page: "10", size: "100" },
+    summary: summarizeTransactions,
   },
 ];
 
@@ -300,50 +275,50 @@ export function parseFills(body: unknown): ParsedFills {
 
 // ── Digests for the high-volume diagnostic calls ────────────────────────────
 
-function distinct(values: string[]): string[] {
-  return [...new Set(values)].sort();
-}
+/**
+ * The transaction ledger's vocabulary. Everything the parser needs to be
+ * written correctly rather than hopefully: which `stage` values exist and how
+ * often, whether each carries a fill_id and a position_id, and — per margin
+ * currency — one worked example of the price_in_* pair, which is how a value
+ * gets converted without inventing an FX rate.
+ */
+function summarizeTransactions(body: unknown): string {
+  const rows = (Array.isArray(body) ? body : []) as Array<Record<string, unknown>>;
+  if (!rows.length) return "  (empty — the ledger stops before this page)";
 
-/** How many, how far back, in what, and does anything fail to parse. */
-function summarizeTrades(body: unknown): string {
-  const records = Array.isArray(body) ? body : [];
-  if (!records.length) return "  (empty — no trades on this page, so paging stops before here)";
+  const times = rows
+    .map((row) => Number(row.created_at))
+    .filter((time) => Number.isFinite(time));
 
-  const { fills, skipped } = parseFills(body);
-  const times = fills.map((fill) => fill.timestamp.getTime());
-  const currencies = distinct(
-    records.map((record) => String((record as { margin_currency_short_name?: unknown }).margin_currency_short_name ?? "—")),
-  );
-
-  return [
-    `  records: ${records.length} (parsed ${fills.length}, unusable ${skipped})`,
-    `  oldest:  ${new Date(Math.min(...times)).toISOString()}`,
-    `  newest:  ${new Date(Math.max(...times)).toISOString()}`,
-    `  symbols: ${distinct(fills.map((fill) => fill.instrument)).join(", ")}`,
-    `  margin_currency_short_name values: ${currencies.join(", ")}`,
-  ].join("\n");
-}
-
-/** Whether positions carry usable funding, and whether closed ones show up. */
-function summarizePositions(body: unknown): string {
-  const records = Array.isArray(body) ? body : [];
-  if (!records.length) return "  (empty)";
-
-  const rows = records as Array<Record<string, unknown>>;
-  const withFunding = rows.filter((row) => typeof row.cumulative_funding_fee === "number");
-  const active = rows.filter((row) => Number(row.active_pos ?? 0) !== 0);
+  const byStage = new Map<string, { count: number; withFill: number; withPosition: number; sample: number }>();
+  for (const row of rows) {
+    const stage = String(row.stage ?? "(none)");
+    const entry = byStage.get(stage) ?? { count: 0, withFill: 0, withPosition: 0, sample: Number(row.amount) };
+    entry.count += 1;
+    if (typeof row.fill_id === "string" && row.fill_id) entry.withFill += 1;
+    if (typeof row.position_id === "string" && row.position_id) entry.withPosition += 1;
+    byStage.set(stage, entry);
+  }
 
   const lines = [
-    `  positions: ${rows.length} (${active.length} with a live size, ${rows.length - active.length} flat)`,
-    `  cumulative_funding_fee populated on: ${withFunding.length} of ${rows.length}`,
+    `  rows: ${rows.length}`,
+    `  span: ${new Date(Math.min(...times)).toISOString()} → ${new Date(Math.max(...times)).toISOString()}`,
+    "  stages (count, has fill_id, has position_id, one amount):",
   ];
-  for (const row of withFunding.slice(0, 5)) {
-    lines.push(
-      `    ${String(row.pair)} funding=${String(row.cumulative_funding_fee)} avg_price=${String(row.avg_price)} active_pos=${String(row.active_pos)}`,
-    );
+  for (const [stage, entry] of [...byStage.entries()].sort((a, b) => b[1].count - a[1].count)) {
+    lines.push(`    ${stage}: ${entry.count}, fill_id ${entry.withFill}/${entry.count}, position_id ${entry.withPosition}/${entry.count}, e.g. ${entry.sample}`);
   }
-  if (!withFunding.length) {
-    lines.push("    → funding is not available here; it has to come from the transactions endpoint");
+
+  // One example per margin currency proves what price_in_* means: for an
+  // INR-margined row price_in_inr should be 1, for a USDT-margined row
+  // price_in_usdt should be 1. If that holds, conversion is free and exact.
+  lines.push("  conversion sample per margin currency:");
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const currency = String(row.margin_currency_short_name ?? "—");
+    if (seen.has(currency)) continue;
+    seen.add(currency);
+    lines.push(`    ${currency}: price_in_inr=${String(row.price_in_inr)} price_in_usdt=${String(row.price_in_usdt)} amount=${String(row.amount)} fee=${String(row.fee_amount)}`);
   }
   return lines.join("\n");
 }
