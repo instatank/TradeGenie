@@ -18,7 +18,8 @@
 // reads .env.local) doesn't need a second copy of the signing logic.
 
 import { createHmac } from "node:crypto";
-import type { Fill } from "@/lib/positions";
+import type { Fill, FundingEvent } from "@/lib/positions";
+import type { MoneyRate } from "@/lib/currency";
 
 const BASE_URL = "https://api.coindcx.com";
 
@@ -44,23 +45,28 @@ export type Probe = {
   summary?: (body: unknown) => string;
 };
 
-// ROUND 3. Rounds 1-2 settled almost everything:
+// DISCOVERY COMPLETE. What three rounds against the live API established:
 //
-//   /trades ................. fills. 425 of them over ~10 months, 100 per call,
-//                             newest first. The whole account is 5 calls.
-//   /positions/transactions . FOUND. Funding, exits and P&L, each row carrying
-//                             position_id AND fill_id, so funding attributes to
-//                             a position exactly rather than by time window.
+//   /trades ................. fills. ~425 over 10 months, 100 per call, newest
+//                             first. The whole account is 5 calls.
+//   /positions/transactions . the ledger: funding, exits and realized P&L.
+//                             `stage` is the UI's Transaction Type column —
+//                             measured: funding 47, default 40, tpsl_exit 12,
+//                             exit 1. Carries price_in_inr / price_in_usdt, so
+//                             currency conversion needs no FX feed.
 //   /positions .............. useless here: 13 rows, all flat, funding never
-//                             populated. Dropped.
+//                             populated. Not used.
 //   margin_currency filter .. IGNORED. Asking for INR alone returns USDT rows
 //                             too, so both accounts arrive together and the
-//                             split has to happen client-side off each record.
+//                             split happens client-side off each record.
 //
-// One unknown left, and it is the one the whole transaction parser turns on:
-// what values does `stage` take? We have seen "tpsl_exit". Which value means a
-// funding payment decides what becomes a FundingEvent, and guessing it would
-// silently drop every funding row — the exact cost the import exists to capture.
+// Known limitation, deliberately not worked around: the ledger only reaches
+// back ~3 weeks while fills reach back 10 months, so older positions import
+// with exact fees but no funding. The sync reports that coverage rather than
+// implying a completeness it doesn't have.
+//
+// The probes below stay as the connection test — they are how a future change
+// checks the shapes still hold rather than trusting this comment.
 const TRANSACTIONS_PATH = "/exchange/v1/derivatives/futures/positions/transactions";
 
 export const FUTURES_PROBES: Probe[] = [
@@ -259,6 +265,129 @@ export function parseFill(record: unknown): Fill | null {
 }
 
 export type ParsedFills = { fills: Fill[]; skipped: number };
+
+// A record from /derivatives/futures/positions/transactions:
+//
+//   { pair: "B-SOL_USDT", stage: "tpsl_exit", amount: -1305.1716,
+//     fee_amount: 30.223106124, price_in_inr: 1, price_in_usdt: 0.010019036,
+//     source: "user", parent_type: "Derivatives::Futures::Order",
+//     parent_id: "27394361-…", fill_id: "622229f6-…",
+//     position_id: "29a90352-…", margin_currency_short_name: "INR",
+//     created_at: 1787841686907 }
+//
+// TRAP, learned the hard way: this `fill_id` is the transaction's OWN id (a
+// time-based v1 UUID), NOT the trades endpoint's `fill_id` (a v4). Joining the
+// two on that field would look plausible and match nothing. The real link to a
+// trade is `parent_id` → the trade's `order_id`.
+//
+// `stage` is the UI's "Transaction Type" column. Measured over a real ledger:
+// funding 47, default 40, tpsl_exit 12, exit 1.
+
+/** The stages that are a funding payment rather than a realized-P&L event. */
+const FUNDING_STAGES = new Set(["funding"]);
+
+/** The stages that close (or partly close) a position and realize P&L. */
+const EXIT_STAGES = new Set(["default", "exit", "tpsl_exit"]);
+
+export type CoindcxTransaction = {
+  id: string;
+  instrument: string;
+  currency: string;
+  stage: string;
+  kind: "FUNDING" | "EXIT" | "OTHER";
+  amount: number;
+  fee: number;
+  /** The exchange's own position id — a stronger key than any of ours. */
+  positionId: string | null;
+  /** The ORDER this row belongs to. The join to a fill goes through this. */
+  orderId: string | null;
+  /** What one unit of `currency` was worth, in each currency, at the time. */
+  rate: MoneyRate;
+  timestamp: Date;
+};
+
+/**
+ * Was this exit a stop-out or a take-profit? The journal has never known this
+ * without being told; `tpsl_exit` says the exchange's own bracket closed the
+ * position rather than the trader.
+ */
+export function exitWasAutomatic(transaction: CoindcxTransaction): boolean {
+  return transaction.stage === "tpsl_exit";
+}
+
+export function parseTransaction(record: unknown): CoindcxTransaction | null {
+  if (!record || typeof record !== "object") return null;
+  const raw = record as Record<string, unknown>;
+
+  const id = typeof raw.fill_id === "string" ? raw.fill_id : null;
+  const pair = typeof raw.pair === "string" ? raw.pair : null;
+  const amount = finiteNumber(raw.amount);
+  const createdAt = finiteNumber(raw.created_at);
+  if (!id || !pair || amount === null || createdAt === null) return null;
+
+  const stage = typeof raw.stage === "string" ? raw.stage : "";
+  return {
+    id,
+    instrument: normalizePair(pair),
+    currency: typeof raw.margin_currency_short_name === "string" ? raw.margin_currency_short_name : "",
+    stage,
+    kind: FUNDING_STAGES.has(stage) ? "FUNDING" : EXIT_STAGES.has(stage) ? "EXIT" : "OTHER",
+    amount,
+    fee: finiteNumber(raw.fee_amount) ?? 0,
+    positionId: typeof raw.position_id === "string" ? raw.position_id : null,
+    orderId: typeof raw.parent_id === "string" ? raw.parent_id : null,
+    rate: { inr: finiteNumber(raw.price_in_inr), usdt: finiteNumber(raw.price_in_usdt) },
+    timestamp: new Date(createdAt),
+  };
+}
+
+export type ParsedTransactions = {
+  transactions: CoindcxTransaction[];
+  skipped: number;
+  /** Every stage seen, so a value CoinDCX adds later shows up instead of
+   *  being silently bucketed as OTHER and quietly dropped from the maths. */
+  unknownStages: string[];
+};
+
+export function parseTransactions(body: unknown): ParsedTransactions {
+  const records = Array.isArray(body) ? body : [];
+  const transactions: CoindcxTransaction[] = [];
+  const unknown = new Set<string>();
+  let skipped = 0;
+
+  for (const record of records) {
+    const transaction = parseTransaction(record);
+    if (!transaction) {
+      skipped += 1;
+      continue;
+    }
+    if (transaction.kind === "OTHER") unknown.add(transaction.stage);
+    transactions.push(transaction);
+  }
+
+  return { transactions, skipped, unknownStages: [...unknown].sort() };
+}
+
+/**
+ * The funding rows, as the reconstructor wants them.
+ *
+ * Attribution is by instrument + currency + time window rather than by
+ * position_id: funding only ever accrues while a position is open, so the
+ * window is exact in every case except closing and reopening the same symbol
+ * inside one funding period. position_id is carried on the transaction for the
+ * day that stops being good enough.
+ */
+export function fundingEventsFrom(transactions: CoindcxTransaction[]): FundingEvent[] {
+  return transactions
+    .filter((transaction) => transaction.kind === "FUNDING")
+    .map((transaction) => ({
+      id: transaction.id,
+      instrument: transaction.instrument,
+      currency: transaction.currency,
+      amount: transaction.amount,
+      timestamp: transaction.timestamp,
+    }));
+}
 
 /** Every usable fill in a trades response, plus how many rows were unusable. */
 export function parseFills(body: unknown): ParsedFills {
