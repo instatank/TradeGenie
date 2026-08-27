@@ -112,7 +112,14 @@ async function fetchPage(
     const body = typeof outcome.body === "string" ? outcome.body : JSON.stringify(outcome.body);
     return { rows: [], error: `HTTP ${outcome.status}: ${body}` };
   }
-  if (!Array.isArray(outcome.body)) return { rows: [], error: null };
+  // A 200 that is not an array is an error dressed as a success — CoinDCX
+  // answers some failures that way. Treating it as "no more pages" would end
+  // the sync quietly and report a clean run that fetched nothing, which is the
+  // exact failure mode this whole integration is built to avoid.
+  if (!Array.isArray(outcome.body)) {
+    const body = typeof outcome.body === "string" ? outcome.body : JSON.stringify(outcome.body);
+    return { rows: [], error: `${path} page ${page} returned a non-list body: ${body}` };
+  }
   return { rows: outcome.body, error: null };
 }
 
