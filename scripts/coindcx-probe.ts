@@ -16,16 +16,52 @@
 // unambiguous. Example values come from your own trade history — nothing
 // sensitive, but read the output before you paste it, as you would any log.
 //
-//   COINDCX_API_KEY=... COINDCX_API_SECRET=... npx tsx scripts/coindcx-probe.ts
+// Put the credentials in .env.local (gitignored, and the same file the app
+// itself will read later), then:
+//
+//   npx tsx scripts/coindcx-probe.ts
+//
+// Reading them from a file rather than the command line is deliberate: a
+// secret typed into a shell lands in your shell history, and an API secret with
+// a `$` or a `!` in it gets silently mangled by the shell before the script
+// ever sees it. Environment variables still win if they are set.
 //
 // Generate the key with READ-ONLY permission and bind it to your IP. This
 // script does not need, and must not be given, trade or withdrawal permission.
 
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 const BASE_URL = "https://api.coindcx.com";
-const KEY = process.env.COINDCX_API_KEY ?? "";
-const SECRET = process.env.COINDCX_API_SECRET ?? "";
+
+/**
+ * Read one key out of .env.local. Deliberately tiny and dependency-free — this
+ * only has to handle `NAME=value`, optionally quoted, which is the entire
+ * format anyone actually writes by hand.
+ */
+function fromEnvFile(name: string): string {
+  try {
+    const file = readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
+    for (const line of file.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator === -1) continue;
+      if (trimmed.slice(0, separator).trim() !== name) continue;
+      return trimmed
+        .slice(separator + 1)
+        .trim()
+        .replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // No .env.local is a normal state — fall through to the guidance below.
+  }
+  return "";
+}
+
+const KEY = process.env.COINDCX_API_KEY || fromEnvFile("COINDCX_API_KEY");
+const SECRET = process.env.COINDCX_API_SECRET || fromEnvFile("COINDCX_API_SECRET");
 
 /** Space between calls, so a probe of a dozen endpoints can't trip a rate limit. */
 const PAUSE_MS = 400;
@@ -135,8 +171,12 @@ function describeShape(value: unknown, indent = "  "): string {
 
 async function main() {
   if (!KEY || !SECRET) {
-    console.error("Set COINDCX_API_KEY and COINDCX_API_SECRET, e.g.\n");
-    console.error("  COINDCX_API_KEY=xxx COINDCX_API_SECRET=yyy npx tsx scripts/coindcx-probe.ts\n");
+    console.error("No CoinDCX credentials found.\n");
+    console.error("Add these two lines to .env.local in the project root:\n");
+    console.error('  COINDCX_API_KEY="your-key-here"');
+    console.error('  COINDCX_API_SECRET="your-secret-here"\n');
+    console.error("Then run this again:  npx tsx scripts/coindcx-probe.ts\n");
+    console.error(".env.local is gitignored, so it never gets committed.");
     console.error("Use a READ-ONLY key. This script never needs trade permission.");
     process.exit(1);
   }
