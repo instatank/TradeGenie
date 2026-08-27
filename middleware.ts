@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { AUTH_COOKIE, expectedAuthToken, siteAuthConfigured } from "@/lib/site-auth";
+import { AUTH_COOKIE, expectedAuthToken, isCronRequest, siteAuthConfigured } from "@/lib/site-auth";
 
 // Runs on every request except the excluded paths in `config.matcher` below.
 // Guards the whole app with one cookie check — see lib/site-auth.ts for why a
@@ -7,6 +7,12 @@ import { AUTH_COOKIE, expectedAuthToken, siteAuthConfigured } from "@/lib/site-a
 // isn't set, so an unconfigured deploy behaves exactly as before this existed.
 export async function middleware(request: NextRequest) {
   if (!siteAuthConfigured()) return NextResponse.next();
+
+  // The scheduled sync carries a bearer token instead of a cookie. Without this
+  // it is redirected to /login and silently never runs — see lib/site-auth.ts.
+  if (isCronRequest(request.nextUrl.pathname, request.headers.get("authorization"))) {
+    return NextResponse.next();
+  }
 
   const expected = await expectedAuthToken();
   const cookie = request.cookies.get(AUTH_COOKIE)?.value;

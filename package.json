@@ -12,7 +12,8 @@
     "eval:capture": "tsx scripts/eval-capture.ts",
     "check:capture": "tsx scripts/check-capture.ts",
     "test": "tsx --test \"tests/unit/*.test.ts\" \"tests/unit/*.test.mts\"",
-    "smoke": "tsx scripts/smoke.mts"
+    "smoke": "tsx scripts/smoke.mts",
+    "check:cron": "tsx scripts/check-cron-auth.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
