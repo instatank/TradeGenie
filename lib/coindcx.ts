@@ -18,6 +18,7 @@
 // reads .env.local) doesn't need a second copy of the signing logic.
 
 import { createHmac } from "node:crypto";
+import type { Fill } from "@/lib/positions";
 
 const BASE_URL = "https://api.coindcx.com";
 
@@ -35,50 +36,61 @@ export type Probe = {
   path: string;
   /** Payload minus `timestamp`, which is added at call time. */
   payload: Record<string, unknown>;
+  /**
+   * For a call returning many records, a digest beats dumping the shape — the
+   * question is the distribution (how far back, which currencies, is funding
+   * ever populated), not the field names, which we already have.
+   */
+  summary?: (body: unknown) => string;
 };
 
-// The four we need are first; the variants after them cost one 404 each and
-// save a round trip if a name is slightly off.
+// ROUND 2. Round 1 confirmed /trades, /orders and /positions and ruled out
+// three names for the transactions endpoint, so those variants are gone and
+// the remaining unknowns get the space instead:
+//
+//   1. Where does funding live? The Transactions tab exists in the UI, so an
+//      endpoint exists; we have only ruled out three spellings of it.
+//   2. How much history can one call carry, and does paging reach back far
+//      enough to import a whole account?
+//   3. Round 1's SOL fill said margin_currency_short_name "INR" while the
+//      request asked for USDT and the price was plainly in USDT. Either the
+//      filter is ignored or that field means something other than what it
+//      looks like. P&L currency depends on the answer, so it is not cosmetic.
+const FUNDING_CANDIDATES = [
+  "/exchange/v1/derivatives/futures/positions/transactions",
+  "/exchange/v1/derivatives/futures/transactions/list",
+  "/exchange/v1/derivatives/futures/wallet_transactions",
+  "/exchange/v1/derivatives/futures/funding",
+  "/exchange/v1/derivatives/futures/funding_history",
+  "/exchange/v1/derivatives/futures/account/transactions",
+  "/exchange/v1/derivatives/futures/ledger",
+  "/exchange/v1/derivatives/futures/data/transactions",
+  "/exchange/v1/wallets/transactions",
+];
+
 export const FUTURES_PROBES: Probe[] = [
+  ...FUNDING_CANDIDATES.map((path) => ({
+    label: `Funding hunt: ${path.split("/").slice(-2).join("/")}`,
+    path,
+    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
+  })),
   {
-    label: "Get Trades — the Trades tab (fills). THE ONE THAT MATTERS MOST.",
+    label: "Trades, page 1 at size 100 — how much does one call carry?",
     path: "/exchange/v1/derivatives/futures/trades",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
+    payload: { page: "1", size: "100", margin_currency_short_name: ["USDT"] },
+    summary: summarizeTrades,
   },
   {
-    label: "Get Transactions — the Transactions tab (funding, realized P&L)",
-    path: "/exchange/v1/derivatives/futures/transactions",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
+    label: "Trades, page 5 at size 100 — does paging reach back, and how far?",
+    path: "/exchange/v1/derivatives/futures/trades",
+    payload: { page: "5", size: "100", margin_currency_short_name: ["USDT"] },
+    summary: summarizeTrades,
   },
   {
-    label: "List Orders — the Orders tab",
-    path: "/exchange/v1/derivatives/futures/orders",
-    payload: { status: "filled", page: "1", size: "10", margin_currency_short_name: ["USDT"] },
-  },
-  {
-    label: "List Positions",
+    label: "Positions at size 50 — is cumulative_funding_fee ever populated?",
     path: "/exchange/v1/derivatives/futures/positions",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
-  },
-  {
-    label: "Wallet Transactions (variant A)",
-    path: "/exchange/v1/derivatives/futures/wallets/transactions",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
-  },
-  {
-    label: "Wallet Transactions (variant B)",
-    path: "/exchange/v1/derivatives/futures/wallet/transactions",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
-  },
-  {
-    label: "Get Trades (variant: /trades/history)",
-    path: "/exchange/v1/derivatives/futures/trades/history",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
-  },
-  {
-    label: "List Orders without a status filter (is status required?)",
-    path: "/exchange/v1/derivatives/futures/orders",
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
+    payload: { page: "1", size: "50", margin_currency_short_name: ["USDT"] },
+    summary: summarizePositions,
   },
 ];
 
@@ -176,6 +188,146 @@ export function describeShape(value: unknown, indent = "  "): string {
   return `${indent}${JSON.stringify(value)}`;
 }
 
+// ── Turning CoinDCX's records into ours ─────────────────────────────────────
+//
+// Shapes below are what the live API actually returned, not what any doc says.
+// A record from /derivatives/futures/trades:
+//
+//   { price: 107.54, quantity: 4.67, is_maker: false,
+//     fee_amount: 0.296304962, pair: "B-SOL_USDT", side: "buy",
+//     timestamp: 1787841686516, fill_id: "60c17b8d-…", order_id: "27394361-…",
+//     settlement_currency_conversion_price: 1, margin_currency_short_name: "INR" }
+//
+// Note `fee_amount` arrives unrounded. The exchange's own UI shows that as
+// "0.30"; keeping the real figure is the entire reason for importing rather
+// than reading the screen.
+
+/**
+ * `B-SOL_USDT` → `SOL`. The journal stores the bare base symbol, which is what
+ * the trader types in the quick log and what every tag and filter keys off.
+ * Anything that doesn't match the exchange's pattern is passed through
+ * unchanged rather than mangled — a wrong symbol is worse than an ugly one.
+ */
+export function normalizePair(pair: string): string {
+  const match = /^B-(.+)_[A-Z]+$/.exec(pair.trim());
+  return match ? match[1] : pair.trim();
+}
+
+type RawTrade = {
+  fill_id?: unknown;
+  pair?: unknown;
+  side?: unknown;
+  quantity?: unknown;
+  price?: unknown;
+  fee_amount?: unknown;
+  timestamp?: unknown;
+  order_id?: unknown;
+};
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * One API trade → one `Fill`, or null if the record can't be trusted.
+ *
+ * Returning null rather than throwing is deliberate: one malformed row must not
+ * cost the import of a whole day. Callers count what was skipped and say so —
+ * a silent drop in a journal is worse than a loud one.
+ */
+export function parseFill(record: unknown): Fill | null {
+  if (!record || typeof record !== "object") return null;
+  const raw = record as RawTrade;
+
+  const id = typeof raw.fill_id === "string" ? raw.fill_id : null;
+  const pair = typeof raw.pair === "string" ? raw.pair : null;
+  const side = typeof raw.side === "string" ? raw.side.trim().toUpperCase() : null;
+  const quantity = finiteNumber(raw.quantity);
+  const price = finiteNumber(raw.price);
+  const timestamp = finiteNumber(raw.timestamp);
+
+  if (!id || !pair || (side !== "BUY" && side !== "SELL")) return null;
+  if (quantity === null || quantity <= 0 || price === null || timestamp === null) return null;
+
+  return {
+    id,
+    instrument: normalizePair(pair),
+    side,
+    quantity,
+    price,
+    // A missing fee is 0, not a reason to drop the fill: the fill is the fact,
+    // the fee is a cost on it.
+    fee: finiteNumber(raw.fee_amount) ?? 0,
+    timestamp: new Date(timestamp),
+    orderId: typeof raw.order_id === "string" ? raw.order_id : null,
+  };
+}
+
+export type ParsedFills = { fills: Fill[]; skipped: number };
+
+/** Every usable fill in a trades response, plus how many rows were unusable. */
+export function parseFills(body: unknown): ParsedFills {
+  const records = Array.isArray(body) ? body : [];
+  const fills: Fill[] = [];
+  let skipped = 0;
+  for (const record of records) {
+    const fill = parseFill(record);
+    if (fill) fills.push(fill);
+    else skipped += 1;
+  }
+  return { fills, skipped };
+}
+
+// ── Digests for the high-volume diagnostic calls ────────────────────────────
+
+function distinct(values: string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+/** How many, how far back, in what, and does anything fail to parse. */
+function summarizeTrades(body: unknown): string {
+  const records = Array.isArray(body) ? body : [];
+  if (!records.length) return "  (empty — no trades on this page, so paging stops before here)";
+
+  const { fills, skipped } = parseFills(body);
+  const times = fills.map((fill) => fill.timestamp.getTime());
+  const currencies = distinct(
+    records.map((record) => String((record as { margin_currency_short_name?: unknown }).margin_currency_short_name ?? "—")),
+  );
+
+  return [
+    `  records: ${records.length} (parsed ${fills.length}, unusable ${skipped})`,
+    `  oldest:  ${new Date(Math.min(...times)).toISOString()}`,
+    `  newest:  ${new Date(Math.max(...times)).toISOString()}`,
+    `  symbols: ${distinct(fills.map((fill) => fill.instrument)).join(", ")}`,
+    `  margin_currency_short_name values: ${currencies.join(", ")}`,
+  ].join("\n");
+}
+
+/** Whether positions carry usable funding, and whether closed ones show up. */
+function summarizePositions(body: unknown): string {
+  const records = Array.isArray(body) ? body : [];
+  if (!records.length) return "  (empty)";
+
+  const rows = records as Array<Record<string, unknown>>;
+  const withFunding = rows.filter((row) => typeof row.cumulative_funding_fee === "number");
+  const active = rows.filter((row) => Number(row.active_pos ?? 0) !== 0);
+
+  const lines = [
+    `  positions: ${rows.length} (${active.length} with a live size, ${rows.length - active.length} flat)`,
+    `  cumulative_funding_fee populated on: ${withFunding.length} of ${rows.length}`,
+  ];
+  for (const row of withFunding.slice(0, 5)) {
+    lines.push(
+      `    ${String(row.pair)} funding=${String(row.cumulative_funding_fee)} avg_price=${String(row.avg_price)} active_pos=${String(row.active_pos)}`,
+    );
+  }
+  if (!withFunding.length) {
+    lines.push("    → funding is not available here; it has to come from the transactions endpoint");
+  }
+  return lines.join("\n");
+}
+
 /** The whole probe run as plain text, ready to copy. */
 export function formatProbeReport(outcomes: ProbeOutcome[]): string {
   const lines: string[] = [
@@ -191,7 +343,7 @@ export function formatProbeReport(outcomes: ProbeOutcome[]): string {
       lines.push(`→ request failed: ${outcome.error}`);
     } else if (outcome.ok) {
       lines.push(`→ HTTP ${outcome.status}`);
-      lines.push(describeShape(outcome.body));
+      lines.push(outcome.probe.summary ? outcome.probe.summary(outcome.body) : describeShape(outcome.body));
     } else {
       // A 4xx body usually names the missing or wrong parameter, which is every
       // bit as useful as a success — so it prints in full.
