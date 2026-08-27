@@ -32,6 +32,12 @@ export type Fill = {
   /** Whatever symbol the caller groups by. Normalizing the exchange's
    *  `B-ETH_USDT` to the journal's `ETH` is the adapter's job, not this file's. */
   instrument: string;
+  /** The margin currency this fill settled in ("USDT", "INR", …).
+   *  Positions are grouped by instrument AND currency: the same symbol traded
+   *  in two margin accounts is two positions, and folding them together would
+   *  net one against the other and corrupt both. Defaults to "" for callers
+   *  with a single account, which groups exactly as before. */
+  currency?: string;
   side: "BUY" | "SELL";
   quantity: number;
   price: number;
@@ -45,12 +51,17 @@ export type Fill = {
 export type FundingEvent = {
   id: string;
   instrument: string;
+  /** Must match the position's currency, for the same reason as Fill.currency. */
+  currency?: string;
   amount: number;
   timestamp: Date;
 };
 
 export type ReconstructedPosition = {
   instrument: string;
+  /** The margin currency every number on this position is denominated in.
+   *  Never convert it here — see the note at the top of the file. */
+  currency: string;
   direction: "LONG" | "SHORT";
   openedAt: Date;
   /** null while the position is still open. */
@@ -90,6 +101,7 @@ const SIZE_EPSILON = 1e-9;
 
 type OpenPosition = {
   instrument: string;
+  currency: string;
   sign: 1 | -1;
   openedAt: Date;
   size: number;
@@ -124,12 +136,15 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
     const feePerUnit = fill.fee / fill.quantity;
     let remaining = fill.quantity;
 
+    const bookKey = positionKey(fill.instrument, fill.currency);
+
     while (remaining > SIZE_EPSILON) {
-      let current = open.get(fill.instrument);
+      let current = open.get(bookKey);
 
       if (!current) {
         current = {
           instrument: fill.instrument,
+          currency: fill.currency ?? "",
           sign,
           openedAt: fill.timestamp,
           size: 0,
@@ -142,7 +157,7 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
           fees: 0,
           fillIds: [],
         };
-        open.set(fill.instrument, current);
+        open.set(bookKey, current);
       }
 
       if (current.sign === sign) {
@@ -169,7 +184,7 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
 
       if (current.size <= SIZE_EPSILON) {
         positions.push(finalize(current, fill.timestamp));
-        open.delete(fill.instrument);
+        open.delete(bookKey);
       }
     }
   }
@@ -196,6 +211,7 @@ function finalize(current: OpenPosition, closedAt: Date | null): ReconstructedPo
   const closed = closedAt !== null;
   return {
     instrument: current.instrument,
+    currency: current.currency,
     direction: current.sign === 1 ? "LONG" : "SHORT",
     openedAt: current.openedAt,
     closedAt,
@@ -225,6 +241,7 @@ function attributeFunding(positions: ReconstructedPosition[], funding: FundingEv
     const host = positions.find(
       (position) =>
         position.instrument === event.instrument &&
+        position.currency === (event.currency ?? "") &&
         at >= position.openedAt.getTime() &&
         (position.closedAt === null || at <= position.closedAt.getTime()),
     );
@@ -236,6 +253,11 @@ function attributeFunding(positions: ReconstructedPosition[], funding: FundingEv
     host.fundingIds.push(event.id);
   }
   return unattributed;
+}
+
+/** One book per instrument per margin currency. */
+function positionKey(instrument: string, currency: string | undefined): string {
+  return `${instrument}\u0000${currency ?? ""}`;
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {

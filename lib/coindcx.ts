@@ -59,7 +59,9 @@ export type Probe = {
 const FUNDING_CANDIDATES = [
   "/exchange/v1/derivatives/futures/positions/transactions",
   "/exchange/v1/derivatives/futures/transactions/list",
+  "/exchange/v1/derivatives/futures/transactions/history",
   "/exchange/v1/derivatives/futures/wallet_transactions",
+  "/exchange/v1/derivatives/futures/wallets",
   "/exchange/v1/derivatives/futures/funding",
   "/exchange/v1/derivatives/futures/funding_history",
   "/exchange/v1/derivatives/futures/account/transactions",
@@ -68,29 +70,42 @@ const FUNDING_CANDIDATES = [
   "/exchange/v1/wallets/transactions",
 ];
 
+// Both margin accounts, always. 80%+ of the trading is USDT, but an INR trade
+// that silently never imports is worse than one that imports slowly.
+const BOTH_ACCOUNTS = ["USDT", "INR"];
+
 export const FUTURES_PROBES: Probe[] = [
   ...FUNDING_CANDIDATES.map((path) => ({
     label: `Funding hunt: ${path.split("/").slice(-2).join("/")}`,
     path,
-    payload: { page: "1", size: "10", margin_currency_short_name: ["USDT"] },
+    payload: { page: "1", size: "10", margin_currency_short_name: BOTH_ACCOUNTS },
   })),
   {
     label: "Trades, page 1 at size 100 — how much does one call carry?",
     path: "/exchange/v1/derivatives/futures/trades",
-    payload: { page: "1", size: "100", margin_currency_short_name: ["USDT"] },
+    payload: { page: "1", size: "100", margin_currency_short_name: BOTH_ACCOUNTS },
     summary: summarizeTrades,
   },
   {
     label: "Trades, page 5 at size 100 — does paging reach back, and how far?",
     path: "/exchange/v1/derivatives/futures/trades",
-    payload: { page: "5", size: "100", margin_currency_short_name: ["USDT"] },
+    payload: { page: "5", size: "100", margin_currency_short_name: BOTH_ACCOUNTS },
     summary: summarizeTrades,
   },
   {
     label: "Positions at size 50 — is cumulative_funding_fee ever populated?",
     path: "/exchange/v1/derivatives/futures/positions",
-    payload: { page: "1", size: "50", margin_currency_short_name: ["USDT"] },
+    payload: { page: "1", size: "50", margin_currency_short_name: BOTH_ACCOUNTS },
     summary: summarizePositions,
+  },
+  {
+    // If the filter is honoured, this returns only INR fills and settles what
+    // margin_currency_short_name actually means. If it comes back with USDT
+    // rows in it, the filter is being ignored and we must split client-side.
+    label: "Trades, INR account only — is the currency filter honoured?",
+    path: "/exchange/v1/derivatives/futures/trades",
+    payload: { page: "1", size: "50", margin_currency_short_name: ["INR"] },
+    summary: summarizeTrades,
   },
 ];
 
@@ -222,6 +237,7 @@ type RawTrade = {
   fee_amount?: unknown;
   timestamp?: unknown;
   order_id?: unknown;
+  margin_currency_short_name?: unknown;
 };
 
 function finiteNumber(value: unknown): number | null {
@@ -252,6 +268,10 @@ export function parseFill(record: unknown): Fill | null {
   return {
     id,
     instrument: normalizePair(pair),
+    // The trader runs separate INR and USDT margin accounts, so this is not
+    // decoration: positions are grouped by instrument AND currency, and the
+    // same symbol in both accounts must never fold into one position.
+    currency: typeof raw.margin_currency_short_name === "string" ? raw.margin_currency_short_name : "",
     side,
     quantity,
     price,

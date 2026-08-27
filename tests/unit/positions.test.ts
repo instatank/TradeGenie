@@ -156,6 +156,30 @@ describe("reconstructPositions", () => {
     assert.deepEqual(reconstructPositions(shuffled).positions, reconstructPositions(ETH_SCALE_IN).positions);
   });
 
+  it("keeps the same symbol in two margin accounts apart", () => {
+    // The trader has separate INR and USDT margin accounts. A SOL long in one
+    // and a SOL short in the other are two positions; folding them together
+    // would net one against the other and corrupt both.
+    const { positions } = reconstructPositions([
+      { ...fill("m1", "SOL", "BUY", 10, 100, 0, "2026-08-27T01:00:00Z"), currency: "USDT" },
+      { ...fill("m2", "SOL", "SELL", 10, 100, 0, "2026-08-27T02:00:00Z"), currency: "INR" },
+    ]);
+    assert.equal(positions.length, 2);
+    assert.deepEqual(positions.map((position) => position.currency).sort(), ["INR", "USDT"]);
+    assert.deepEqual(positions.map((position) => position.direction), ["LONG", "SHORT"]);
+    // Both still open — neither closed the other.
+    assert.deepEqual(positions.map((position) => position.status), ["OPEN", "OPEN"]);
+  });
+
+  it("will not pay one account's funding into the other's position", () => {
+    const { positions, unattributedFunding } = reconstructPositions(
+      [{ ...fill("m1", "SOL", "BUY", 10, 100, 0, "2026-08-27T01:00:00Z"), currency: "USDT" }],
+      [{ id: "f-inr", instrument: "SOL", currency: "INR", amount: -5, timestamp: new Date("2026-08-27T02:00:00Z") }],
+    );
+    assert.equal(positions[0].funding, 0);
+    assert.deepEqual(unattributedFunding.map((event) => event.id), ["f-inr"]);
+  });
+
   it("keeps instruments apart", () => {
     const { positions } = reconstructPositions([...ZEC_ROUND_TRIP, ...ETH_SCALE_IN]);
     assert.deepEqual(positions.map((position) => position.instrument).sort(), ["ETH", "ZEC"]);
