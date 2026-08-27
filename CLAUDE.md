@@ -36,6 +36,16 @@ product. No multi-user, auth, payments, broker sync, signals, or financial advic
 - When something is a real tradeoff or changes the daily workflow, **stop and ask in plain
   English** — don't quietly decide. Default bias: if a thing doesn't earn its place for a
   solo beginner, leave it out and flag it.
+- **This is built entirely in Claude Code cloud sessions** — no local checkout, no local
+  terminal for the owner. Never hand him `cd` / `git clone` / `npm install` / `./script.sh`
+  steps; whatever must execute runs in the agent's own container, or in the deployed app.
+- **Container egress is allowlisted.** "Host not in allowlist" means blocked, not down —
+  say so and propose another route, don't conclude the service is broken.
+- **No secrets store here** (Anthropic's own docs say don't put API keys in Claude Code
+  cloud env vars) — secrets belong in Vercel's env vars, never pasted into chat or a local file.
+- **Can't verify against a blocked host or real credentials?** Ship it as a route in the
+  deployed app and hand the owner a URL to open, not a script. Anything he does himself is
+  a browser/dashboard step — name the site, the menu, the button.
 
 ## Friction budgets (hard requirements)
 Daily check-in < 60s · quick trade note < 30s · transcript paste/save < 20s · EOD review 2–4 min.
