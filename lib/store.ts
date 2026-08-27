@@ -6,6 +6,8 @@ import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin
 import { getFirestore, Timestamp, type Firestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import type {
+  ExchangeFill,
+  ExchangeLedgerEntry,
   Asset,
   AssetNote,
   CustomOption,
@@ -43,6 +45,8 @@ export type StoreShape = {
   customOptions: CustomOption[];
   freeNotes: FreeNote[];
   savedViews: SavedView[];
+  exchangeFills: ExchangeFill[];
+  exchangeLedger: ExchangeLedgerEntry[];
 };
 
 const emptyStore: StoreShape = {
@@ -62,6 +66,8 @@ const emptyStore: StoreShape = {
   customOptions: [],
   freeNotes: [],
   savedViews: [],
+  exchangeFills: [],
+  exchangeLedger: [],
 };
 
 // Derived from the store shape itself so a new collection can never be left out

@@ -1,17 +1,17 @@
-// Talking to CoinDCX's futures API.
+// Talking to CoinDCX's futures API: signing, the endpoint allowlist, and
+// turning its records into ours. The paging and storage live in
+// lib/coindcx-sync.ts; this file knows the wire format and nothing else.
 //
-// Right now this is only the signing core plus a discovery probe. The futures
-// API is documented on docs.coindcx.com, which is JS-rendered and unreadable by
-// any fetch tooling we have — two independent attempts got the endpoint names
-// ("Get Trades", "Get Transactions", "List Orders") and no parameters or
-// response fields. So rather than guess paths and build on the guess, we ask
-// the exchange and write the adapter against what it actually returns. The API
-// is the ground truth anyway; docs drift, responses don't.
+// The futures API is documented only on docs.coindcx.com, which is JS-rendered
+// and unreadable by any fetch tooling available here — two independent attempts
+// got endpoint names and no fields. So every shape below was learned by asking
+// the live API and is pinned by fixtures in tests/unit/coindcx.test.ts. Those
+// fixtures ARE the schema; there is no published one to check them against.
 //
-// READ-ONLY BY CONSTRUCTION. Every callable path is in FUTURES_PROBES, all of
-// them list/history endpoints, and `callFutures` refuses anything outside that
-// list. Nothing here can place, edit, cancel or exit an order — and per the
-// project brief, nothing here ever should.
+// READ-ONLY BY CONSTRUCTION. `callFutures` refuses any path outside
+// ALLOWED_PATHS, all of which are list/history endpoints. Nothing here can
+// place, edit, cancel or exit an order — and per the project brief, nothing
+// here ever should.
 //
 // Credentials are passed in rather than read from the environment inside the
 // call, so the one caller that needs a different source (the local script, which
@@ -67,7 +67,17 @@ export type Probe = {
 //
 // The probes below stay as the connection test — they are how a future change
 // checks the shapes still hold rather than trusting this comment.
-const TRANSACTIONS_PATH = "/exchange/v1/derivatives/futures/positions/transactions";
+
+// THE allowlist. Every path this module may ever call, all of them read-only
+// list/history endpoints. Both the probe and the sync validate against it, so
+// there is exactly one place that decides what this app can ask the exchange —
+// and nothing in it can place, edit, cancel or exit an order.
+export const TRADES_PATH = "/exchange/v1/derivatives/futures/trades";
+export const TRANSACTIONS_PATH = "/exchange/v1/derivatives/futures/positions/transactions";
+const ORDERS_PATH = "/exchange/v1/derivatives/futures/orders";
+const POSITIONS_PATH = "/exchange/v1/derivatives/futures/positions";
+
+const ALLOWED_PATHS = new Set([TRADES_PATH, TRANSACTIONS_PATH, ORDERS_PATH, POSITIONS_PATH]);
 
 export const FUTURES_PROBES: Probe[] = [
   {
@@ -89,8 +99,6 @@ export const FUTURES_PROBES: Probe[] = [
     summary: summarizeTransactions,
   },
 ];
-
-const ALLOWED_PATHS = new Set(FUTURES_PROBES.map((probe) => probe.path));
 
 export type ProbeOutcome = {
   probe: Probe;

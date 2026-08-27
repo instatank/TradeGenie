@@ -177,6 +177,11 @@ export type Trade = {
   netPnl: number | null;
   rMultiple: number | null;
   tags?: string[];
+  /** The exchange position this trade has been reconciled against. Set once a
+   *  match is accepted, and thereafter authoritative: an established link is
+   *  never re-guessed by the proximity matcher. Absent on every hand-logged
+   *  trade that has not been reconciled, which is the normal state. */
+  exchangeKey?: string | null;
   // What the market looked like when this trade was entered, copied once from
   // SignalDesk and frozen. Never recomputed — the point is what it looked like
   // THEN. Absent on every trade logged before the bridge existed, and null
@@ -338,4 +343,53 @@ export type WeeklyReview = {
   mostCommonMistake: string | null;
   bestLesson: string | null;
   actionItem: string | null;
+};
+
+// ── Exchange import ─────────────────────────────────────────────────────────
+//
+// Two raw collections, and NO stored positions. Positions are derived at read
+// time by reconstructPositions(), which is a pure tested function — so there is
+// one source of truth, the fold can be improved without a migration, and no
+// sync state can drift out of agreement with the records it came from.
+//
+// Capturing the raw rows is also what defeats the exchange's own limits: the
+// CoinDCX ledger only reaches back ~3 weeks, so a funding charge we do not
+// store now is gone for good. Once it is here it is ours.
+
+/** One execution, exactly as the exchange reported it. `id` is the exchange's
+ *  own fill id, which makes re-importing a day idempotent by construction. */
+export type ExchangeFill = {
+  id: string;
+  createdAt: Date;
+  source: string;
+  instrument: string;
+  /** Margin account this settled in — "USDT" or "INR". */
+  currency: string;
+  side: "BUY" | "SELL";
+  quantity: number;
+  price: number;
+  fee: number;
+  executedAt: Date;
+  orderId: string | null;
+};
+
+/** One row of the exchange's transaction ledger: funding, an exit, or P&L. */
+export type ExchangeLedgerEntry = {
+  id: string;
+  createdAt: Date;
+  source: string;
+  instrument: string;
+  currency: string;
+  /** The exchange's own word for the row type ("funding", "tpsl_exit", …). */
+  stage: string;
+  kind: "FUNDING" | "EXIT" | "OTHER";
+  amount: number;
+  fee: number;
+  positionId: string | null;
+  orderId: string | null;
+  /** What one unit of `currency` was worth at the time, as the exchange
+   *  recorded it. This is why no FX feed is needed to combine accounts. */
+  rateInr: number | null;
+  rateUsdt: number | null;
+  occurredAt: Date;
 };
