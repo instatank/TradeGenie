@@ -9,6 +9,10 @@ This is the source-of-truth operating guide for Codex and other coding agents wo
 - Core value: help build a daily journaling habit, capture subjective reasoning, review mistakes, and turn trades/voice notes into reusable lessons.
 - This app must not provide financial advice, trade recommendations, signals, broker sync, automated execution, or social/team features.
 
+## Where This Runs
+
+Development happens entirely in Claude Code cloud containers. There is no local checkout and no local terminal on the owner's machine — never give them commands to run locally. Container egress is allowlisted, and secrets live in Vercel's environment variables, not in cloud-session env vars or a local file. See "Where this runs" in `CLAUDE.md` for the full rules before proposing any step the owner has to perform.
+
 ## Current Stack
 
 - Next.js App Router, TypeScript, React 19

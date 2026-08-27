@@ -37,6 +37,25 @@ product. No multi-user, auth, payments, broker sync, signals, or financial advic
   English** — don't quietly decide. Default bias: if a thing doesn't earn its place for a
   solo beginner, leave it out and flag it.
 
+## Where this runs (read before giving the owner steps)
+This project is developed **entirely in Claude Code cloud sessions** — ephemeral containers.
+There is **no local checkout, no local terminal, no local dev environment** on the owner's
+machine, and never has been.
+- **Never hand the owner `cd` / `git clone` / `npm install` / `npx …` steps to run locally.**
+  They cannot run them. Anything that must execute is run by the agent in its own container,
+  or by the deployed app on Vercel.
+- **Container egress is allowlisted.** An external host can fail with *"Host not in
+  allowlist"* — that means blocked from here, not down. Say so and propose another route
+  (`api.coindcx.com` is one such host).
+- **Cloud environments have no secrets store** — Anthropic's own docs say not to put API keys
+  in their environment variables. Secrets live in **Vercel → Settings → Environment
+  Variables**, same as the Firebase credentials. Never ask the owner to paste a secret into
+  chat or into a local file.
+- **When something can only be verified with real credentials or against a blocked host,
+  build it as a route in the deployed app and give the owner a URL to open** — not a script.
+  `app/api/coindcx-probe/route.ts` is the worked example.
+- Steps the owner performs are **browser steps**. Name the site, the menu, the button.
+
 ## Friction budgets (hard requirements)
 Daily check-in < 60s · quick trade note < 30s · transcript paste/save < 20s · EOD review 2–4 min.
 Anything that doesn't fit gets cut, deferred, or hidden behind an advanced/optional toggle.
