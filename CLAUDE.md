@@ -928,6 +928,21 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - **`/import` is the exchange page** and is `force-dynamic` — it reports live sync state, and
     a build-time snapshot of that is worse than useless. CSV import moved under a fold (with its
     row list, since it still writes them) rather than being deleted.
+  - **Per-entry select/deselect, on both lists.** "Accept selected" on Needs review is the exact
+    same skip rule as "Accept all", narrowed to the checked trade ids — same button, minus a
+    deselect, so there is nothing new to learn. Checkboxes are `defaultChecked` there (the common
+    case is accepting most of a sync and excluding the odd one), unchecked on Not journaled (a
+    deliberate action, not the default). Both use the `form=` attribute trick already established
+    for the inbox's remove buttons, since a checkbox's bulk form cannot nest inside a card's own
+    per-item form. **"Accept selected" on Not journaled is dismiss, not bulk-log** — nothing here
+    ever auto-creates a trade, and a logged trade still needs its own thesis, so the only bulk
+    action available for a batch of unjournaled positions is hiding the ones not being written up;
+    the page says so rather than silently reinterpreting the ask.
+  - **Found while verifying it: `lib/settings-store.ts` ignored `TRADEGENIE_LOCAL_STORE`.** Every
+    test server this whole engagement started with that override to isolate the trades store was
+    still silently reading and writing the real project's `data/settings.json` for settings —
+    proven when a scratch dismiss test landed its key in the real file. Fixed to resolve beside the
+    same override, covered by `tests/unit/settings-store.test.mts`.
   - **The scheduled sync would have silently never run.** `middleware.ts` bounced the cron call
     to `/login` (307), which a runner counts as success. `CRON_SECRET` + an `/api/cron/*`
     exemption fixes it and `npm run check:cron` asserts all three cases — this is a gate hole

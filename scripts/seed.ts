@@ -370,7 +370,12 @@ async function main() {
   //   - one still open, and one in the INR margin account,
   //   - funding inside a position's window, so attribution runs.
   const seededTrades = await db.list("trades");
-  const matchable = seededTrades.find((trade) => trade.status === "CLOSED") ?? seededTrades[0];
+  // Two matchable CLOSED trades, so `npm run smoke` exercises the bulk
+  // select/deselect controls (they only render past one item) and so the
+  // selective-accept action has something real to discriminate between.
+  const closedTrades = seededTrades.filter((trade) => trade.status === "CLOSED");
+  const matchable = closedTrades[0] ?? seededTrades[0];
+  const secondMatchable = closedTrades[1];
   const exchangeNow = new Date();
 
   async function seedFill(
@@ -406,6 +411,14 @@ async function main() {
       rateInr: 99.88, rateUsdt: 1,
       occurredAt: new Date(opened.getTime() + 60 * 60_000),
     });
+  }
+
+  if (secondMatchable) {
+    const opened = new Date(secondMatchable.tradeDateTime.getTime() + 6 * 60_000);
+    const closed = new Date(opened.getTime() + 2 * 60 * 60_000);
+    const isLong = secondMatchable.direction === "LONG";
+    await seedFill("seed-fill-6", secondMatchable.instrument, "USDT", isLong ? "BUY" : "SELL", 0.3, 71.2, 0.05, opened);
+    await seedFill("seed-fill-7", secondMatchable.instrument, "USDT", isLong ? "SELL" : "BUY", 0.3, 74.9, 0.05, closed);
   }
 
   // Never journaled — becomes the Today nudge and the "Not journaled" list.

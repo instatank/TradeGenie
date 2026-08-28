@@ -34,7 +34,22 @@ function money(value: number | null, unit: string): string {
   return `${value.toFixed(decimals)} ${unit}`;
 }
 
-export function MatchCard({ match, positionKey }: { match: Match; positionKey: string }) {
+export function MatchCard({
+  match,
+  positionKey,
+  bulkFormId,
+}: {
+  match: Match;
+  positionKey: string;
+  /** The id of the "Accept selected" form elsewhere on the page. The checkbox
+   *  uses the HTML `form` attribute to submit there regardless of where it sits
+   *  in the DOM — same trick the inbox's remove buttons use, since a form
+   *  cannot nest inside this card's own per-item accept form. Omitted when
+   *  there is nothing to bulk-act on (one match, same as "Accept all" being
+   *  hidden then) — a checkbox with no form to reach would tick without doing
+   *  anything, which is worse than not offering it. */
+  bulkFormId?: string;
+}) {
   const changes = changedFields(diffTrade(match.trade, match.position));
   const closes = willCloseTrade(match);
   const { position, trade } = match;
@@ -44,6 +59,19 @@ export function MatchCard({ match, positionKey }: { match: Match; positionKey: s
       <header className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
+            {bulkFormId ? (
+              <label className="inline-flex cursor-pointer items-center">
+                <input
+                  type="checkbox"
+                  name="selected"
+                  value={`${trade.id}::${positionKey}`}
+                  form={bulkFormId}
+                  defaultChecked
+                  className="h-4 w-4 rounded border-forge-line"
+                  aria-label={`Include ${position.instrument} in the bulk accept`}
+                />
+              </label>
+            ) : null}
             <span className="font-semibold">{position.instrument}</span>
             <DirectionBadge direction={position.direction} />
             <InfoChip label={`${position.currency} wallet`} />
@@ -121,13 +149,37 @@ export function MatchCard({ match, positionKey }: { match: Match; positionKey: s
  * an app that silently filled these in would leave you with a P&L spreadsheet
  * instead of a journal, and the writing-down is the habit worth protecting.
  */
-export function UnmatchedCard({ position, positionKey }: { position: ReconstructedPosition; positionKey: string }) {
+export function UnmatchedCard({
+  position,
+  positionKey,
+  bulkFormId,
+}: {
+  position: ReconstructedPosition;
+  positionKey: string;
+  /** The id of the "Dismiss selected" form elsewhere on the page. Same `form`
+   *  attribute trick as MatchCard — nothing here ever bulk-logs a trade, since
+   *  each one still needs its own thesis, so the only bulk action is hiding.
+   *  Omitted when there is nothing to bulk-act on. */
+  bulkFormId?: string;
+}) {
   const logHref = `/trades/new?instrument=${encodeURIComponent(position.instrument)}&direction=${position.direction}`;
 
   return (
     <article className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-forge-line p-4">
       <div>
         <div className="flex flex-wrap items-center gap-2">
+          {bulkFormId ? (
+            <label className="inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                name="selected"
+                value={positionKey}
+                form={bulkFormId}
+                className="h-4 w-4 rounded border-forge-line"
+                aria-label={`Select ${position.instrument} to dismiss`}
+              />
+            </label>
+          ) : null}
           <span className="font-semibold">{position.instrument}</span>
           <DirectionBadge direction={position.direction} />
           <InfoChip label={`${position.currency} wallet`} />

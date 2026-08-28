@@ -1968,6 +1968,46 @@ export async function acceptAllExchangeMatchesAction() {
   await redirectBackWithFeedback(applied ? `Reconciled ${applied} trade${applied === 1 ? "" : "s"}.` : "Everything already matches.", "/import");
 }
 
+/**
+ * The selective version of "Accept all": same skip rule (don't bump an
+ * already-linked trade that would change nothing), narrowed to the trade ids
+ * the form actually checked. Lets the trader accept most of a sync in one go
+ * while excluding the odd one that looks wrong — exactly "Accept all" minus a
+ * deselect, rather than a second thing to learn.
+ */
+export async function acceptSelectedExchangeMatchesAction(formData: FormData) {
+  // Each checkbox value is "tradeId::positionKey" — see the note on the input
+  // in components/ExchangeReconcile.tsx for why both travel together.
+  const selected = new Map(
+    formData.getAll("selected").map((value) => {
+      const [tradeId, key] = String(value).split("::");
+      return [tradeId, key] as const;
+    }),
+  );
+  if (!selected.size) {
+    await redirectBackWithFeedback("Nothing selected.", "/import");
+    return;
+  }
+
+  const [view, trades] = await Promise.all([exchangeView(), db.list("trades")]);
+  const { matches } = matchPositions(view.positions, trades, positionKey);
+
+  let applied = 0;
+  for (const match of matches) {
+    const key = positionKey(match.position);
+    if (selected.get(match.trade.id) !== key) continue;
+    if (!changedFields(diffTrade(match.trade, match.position)).length && match.trade.exchangeKey) continue;
+    await db.update("trades", match.trade.id, { ...acceptPatch(match, key), updatedAt: new Date() });
+    applied += 1;
+  }
+
+  revalidateEverything();
+  await redirectBackWithFeedback(
+    applied ? `Reconciled ${applied} selected trade${applied === 1 ? "" : "s"}.` : "Nothing in the selection needed a change.",
+    "/import",
+  );
+}
+
 export async function dismissExchangePositionAction(formData: FormData) {
   const key = toText(formData.get("exchangeKey"));
   if (!key) return;
@@ -1978,6 +2018,27 @@ export async function dismissExchangePositionAction(formData: FormData) {
   }
   revalidateEverything();
   await redirectBackWithFeedback("Hidden. It stays in the exchange data, just not in the nudge.", "/import");
+}
+
+/**
+ * The bulk form of dismiss, not of logging. Nothing here ever auto-creates a
+ * trade — a logged trade still needs its own thesis, mood, setup — so the only
+ * bulk action that makes sense for a batch of unjournaled positions is hiding
+ * the ones you've decided not to write up, the same as the single dismiss
+ * button, just for several at once.
+ */
+export async function dismissSelectedExchangePositionsAction(formData: FormData) {
+  const selected = formData.getAll("selected").map(String).filter(Boolean);
+  if (!selected.length) {
+    await redirectBackWithFeedback("Nothing selected.", "/import");
+    return;
+  }
+  const settings = await getSettings();
+  const dismissed = new Set(settings.dismissedExchangeKeys ?? []);
+  for (const key of selected) dismissed.add(key);
+  await saveSettings({ ...settings, dismissedExchangeKeys: [...dismissed] });
+  revalidateEverything();
+  await redirectBackWithFeedback(`Hidden ${selected.length} position${selected.length === 1 ? "" : "s"} from the nudge.`, "/import");
 }
 
 export async function restoreExchangePositionsAction() {

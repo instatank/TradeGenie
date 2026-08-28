@@ -97,6 +97,8 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/import", "Use the exchange", "the reconcile diff + accept button"],
   ["/import", "Log this trade", "an unjournaled position card"],
   ["/import", "older position", "the missing-funding warning"],
+  ["/import", "Accept selected", "the bulk-select accept control (seed keeps 2+ review items for this)"],
+  ["/import", "Dismiss selected", "the bulk-select dismiss control"],
 ];
 
 async function fetchBody(route: string): Promise<string> {

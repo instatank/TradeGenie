@@ -3,8 +3,10 @@ import { format } from "date-fns";
 import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
 import {
   acceptAllExchangeMatchesAction,
+  acceptSelectedExchangeMatchesAction,
   deleteImportBatchAction,
   deleteRawExecutionAction,
+  dismissSelectedExchangePositionsAction,
   restoreExchangePositionsAction,
   syncExchangeAction,
 } from "@/app/actions";
@@ -35,6 +37,9 @@ import { listRecords } from "@/lib/store";
 // a sync status from whenever the app was last deployed. Every other page here
 // can be cached and revalidated on write; this one genuinely cannot.
 export const dynamic = "force-dynamic";
+
+const REVIEW_BULK_FORM_ID = "exchange-review-select";
+const UNJOURNALED_BULK_FORM_ID = "exchange-unjournaled-select";
 
 export default async function ImportPage() {
   const [view, trades, settings, storedFills, storedLedger, batches] = await Promise.all([
@@ -144,16 +149,26 @@ export default async function ImportPage() {
             </p>
           </div>
           {needsReview.length > 1 ? (
-            <form action={acceptAllExchangeMatchesAction}>
-              <SubmitButton className="button-secondary" pendingLabel="Reconciling…">
-                Accept all {needsReview.length}
-              </SubmitButton>
-            </form>
+            <div className="flex gap-2">
+              <form id={REVIEW_BULK_FORM_ID} action={acceptSelectedExchangeMatchesAction}>
+                <SubmitButton className="button-secondary" pendingLabel="Accepting…">Accept selected</SubmitButton>
+              </form>
+              <form action={acceptAllExchangeMatchesAction}>
+                <SubmitButton className="button-secondary" pendingLabel="Reconciling…">
+                  Accept all {needsReview.length}
+                </SubmitButton>
+              </form>
+            </div>
           ) : null}
         </div>
         <div className="space-y-3">
           {needsReview.map((match) => (
-            <MatchCard key={match.trade.id} match={match} positionKey={positionKey(match.position)} />
+            <MatchCard
+              key={match.trade.id}
+              match={match}
+              positionKey={positionKey(match.position)}
+              bulkFormId={needsReview.length > 1 ? REVIEW_BULK_FORM_ID : undefined}
+            />
           ))}
           {!needsReview.length && storedFills.length ? (
             <p className="text-sm text-forge-muted">Your journal agrees with the exchange on every matched trade.</p>
@@ -162,17 +177,35 @@ export default async function ImportPage() {
       </section>
 
       <section className="panel mb-5">
-        <div className="mb-3">
-          <h2 className="font-semibold">Not journaled</h2>
-          <p className="text-sm text-forge-muted">
-            {toJournal.length
-              ? `${toJournal.length} position${toJournal.length === 1 ? "" : "s"} on the exchange you haven't written up.`
-              : "Every exchange position has a journal entry."}
-          </p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Not journaled</h2>
+            <p className="text-sm text-forge-muted">
+              {toJournal.length
+                ? `${toJournal.length} position${toJournal.length === 1 ? "" : "s"} on the exchange you haven't written up.`
+                : "Every exchange position has a journal entry."}
+            </p>
+          </div>
+          {toJournal.length > 1 ? (
+            <form id={UNJOURNALED_BULK_FORM_ID} action={dismissSelectedExchangePositionsAction}>
+              <SubmitButton className="button-secondary" pendingLabel="Hiding…">Dismiss selected</SubmitButton>
+            </form>
+          ) : null}
         </div>
+        {toJournal.length > 1 ? (
+          <p className="mb-3 text-xs text-forge-muted">
+            Checking a box here only hides it from this list — logging a trade always needs its own thesis, so there is no
+            bulk &quot;log selected&quot;. Use the checkbox to clear out the ones you don&apos;t plan to journal.
+          </p>
+        ) : null}
         <div className="space-y-3">
           {toJournal.map((position) => (
-            <UnmatchedCard key={positionKey(position)} position={position} positionKey={positionKey(position)} />
+            <UnmatchedCard
+              key={positionKey(position)}
+              position={position}
+              positionKey={positionKey(position)}
+              bulkFormId={toJournal.length > 1 ? UNJOURNALED_BULK_FORM_ID : undefined}
+            />
           ))}
         </div>
         {hiddenCount ? (

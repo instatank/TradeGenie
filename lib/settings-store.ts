@@ -26,7 +26,17 @@ export type AppSettings = {
 
 const SETTINGS_COLLECTION = "appSettings";
 const SETTINGS_DOC_ID = "singleton";
-const localSettingsPath = path.join(process.cwd(), "data", "settings.json");
+// Mirrors lib/store.ts's TRADEGENIE_LOCAL_STORE handling — before this, a
+// test server started with that env var (every smoke run, every manual
+// verification against a throwaway store) still silently read AND WROTE the
+// real project's data/settings.json, because this file resolved its path
+// independently and never consulted the same override. Found when verifying
+// the exchange bulk-dismiss action against a scratch store: the dismissed key
+// landed in the real settings file instead. Same directory as the override
+// (not a sibling "-settings" file) so one override still isolates a whole run.
+const localSettingsPath = process.env.TRADEGENIE_LOCAL_STORE
+  ? path.join(path.dirname(path.resolve(process.env.TRADEGENIE_LOCAL_STORE)), "settings.json")
+  : path.join(process.cwd(), "data", "settings.json");
 
 export const defaultSettings: AppSettings = {
   aiEnabled: true,
