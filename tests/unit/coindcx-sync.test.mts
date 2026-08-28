@@ -68,6 +68,46 @@ before(async () => {
 
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
+describe("fills stored before quoteCurrency existed", () => {
+  // The exact production situation: 425 fills written by an earlier sync, none
+  // carrying a price currency, and an idempotent sync that skips ids it already
+  // holds and so would never have repaired them. A blank quote currency
+  // silently disabled the conversion AND made prices render with the wallet's
+  // label — the ~100x INR bug returning purely as a data-migration gap.
+  before(async () => {
+    await createRecord("exchangeFills", {
+      id: "legacy-1", createdAt: new Date(), source: "coindcx", instrument: "SOL", currency: "INR",
+      side: "SELL", quantity: 4.67, price: 104.8, fee: 0.2,
+      executedAt: new Date("2026-08-25T13:45:00Z"), orderId: "lo1",
+      quoteCurrency: "",
+    });
+    await createRecord("exchangeFills", {
+      id: "legacy-2", createdAt: new Date(), source: "coindcx", instrument: "SOL", currency: "INR",
+      side: "BUY", quantity: 4.67, price: 107.54, fee: 0.211807,
+      executedAt: new Date("2026-08-25T16:00:00Z"), orderId: "lo2",
+      quoteCurrency: "",
+    });
+  });
+
+  it("still converts into the wallet, without needing a re-sync", async () => {
+    const sol = (await exchangeView()).positions.find((position) => position.instrument === "SOL");
+    assert.ok(sol, "expected the legacy SOL position");
+    assert.equal(sol.quoteCurrency, "USDT", "a blank price currency must default, not stay blank");
+
+    // (104.80 - 107.54) x 4.67 = -12.7958 USDT. Anything near -12.8 means the
+    // conversion silently did not happen.
+    assert.ok(sol.grossPnl < -1200, `gross should be ~-1277 INR, got ${sol.grossPnl}`);
+    assert.ok(sol.grossPnl > -1350, `gross should be ~-1277 INR, got ${sol.grossPnl}`);
+    assert.ok(sol.fees > 30 && sol.fees < 50, `fees should be ~41 INR, got ${sol.fees}`);
+  });
+
+  it("keeps the price in the currency it was quoted in", async () => {
+    const sol = (await exchangeView()).positions.find((position) => position.instrument === "SOL");
+    // 104.80 is what a trader recognises. 10,460 INR is not.
+    assert.ok(Math.abs((sol?.entryPrice ?? 0) - 104.8) < 1e-9);
+  });
+});
+
 describe("exchangeView", () => {
   it("rebuilds positions from stored rows, with funding folded in", async () => {
     const view = await exchangeView();

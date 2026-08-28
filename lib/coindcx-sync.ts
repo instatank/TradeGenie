@@ -30,7 +30,7 @@ import {
 } from "@/lib/coindcx";
 import { reconstructPositions, type Fill, type FundingEvent, type ReconstructedPosition } from "@/lib/positions";
 import { FALLBACK_INR_PER_USDT } from "@/lib/currency";
-import { createRecord, listRecords } from "@/lib/store";
+import { createRecord, listRecords, updateRecord } from "@/lib/store";
 import type { ExchangeFill, ExchangeLedgerEntry } from "@/lib/types";
 
 export const SOURCE = "coindcx";
@@ -55,6 +55,9 @@ export type SyncReport = {
   detail: string;
   fillsSeen: number;
   fillsStored: number;
+  /** Held rows topped up with a field they predate. Visible so a schema
+   *  migration is never silent. */
+  fillsBackfilled: number;
   ledgerSeen: number;
   ledgerStored: number;
   pages: number;
@@ -80,6 +83,7 @@ function emptyReport(detail: string, ok = false): SyncReport {
     detail,
     fillsSeen: 0,
     fillsStored: 0,
+    fillsBackfilled: 0,
     ledgerSeen: 0,
     ledgerStored: 0,
     pages: 0,
@@ -231,13 +235,25 @@ export async function syncExchange(credentials: CoindcxCredentials): Promise<Syn
     listRecords("exchangeFills"),
     listRecords("exchangeLedger"),
   ]);
-  const heldFills = new Set(existingFills.map((fill) => fill.id));
   const heldLedger = new Set(existingLedger.map((entry) => entry.id));
 
+  // Rows already held are skipped — that is what makes the sync idempotent —
+  // but a field ADDED to the shape after they were written would then never
+  // reach them. `quoteCurrency` was exactly that: 425 rows stored without it,
+  // and no amount of re-syncing would have fixed them. So held rows are checked
+  // for fields they predate and topped up in place.
+  const heldById = new Map(existingFills.map((fill) => [fill.id, fill]));
   for (const fill of parsedFills.fills) {
-    if (heldFills.has(fill.id)) continue;
-    await createRecord("exchangeFills", toStoredFill(fill));
-    report.fillsStored += 1;
+    const held = heldById.get(fill.id);
+    if (!held) {
+      await createRecord("exchangeFills", toStoredFill(fill));
+      report.fillsStored += 1;
+      continue;
+    }
+    if (!held.quoteCurrency && fill.quoteCurrency) {
+      await updateRecord("exchangeFills", fill.id, { quoteCurrency: fill.quoteCurrency });
+      report.fillsBackfilled += 1;
+    }
   }
   for (const transaction of parsedLedger.transactions) {
     if (heldLedger.has(transaction.id)) continue;
@@ -260,9 +276,28 @@ export async function syncExchange(credentials: CoindcxCredentials): Promise<Syn
 
   report.finishedAt = new Date();
   if (report.ok) {
-    report.detail = `Stored ${report.fillsStored} new fill${report.fillsStored === 1 ? "" : "s"} and ${report.ledgerStored} new ledger row${report.ledgerStored === 1 ? "" : "s"}.`;
+    const backfill = report.fillsBackfilled ? ` Repaired ${report.fillsBackfilled} older fill${report.fillsBackfilled === 1 ? "" : "s"} missing their price currency.` : "";
+    report.detail = `Stored ${report.fillsStored} new fill${report.fillsStored === 1 ? "" : "s"} and ${report.ledgerStored} new ledger row${report.ledgerStored === 1 ? "" : "s"}.${backfill}`;
   }
   return report;
+}
+
+/**
+ * What a stored fill is priced in.
+ *
+ * Rows written before `quoteCurrency` existed have it empty, and the sync is
+ * idempotent — it skips ids it already holds — so nothing would ever have
+ * backfilled them. Left unhandled, a blank quote currency silently disables the
+ * conversion AND makes prices render with the wallet's label: both symptoms of
+ * the ~100x INR bug, reappearing purely as a data-migration gap.
+ *
+ * Defaulting to USDT is safe because every CoinDCX perp is USDT-quoted
+ * (`B-SOL_USDT`, `B-ETH_USDT`, …) — three probe rounds against the live account
+ * returned nothing else. If a pair ever settles in the same currency it is
+ * quoted in, the rate is 1 and this default changes nothing anyway.
+ */
+function quoteOf(fill: { quoteCurrency?: string }): string {
+  return fill.quoteCurrency || "USDT";
 }
 
 type RatePoint = { at: number; perUsdt: number };
@@ -349,8 +384,8 @@ export async function exchangeView(): Promise<ExchangeView> {
     id: fill.id,
     instrument: fill.instrument,
     currency: fill.currency,
-    quoteCurrency: fill.quoteCurrency || "",
-    settlementRate: settlementRateFor(rateHistory, fill.currency, fill.quoteCurrency || "", fill.executedAt),
+    quoteCurrency: quoteOf(fill),
+    settlementRate: settlementRateFor(rateHistory, fill.currency, quoteOf(fill), fill.executedAt),
     side: fill.side,
     quantity: fill.quantity,
     price: fill.price,

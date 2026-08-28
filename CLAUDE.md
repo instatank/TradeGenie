@@ -902,6 +902,12 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     exchange stamped on the nearest ledger row, and **quantity is in units of the coin** — it is
     not a currency at all, and rendering "4.670 INR" is exactly how a unit bug hides in plain
     sight. Every diff row now carries its own unit.
+  - **An idempotent sync never backfills a new field.** Skipping ids already held is what makes
+    re-syncing safe, but it also means a field added to the shape later reaches none of the
+    existing rows — `quoteCurrency` landed on 425 stored fills as empty, which silently disabled
+    the conversion above and reproduced the ~100x bug as a pure migration gap. Two defences now:
+    a read-time default (every CoinDCX perp is USDT-quoted), and the sync tops up held rows for
+    fields they predate and reports the count. Pinned by a test that stores rows the old way.
   - **Positions key on instrument AND margin currency.** The trader runs separate INR and USDT
     accounts, and a SOL long in one against a SOL short in the other would otherwise fold into
     one position and net out — silent corruption in the one module that decides what a trade was.
