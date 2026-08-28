@@ -948,6 +948,49 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     exemption fixes it and `npm run check:cron` asserts all three cases — this is a gate hole
     `next build` cannot see, since middleware only runs against a real request.
 
+- **One number line — the base currency** (`toBaseCurrency` in `lib/currency.ts`,
+  `settings.displayCurrency`, default INR). Two margin accounts meant an INR trade that made
+  100 and a USDT trade that made 10 were both stored honestly and then **added to 110**, when
+  the true answer is nearer 1,100. Every ratio the journal computes (win rate, R, on-plan %)
+  was immune; every **sum** was wrong — day P&L, the week strip, the equity curve, every
+  analytics table. Verified at runtime on the real code path: that pair now totals **₹1,099**
+  on an INR base and **$11.00** on a USDT one.
+  - **The conversion happens on READ, at one boundary** — `getTradesWithMistakes()` in
+    `lib/data.ts`, which every aggregating page (Today, `/trades`, `/analytics`, `/calendar`,
+    `/mechanisms`, `/daily`, search, the weekly review) already loads trades through. Convert
+    once there and every total is right at once, with no consumer able to forget.
+  - **NOT on write.** A converted record cannot be reconciled against its CoinDCX statement
+    line, and that reconcilability is what caught the ~100x bug. A trade stores exactly what
+    the exchange said, in the wallet it settled in.
+  - **NOT inside `lib/metrics.ts`.** It stays pure, store-free and currency-blind: by the time
+    a number reaches it, it is already comparable. The alternative was threading a target
+    currency through twenty call sites.
+  - **Each trade carries its own rate.** `Trade.currency` + `Trade.moneyRate` are stamped once
+    at accept time from the exchange's own `price_in_inr`/`price_in_usdt` row, so a total over
+    last year's trades uses last year's rate and needs no FX feed. `acceptPatch` writes them
+    alongside `exchangeKey`/`status` as the named `PROVENANCE_FIELDS` — the diff-only guarantee
+    is unchanged, the exceptions are just written down and tested.
+  - **A trade with no `currency` is passed through untouched**, which is every hand-logged
+    trade: its numbers are already in whatever the trader was thinking in. So this is a no-op
+    for the whole existing journal — no migration. Trades reconciled *before* `Trade.currency`
+    existed are repaired at read time by parsing the wallet back out of their `exchangeKey`
+    (`currencyFromPositionKey`), which is exact recovery rather than a guess.
+  - **Prices, quantity and R are never converted.** A price is in the pair's quote currency, a
+    quantity is units of the coin, an R multiple is a ratio. Converting any of those is the
+    original ~100x bug in new clothes, so `BASE_CONVERTED_FIELDS` is an explicit four-item list
+    and a test fails if a fifth money field is ever added to `Trade` without joining it.
+  - **The trade page stays native** — it IS the reconcile view — and shows the base equivalent
+    beneath (`$10.00` / `= ₹999`), with `≈` instead of `=` when the flat fallback rate had to
+    stand in. `formatMoney` is now one function with the currency **required** at every call
+    site: three unlabelled copies were fine with one account and uncheckable with two.
+  - **Drift guard** (`tests/unit/base-currency.test.ts`): no page may both compute
+    `getTradePnl` and read `db.list("trades")`. `/daily` was doing exactly that and is fixed;
+    verified by reintroducing it and watching the test fail.
+  - `getSettings()` is now request-cached (`React.cache()`, invalidated by `saveSettings`) —
+    three helpers per render now want it, and it is one Firestore document.
+  - Deliberately NOT done: converting stored values, a per-page currency toggle, and any FX
+    lookup. The rate always comes from the exchange's own row or is reported as inexact.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

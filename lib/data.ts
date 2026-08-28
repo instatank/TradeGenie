@@ -8,6 +8,8 @@ import {
   upsertBy,
   type StoreShape,
 } from "@/lib/store";
+import { currencyFromPositionKey } from "@/lib/coindcx-sync";
+import { toBaseCurrency, type Currency, type InBaseCurrency } from "@/lib/currency";
 import { getSettings } from "@/lib/settings-store";
 import { setupSteps } from "@/lib/setups";
 import { normalizeTag } from "@/lib/tags";
@@ -96,19 +98,61 @@ export async function getTagVocabulary(
     .sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime() || b.count - a.count || a.tag.localeCompare(b.tag));
 }
 
-export async function getTradesWithMistakes(): Promise<TradeWithMistakes[]> {
-  const [trades, links, tags] = await Promise.all([
+/**
+ * Every trade, with its mistake tags, and with its money on ONE number line.
+ *
+ * This is the conversion boundary for the whole app. Two margin accounts mean a
+ * stored P&L is only meaningful next to the currency it settled in, and every
+ * page that adds trades up — Today, /trades, /analytics, /calendar,
+ * /mechanisms, search, the weekly review — loads them through here. Converting
+ * once, at this one function, is what makes lib/metrics.ts able to stay pure and
+ * currency-blind: by the time a number reaches it, it is already comparable.
+ *
+ * Deliberately NOT done on the way in from the exchange: a stored number stays
+ * exactly what CoinDCX said, in the wallet it said it in, so a trade can always
+ * be checked against its statement line. That reconcilability is what caught a
+ * ~100x bug once already.
+ *
+ * getTradeDetail() is the deliberate exception — one trade shown on its own page
+ * stays in its native currency, because that page IS the reconcile view.
+ */
+export type TradeInBaseCurrency = InBaseCurrency<TradeWithMistakes>;
+
+/** What every total in the app is denominated in. Cheap — getSettings is
+ *  request-cached, so a page asking for this and for trades reads one document. */
+export async function getBaseCurrency(): Promise<Currency> {
+  return (await getSettings()).displayCurrency;
+}
+
+export async function getTradesWithMistakes(): Promise<TradeInBaseCurrency[]> {
+  const [trades, links, tags, settings] = await Promise.all([
     listRecords("trades"),
     listRecords("tradeMistakes"),
     listRecords("mistakeTags"),
+    getSettings(),
   ]);
+  const base = settings.displayCurrency;
   return trades.map((trade) => ({
-    ...trade,
+    ...toBaseCurrency(withNativeCurrency(trade), base),
     mistakeTags: links
       .filter((link) => link.tradeId === trade.id)
       .map((link) => ({ ...link, mistakeTag: tags.find((tag) => tag.id === link.mistakeTagId)! }))
       .filter((link): link is TradeMistakeWithTag => Boolean(link.mistakeTag)),
   }));
+}
+
+/**
+ * Recover the wallet for a trade reconciled before `Trade.currency` existed.
+ *
+ * The exchange key already encodes it exactly, so this is a read-time repair
+ * rather than a migration — and without it, the handful of trades accepted
+ * before this change would have their USDT numbers read as if they were already
+ * rupees, which is precisely the skew being fixed.
+ */
+function withNativeCurrency(trade: Trade): Trade {
+  if (trade.currency || !trade.exchangeKey) return trade;
+  const currency = currencyFromPositionKey(trade.exchangeKey);
+  return currency ? { ...trade, currency } : trade;
 }
 
 export async function getTradeDetail(id: string) {
@@ -269,7 +313,7 @@ export async function getSymbolTagSuggestions(limit = 8): Promise<string[]> {
   return tags;
 }
 
-export async function getClosedTradesInRange(start: Date, end: Date): Promise<TradeWithMistakes[]> {
+export async function getClosedTradesInRange(start: Date, end: Date): Promise<TradeInBaseCurrency[]> {
   const trades = await getTradesWithMistakes();
   return trades.filter((trade) => trade.status === "CLOSED" && trade.tradeDateTime >= start && trade.tradeDateTime <= endOfDay(end));
 }

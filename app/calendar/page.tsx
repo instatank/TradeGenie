@@ -5,7 +5,8 @@ import { CalendarRangeControls } from "@/components/CalendarRangeControls";
 import { PageTitle } from "@/components/Fields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { humanize } from "@/lib/constants";
-import { db, getTradesWithMistakes } from "@/lib/data";
+import { formatMoney } from "@/lib/currency";
+import { db, getBaseCurrency, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
 import { calculateTotalR, calculateWinRate, getTradePnl } from "@/lib/metrics";
 
@@ -13,7 +14,7 @@ export default async function CalendarPage({ searchParams }: { searchParams?: Pr
   const params = await searchParams ?? {};
   const calendarParams = params.period || params.date ? params : { ...params, period: "month" };
   const range = getCalendarRange(calendarParams);
-  const [trades, transcripts, journals, rawExecutions, lessons, weeklyReviews, options] = await Promise.all([
+  const [trades, transcripts, journals, rawExecutions, lessons, weeklyReviews, options, base] = await Promise.all([
     getTradesWithMistakes(),
     db.list("transcripts"),
     db.list("dailyJournals"),
@@ -21,6 +22,7 @@ export default async function CalendarPage({ searchParams }: { searchParams?: Pr
     db.list("lessons"),
     db.list("weeklyReviews"),
     getOptionCatalog(),
+    getBaseCurrency(),
   ]);
 
   const rangeTrades = trades.filter((trade) => isWithinCalendarRange(trade.tradeDateTime, range));
@@ -77,7 +79,7 @@ export default async function CalendarPage({ searchParams }: { searchParams?: Pr
           ))}
           {dayTrades.slice(0, 4).map((trade) => (
             <Link key={trade.id} href={`/trades/${trade.id}`} className="rounded-md bg-forge-panel p-3 text-sm transition hover:bg-forge-line/40">
-              <span className="font-medium">{trade.instrument}</span> · {humanize(trade.direction)} · {humanize(trade.status)} · P&L {formatNumber(getTradePnl(trade))}
+              <span className="font-medium">{trade.instrument}</span> · {humanize(trade.direction)} · {humanize(trade.status)} · P&L {getTradePnl(trade) == null ? "NA" : formatMoney(getTradePnl(trade)!, trade.baseCurrency)}
             </Link>
           ))}
           {dayTranscripts.slice(0, 3).map((transcript) => (
@@ -114,7 +116,7 @@ export default async function CalendarPage({ searchParams }: { searchParams?: Pr
       <section className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Metric label="Trades" value={rangeTrades.length} />
         <Metric label="Closed trades" value={closedTrades.length} />
-        <Metric label="Net P&L" value={formatNumber(closedTrades.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0))} />
+        <Metric label="Net P&L" value={formatMoney(closedTrades.reduce((sum, trade) => sum + (getTradePnl(trade) ?? 0), 0), base)} />
         <Metric label="Total R" value={formatNumber(calculateTotalR(closedTrades))} />
         <Metric label="Win rate" value={formatPercent(calculateWinRate(closedTrades))} />
       </section>

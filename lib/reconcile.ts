@@ -221,14 +221,35 @@ export function changedFields(diff: FieldDiff[]): FieldDiff[] {
 }
 
 /**
+ * Fields an accept may write that are NOT numbers from the diff.
+ *
+ * The structural guarantee is "a field absent from diffTrade cannot be written
+ * by a sync", and these are the deliberate, named exceptions: the link itself,
+ * the status the exchange is authoritative about, and the provenance that says
+ * what the numbers just written are denominated in. Naming them here rather
+ * than letting them accrete is what keeps the guarantee checkable — a test
+ * asserts an accept patch touches nothing outside diffTrade ∪ this set.
+ */
+export const PROVENANCE_FIELDS = ["exchangeKey", "status", "currency", "moneyRate"] as const;
+
+/**
  * The patch to apply when a match is accepted.
  *
  * Built only from the diff, so it can never contain a field diffTrade does not
  * list. Status follows the exchange too: a position the exchange shows closed
  * is closed, whatever the journal still says.
+ *
+ * The currency and rate ride along with the numbers because they are part of
+ * what the numbers MEAN. A stored 13.21 is meaningless on its own once two
+ * margin accounts exist; 13.21 USDT at 99.81 INR/USDT is a fact that can still
+ * be added to an INR total correctly in a year's time.
  */
 export function acceptPatch(match: Match, key: string): Partial<Trade> {
-  const patch: Partial<Trade> = { exchangeKey: key };
+  const patch: Partial<Trade> = {
+    exchangeKey: key,
+    currency: match.position.currency || null,
+    moneyRate: match.position.moneyRate ?? null,
+  };
   for (const row of changedFields(diffTrade(match.trade, match.position))) {
     if (row.exchange === null) continue;
     (patch as Record<string, unknown>)[row.field] = row.exchange;

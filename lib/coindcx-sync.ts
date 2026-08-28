@@ -29,7 +29,7 @@ import {
   type CoindcxTransaction,
 } from "@/lib/coindcx";
 import { reconstructPositions, type Fill, type FundingEvent, type ReconstructedPosition } from "@/lib/positions";
-import { FALLBACK_INR_PER_USDT } from "@/lib/currency";
+import { FALLBACK_INR_PER_USDT, type MoneyRate } from "@/lib/currency";
 import { createRecord, listRecords, updateRecord } from "@/lib/store";
 import type { ExchangeFill, ExchangeLedgerEntry } from "@/lib/types";
 
@@ -334,15 +334,58 @@ function settlementRateFor(history: RateHistory, wallet: string, quote: string, 
   if (!wallet || !quote || wallet === quote) return 1;
   if (quote !== "USDT") return 1; // Every pair here is USDT-quoted; refuse to guess otherwise.
 
-  const points = history.get(wallet);
-  if (!points?.length) return wallet === "INR" ? FALLBACK_INR_PER_USDT : 1;
+  const recorded = nearestRate(history, wallet, at);
+  if (recorded === null) return wallet === "INR" ? FALLBACK_INR_PER_USDT : 1;
+  return recorded;
+}
 
+/**
+ * Units of `wallet` per 1 USDT at the moment nearest `at`, or null when the
+ * ledger recorded nothing for that wallet.
+ *
+ * Null rather than a fallback on purpose: this is also what decides whether a
+ * converted total gets to call itself exact, and a silent 100:1 substitution
+ * would make an approximation indistinguishable from a measurement.
+ */
+function nearestRate(history: RateHistory, wallet: string, at: Date): number | null {
+  const points = history.get(wallet);
+  if (!points?.length) return null;
   const target = at.getTime();
   let nearest = points[0];
   for (const point of points) {
     if (Math.abs(point.at - target) < Math.abs(nearest.at - target)) nearest = point;
   }
   return nearest.perUsdt;
+}
+
+/**
+ * What one unit of the wallet's currency was worth in each currency, so a trade
+ * can be added to a base-currency total later at the rate that applied then.
+ *
+ * Both directions are stored because either currency can be the base. Only INR
+ * and USDT are known here — an unrecognised wallet returns nulls, and
+ * convertAmount() then reports the total as inexact rather than inventing a rate.
+ */
+function moneyRateFor(history: RateHistory, wallet: string, at: Date): MoneyRate | null {
+  const inrPerUsdt = nearestRate(history, "INR", at);
+  if (wallet === "USDT") return { inr: inrPerUsdt, usdt: 1 };
+  if (wallet === "INR") return { inr: 1, usdt: inrPerUsdt ? 1 / inrPerUsdt : null };
+  return null;
+}
+
+/**
+ * The margin wallet encoded in a position key, for a trade reconciled before
+ * `Trade.currency` existed.
+ *
+ * positionKey() is `instrument|currency|openedAt`, so the wallet is recoverable
+ * exactly — no guess, no migration. Without this, a trade accepted last week
+ * would have USDT numbers read as if they were already in the base currency,
+ * which is the very bug this whole change exists to fix.
+ */
+export function currencyFromPositionKey(key: string): string | null {
+  const parts = key.split("|");
+  if (parts.length < 3) return null;
+  return parts[1]?.trim().toUpperCase() || null;
 }
 
 /** A stable handle for a reconstructed position. One book per instrument per
@@ -386,6 +429,7 @@ export async function exchangeView(): Promise<ExchangeView> {
     currency: fill.currency,
     quoteCurrency: quoteOf(fill),
     settlementRate: settlementRateFor(rateHistory, fill.currency, quoteOf(fill), fill.executedAt),
+    moneyRate: moneyRateFor(rateHistory, fill.currency, fill.executedAt),
     side: fill.side,
     quantity: fill.quantity,
     price: fill.price,

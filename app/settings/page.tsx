@@ -9,6 +9,7 @@ import {
   renameCustomMistakeTagAction,
   renameCustomOptionAction,
   saveSettingsAction,
+  setDisplayCurrencyAction,
   showTagAction,
   testAiConnectionAction,
 } from "@/app/actions";
@@ -61,6 +62,31 @@ export default async function SettingsPage({
           </div>
         </section>
       ) : null}
+
+      <section className="panel mb-5 space-y-3">
+        <h2 className="font-semibold">Base currency</h2>
+        <div className="rounded-lg bg-forge-panel p-3 text-sm">
+          <p className="text-forge-muted">
+            You trade an INR margin account and a USDT one. Every number that gets <span className="font-medium text-forge-ink">added up</span> —
+            a day&apos;s P&amp;L, the week strip, the equity curve, every analytics table — is converted into this currency first, at the rate
+            CoinDCX itself recorded on the day of the trade. Without that, a +10 USDT trade and a +100 INR trade would add to 110 when the
+            honest answer is nearer 1,100.
+          </p>
+          <p className="mt-2 text-forge-muted">
+            What each trade is <span className="font-medium text-forge-ink">stored</span> as never changes — its own page keeps showing the
+            exchange&apos;s numbers in the wallet they settled in, so you can always check a trade against your CoinDCX statement.
+          </p>
+          <form action={setDisplayCurrencyAction} className="mt-3 flex flex-wrap items-center gap-2">
+            <SelectField
+              label="Totals in"
+              name="displayCurrency"
+              options={["INR", "USDT"]}
+              defaultValue={settings.displayCurrency}
+            />
+            <button className="button-secondary self-end" type="submit">Save</button>
+          </form>
+        </div>
+      </section>
 
       <section className="panel mb-5 space-y-3">
         <h2 className="font-semibold">Data &amp; backup</h2>

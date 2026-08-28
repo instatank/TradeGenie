@@ -7,7 +7,7 @@
 // tries to steal, and the subjective fields that must never be touched.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { acceptPatch, changedFields, diffTrade, matchPositions, willCloseTrade, MATCH_WINDOW_HOURS } from "@/lib/reconcile";
+import { acceptPatch, changedFields, diffTrade, matchPositions, willCloseTrade, MATCH_WINDOW_HOURS, PROVENANCE_FIELDS } from "@/lib/reconcile";
 import type { ReconstructedPosition } from "@/lib/positions";
 import type { Trade } from "@/lib/types";
 
@@ -19,6 +19,7 @@ function position(overrides: Partial<ReconstructedPosition> = {}): Reconstructed
     instrument: "ETH",
     currency: "USDT",
     quoteCurrency: "USDT",
+    moneyRate: { inr: 99.81, usdt: 1 },
     direction: "LONG",
     openedAt: new Date("2026-08-27T02:00:00Z"),
     closedAt: new Date("2026-08-27T06:00:00Z"),
@@ -203,10 +204,22 @@ describe("acceptPatch", () => {
 
   it("carries nothing the diff did not list", () => {
     const match = { position: position(), trade: trade(), minutesApart: 5, confirmed: false };
-    const allowed = new Set([...diffTrade(match.trade, match.position).map((row) => row.field), "exchangeKey", "status"]);
+    // The allowed set is diffTrade's own fields plus the NAMED provenance
+    // exceptions — read from the constant, not retyped here, so adding a
+    // writable field has to be a deliberate edit to that list.
+    const allowed = new Set<string>([...diffTrade(match.trade, match.position).map((row) => String(row.field)), ...PROVENANCE_FIELDS]);
     for (const key of Object.keys(acceptPatch(match, "k"))) {
-      assert.ok(allowed.has(key as keyof Trade), `${key} is not an allowed synced field`);
+      assert.ok(allowed.has(key), `${key} is not an allowed synced field`);
     }
+  });
+
+  it("stamps what the numbers are denominated in, and at what rate", () => {
+    // Without these two, a USDT trade's 13.67 is indistinguishable from ₹13.67
+    // the moment it lands in a total. The rate is the exchange's own, frozen.
+    const match = { position: position(), trade: trade(), minutesApart: 5, confirmed: false };
+    const patch = acceptPatch(match, "k");
+    assert.equal(patch.currency, "USDT");
+    assert.deepEqual(patch.moneyRate, { inr: 99.81, usdt: 1 });
   });
 
   it("leaves a trade that already agrees almost untouched", () => {
@@ -222,7 +235,8 @@ describe("acceptPatch", () => {
       status: "CLOSED",
     });
     const patch = acceptPatch({ position: exact, trade: already, minutesApart: 0, confirmed: false }, "k");
-    assert.deepEqual(Object.keys(patch), ["exchangeKey"]);
+    // Provenance is always stamped; no NUMBER is rewritten.
+    assert.deepEqual(Object.keys(patch), ["exchangeKey", "currency", "moneyRate"]);
     assert.equal(changedFields(diffTrade(already, exact)).length, 0);
   });
 });

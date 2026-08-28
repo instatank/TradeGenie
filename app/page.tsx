@@ -7,6 +7,7 @@ import { QuickTradeForm } from "@/components/QuickTradeForm";
 import { RunSetupBar } from "@/components/RunSetupBar";
 import { eveningDone, journalStreak, morningDone, streakMilestone, tipOfTheDay } from "@/lib/coach";
 import { humanize } from "@/lib/constants";
+import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
 import { db, getFreeNotesForDay, getResurfacedLessons, getRunnableSetups, getSetupNameMap, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import { exchangeView, positionKey } from "@/lib/coindcx-sync";
 import { getOptionCatalog } from "@/lib/options";
@@ -49,6 +50,10 @@ export default async function TodayPage() {
     exchangeView(),
     getSettings(),
   ]);
+
+  // Everything summed on this page is already on one number line — trades come
+  // through getTradesWithMistakes, which converts. This is only the label.
+  const base = settings.displayCurrency;
 
   // Streak counts showing up in any form — never profitability.
   const streak = journalStreak([
@@ -134,7 +139,7 @@ export default async function TodayPage() {
     label: trade.instrument,
     value: useR ? (trade.rMultiple ?? 0) : (getTradePnl(trade) ?? 0),
     tooltip: `${trade.instrument} ${humanize(trade.direction).toLowerCase()} · ${format(trade.tradeDateTime, "d MMM")} · ${
-      useR ? `${(trade.rMultiple ?? 0).toFixed(2)}R` : `P&L ${(getTradePnl(trade) ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+      useR ? `${(trade.rMultiple ?? 0).toFixed(2)}R` : `P&L ${formatMoney(getTradePnl(trade) ?? 0, base)}`
     }`,
   }));
   let snapshotMistakes = mistakeFrequency(trades.filter((trade) => trade.tradeDateTime >= thirtyDaysAgo)).slice(0, 5);
@@ -256,7 +261,7 @@ export default async function TodayPage() {
                   <div className="text-[11px] font-medium uppercase text-forge-muted">{day.label}</div>
                   <div className="text-sm font-semibold">{day.dayOfMonth}</div>
                   <div className={`mt-0.5 truncate text-[11px] font-medium ${day.pnl == null ? "text-forge-muted" : day.pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                    {day.pnl == null ? (day.journaled ? "·" : " ") : formatMoney(day.pnl)}
+                    {day.pnl == null ? (day.journaled ? "·" : " ") : formatMoney(day.pnl, base)}
                   </div>
                 </Link>
               ))}
@@ -268,11 +273,11 @@ export default async function TodayPage() {
                 sub="Your real score. P&L follows this."
                 tone={onPlan == null ? undefined : onPlan >= 0.7 ? "good" : "bad"}
               />
-              <Stat label="Net P&L" value={weekClosed.length ? formatMoney(weekPnl) : "—"} tone={!weekClosed.length ? undefined : weekPnl >= 0 ? "good" : "bad"} />
+              <Stat label="Net P&L" value={weekClosed.length ? formatMoney(weekPnl, base) : "—"} tone={!weekClosed.length ? undefined : weekPnl >= 0 ? "good" : "bad"} />
               <Stat
                 label="Win rate"
                 value={weekStats.winRate == null ? "—" : `${(weekStats.winRate * 100).toFixed(0)}%`}
-                sub={weekStats.winRate == null ? undefined : `avg win ${formatMoney(weekStats.avgWin)} · avg loss ${formatMoney(weekStats.avgLoss)}`}
+                sub={weekStats.winRate == null ? undefined : `avg win ${formatMoney(weekStats.avgWin, base)} · avg loss ${formatMoney(weekStats.avgLoss, base)}`}
               />
               <Stat label="Total R" value={weekR == null ? "—" : weekR.toFixed(1)} sub={`${weekClosed.length} closed trade${weekClosed.length === 1 ? "" : "s"}`} />
             </div>
@@ -478,6 +483,9 @@ function summarizeMorning(stateLabel: string, maxTrades?: number | null, maxLoss
   return parts.length ? `${parts.join(" · ")}.` : "Checked in.";
 }
 
-function formatMoney(value: number) {
-  return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+// Thin wrapper over the app's one money formatter so the base currency has to
+// be passed at every call site. A bare number was fine while there was only one
+// account; with an INR and a USDT wallet it is a number you cannot check.
+function formatMoney(value: number, currency: Currency) {
+  return sharedFormatMoney(value, currency);
 }

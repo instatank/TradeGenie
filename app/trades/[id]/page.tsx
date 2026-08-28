@@ -11,7 +11,8 @@ import { TagPicker } from "@/components/TagPicker";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { directions, humanize, isPrimaryMistakeTag, marketTypes } from "@/lib/constants";
-import { db, getTagVocabulary, getTradeDetail } from "@/lib/data";
+import { convertAmount, formatMoney, type Currency } from "@/lib/currency";
+import { db, getBaseCurrency, getTagVocabulary, getTradeDetail } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { exitEfficiency, tradeNeedsReview, tradeProcessScore } from "@/lib/metrics";
 import { checklistScore, setupSteps } from "@/lib/setups";
@@ -22,13 +23,17 @@ import type { MarketContext } from "@/lib/market-context";
 // press of Save captures whatever you touched, wherever you touched it.
 export default async function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [trade, mistakeTags, unlinkedExecutions, setups, tagVocabulary, options] = await Promise.all([
+  const [trade, mistakeTags, unlinkedExecutions, setups, tagVocabulary, options, base] = await Promise.all([
+    // Deliberately NOT converted: this page is the reconcile view for one trade,
+    // and its numbers have to stay checkable against the CoinDCX statement line
+    // they came from. The base-currency equivalent is shown beside them instead.
     getTradeDetail(id),
     db.list("mistakeTags"),
     db.list("rawExecutions"),
     db.list("setups"),
     getTagVocabulary(),
     getOptionCatalog(),
+    getBaseCurrency(),
   ]);
   if (!trade) throw new Error("Trade not found");
   // Active setups to choose from, plus this trade's own even if it's been
@@ -51,6 +56,15 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
   const primaryTags = sortedMistakeTags.filter((tag) => isPrimaryMistakeTag(tag.name));
   const otherTags = sortedMistakeTags.filter((tag) => !isPrimaryMistakeTag(tag.name));
   const needsReview = tradeNeedsReview(trade);
+  // The wallet this trade's money is actually in. Absent on every hand-logged
+  // trade, which is read as already being in the base currency.
+  const native: Currency | string = trade.currency?.trim().toUpperCase() || base;
+  const baseEquivalent = (value: number | null | undefined) => {
+    if (value == null || native === base) return undefined;
+    const converted = convertAmount(value, native, base, trade.moneyRate);
+    if (!Number.isFinite(converted.amount)) return undefined;
+    return `${converted.exact ? "=" : "≈"} ${formatMoney(converted.amount, base)}`;
+  };
 
   return (
     <main className="page-shell max-w-5xl pb-28">
@@ -88,7 +102,14 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </div>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <MiniMetric label="Net P&L" value={formatMaybe(trade.netPnl)} tone={Number(trade.netPnl ?? 0) >= 0 ? "good" : "bad"} />
+          <MiniMetric
+            label="Net P&L"
+            value={trade.netPnl == null ? "NA" : formatMoney(trade.netPnl, native)}
+            // The equivalent, only when the trade is not already in the base
+            // currency — repeating "₹1,320 (₹1,320)" would be noise.
+            hint={baseEquivalent(trade.netPnl)}
+            tone={Number(trade.netPnl ?? 0) >= 0 ? "good" : "bad"}
+          />
           <MiniMetric label="R multiple" value={formatMaybe(trade.rMultiple)} />
           <MiniMetric label="Process score" value={processScore == null ? "NA" : `${processScore}/100`} tone={processScore == null ? undefined : processScore >= 60 ? "good" : "bad"} />
           <MiniMetric label="Exit efficiency" value={efficiency == null ? "NA" : `${(efficiency * 100).toFixed(0)}%`} />
@@ -197,11 +218,11 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Quantity / size" name="quantity" type="number" step="any" defaultValue={trade.quantity} />
             <TextField label="Total order value" name="totalOrderValue" type="number" step="0.01" defaultValue={trade.totalOrderValue} />
             <TextField label="Leverage" name="leverage" type="number" defaultValue={trade.leverage} />
-            <TextField label="Fees" name="fees" type="number" step="0.01" defaultValue={trade.fees} />
-            <TextField label="Funding" name="funding" type="number" step="0.01" defaultValue={trade.funding} />
+            <TextField label={`Fees (${native})`} name="fees" type="number" step="0.01" defaultValue={trade.fees} />
+            <TextField label={`Funding (${native})`} name="funding" type="number" step="0.01" defaultValue={trade.funding} />
             <div className="rounded-lg bg-forge-panel p-3">
               <div className="text-xs text-forge-muted">Net P&L</div>
-              <div className="text-lg font-semibold">{trade.netPnl?.toFixed(2) ?? "NA"}</div>
+              <div className="text-lg font-semibold">{trade.netPnl == null ? "NA" : formatMoney(trade.netPnl, native)}</div>
             </div>
             <div className="rounded-lg bg-forge-panel p-3">
               <div className="text-xs text-forge-muted">R multiple</div>
@@ -396,11 +417,12 @@ function MarketContextPanel({ context }: { context: MarketContext | null | undef
   );
 }
 
-function MiniMetric({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
+function MiniMetric({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" }) {
   return (
     <div className="rounded-lg bg-forge-panel p-3">
       <div className="text-xs uppercase tracking-wide text-forge-muted">{label}</div>
       <div className={`mt-1 font-semibold ${tone === "good" ? "text-forge-green" : tone === "bad" ? "text-forge-red" : ""}`}>{value}</div>
+      {hint ? <div className="mt-0.5 text-[11px] text-forge-muted">{hint}</div> : null}
     </div>
   );
 }

@@ -36,6 +36,8 @@
 //     dropped**. Silently swallowing it would understate the cost of exactly
 //     the trades that held longest, which are the ones funding actually hurts.
 
+import type { MoneyRate } from "@/lib/currency";
+
 /** One execution as the exchange reports it. Quantity is always positive; the
  *  side carries the sign. Fee is a positive cost in the quote currency. */
 export type Fill = {
@@ -58,6 +60,11 @@ export type Fill = {
    *  in INR; 1 when the two are the same). Money derived from prices is scaled
    *  by this; prices themselves are not. Defaults to 1. */
   settlementRate?: number;
+  /** What one unit of the settlement wallet's currency was worth in each
+   *  currency at this fill, as the exchange recorded it. Carried through to the
+   *  position so a trade can be converted to a base currency later at the rate
+   *  that actually applied, rather than at today's. */
+  moneyRate?: MoneyRate | null;
   side: "BUY" | "SELL";
   quantity: number;
   price: number;
@@ -86,6 +93,9 @@ export type ReconstructedPosition = {
    *  Deliberately not converted: SOL at 104.80 is a price a trader recognises;
    *  the same price as 10,460 INR is not. */
   quoteCurrency: string;
+  /** The wallet's value in both currencies, frozen at the opening fill. Null
+   *  when nothing recorded one. */
+  moneyRate: MoneyRate | null;
   direction: "LONG" | "SHORT";
   openedAt: Date;
   /** null while the position is still open. */
@@ -127,6 +137,7 @@ type OpenPosition = {
   instrument: string;
   currency: string;
   quoteCurrency: string;
+  moneyRate: MoneyRate | null;
   sign: 1 | -1;
   openedAt: Date;
   size: number;
@@ -174,6 +185,9 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
           instrument: fill.instrument,
           currency: fill.currency ?? "",
           quoteCurrency: fill.quoteCurrency ?? fill.currency ?? "",
+          // Frozen at the opening fill, for the same reason marketContext is:
+          // the rate that applied when the position was taken is the honest one.
+          moneyRate: fill.moneyRate ?? null,
           sign,
           openedAt: fill.timestamp,
           size: 0,
@@ -244,6 +258,7 @@ function finalize(current: OpenPosition, closedAt: Date | null): ReconstructedPo
     instrument: current.instrument,
     currency: current.currency,
     quoteCurrency: current.quoteCurrency,
+    moneyRate: current.moneyRate,
     direction: current.sign === 1 ? "LONG" : "SHORT",
     openedAt: current.openedAt,
     closedAt,

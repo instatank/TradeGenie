@@ -10,7 +10,8 @@ import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
 import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, isPrimaryMistakeTag, marketTypes, tradeStatuses } from "@/lib/constants";
-import { db, getTradesWithMistakes } from "@/lib/data";
+import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
+import { db, getBaseCurrency, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog, type OptionChoice } from "@/lib/options";
 import { calculateTotalR, calculateWinRate, getTradePnl, tradeNeedsReview } from "@/lib/metrics";
 import { checklistScore, setupSteps } from "@/lib/setups";
@@ -27,8 +28,11 @@ const tradeViews = [
 // day with the day's P&L, one clean row per trade, tap anywhere to open it.
 export default async function TradesPage({ searchParams }: { searchParams?: Promise<Record<string, string | undefined>> }) {
   const params = await searchParams ?? {};
-  const [mistakeTags, allTrades, options, setups, savedViews] = await Promise.all([
+  const [mistakeTags, allTrades, options, setups, savedViews, base] = await Promise.all([
     db.list("mistakeTags"), getTradesWithMistakes(), getOptionCatalog(), db.list("setups"), db.list("savedViews"),
+    // Only for the label: getTradesWithMistakes has already put every trade's
+    // money on this currency, so the day totals and the summary line add up.
+    getBaseCurrency(),
   ]);
   // Filtering has to reach every mind state ever stored, so the filter list is
   // the old full enum plus whatever the trader has added since.
@@ -186,7 +190,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
           {closed.length ? (
             <>
               {" · net P&L "}
-              <span className={`font-semibold ${netPnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>{formatMoney(netPnl)}</span>
+              <span className={`font-semibold ${netPnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>{formatMoney(netPnl, base)}</span>
               {winRate != null ? <>{" · win rate "}<span className="font-semibold text-forge-ink">{(winRate * 100).toFixed(0)}%</span></> : null}
               {totalR != null ? <>{" · total "}<span className={`font-semibold ${totalR >= 0 ? "text-forge-green" : "text-forge-red"}`}>{totalR.toFixed(1)}R</span></> : null}
             </>
@@ -201,7 +205,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
               <h2 className="text-sm font-semibold">{group.label}</h2>
               {group.pnl != null ? (
                 <span className={`text-sm font-semibold ${group.pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                  {group.pnl >= 0 ? "+" : ""}{formatMoney(group.pnl)}
+                  {group.pnl >= 0 ? "+" : ""}{formatMoney(group.pnl, base)}
                 </span>
               ) : (
                 <span className="text-xs text-forge-muted">no closed P&L</span>
@@ -301,7 +305,7 @@ function TradeRow({
           ) : pnl != null ? (
             <>
               <span className={`block text-sm font-semibold tabular-nums ${pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                {pnl >= 0 ? "+" : ""}{formatMoney(pnl)}
+                {pnl >= 0 ? "+" : ""}{formatMoney(pnl, trade.baseCurrency)}
               </span>
               {trade.rMultiple != null ? <span className="block text-xs tabular-nums text-forge-muted">{trade.rMultiple >= 0 ? "+" : ""}{trade.rMultiple.toFixed(1)}R</span> : null}
             </>
@@ -376,7 +380,7 @@ function TradePreview({
     ["Exit", formatPrice(trade.exitPrice)],
     ["Size", formatLoose(trade.quantity)],
     ["Leverage", trade.leverage != null ? `${formatLoose(trade.leverage)}x` : "—"],
-    ["P&L", pnl != null ? `${pnl >= 0 ? "+" : ""}${formatMoney(pnl)}` : "—", pnl == null ? undefined : pnl >= 0 ? "good" : "bad"],
+    ["P&L", pnl != null ? `${pnl >= 0 ? "+" : ""}${formatMoney(pnl, trade.baseCurrency)}` : "—", pnl == null ? undefined : pnl >= 0 ? "good" : "bad"],
     ["R", trade.rMultiple != null ? `${trade.rMultiple >= 0 ? "+" : ""}${trade.rMultiple.toFixed(2)}` : "—", trade.rMultiple == null ? undefined : trade.rMultiple >= 0 ? "good" : "bad"],
   ];
   return (
@@ -605,8 +609,10 @@ function compareTrades(a: TradeRowData, b: TradeRowData, sort: string) {
   return b.tradeDateTime.getTime() - a.tradeDateTime.getTime();
 }
 
-function formatMoney(value: number) {
-  return value.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+// The app's one money formatter, with the currency required at the call site.
+// A bare "1,320" was fine with one account and unreadable with two.
+function formatMoney(value: number, currency: Currency) {
+  return sharedFormatMoney(value, currency);
 }
 
 function formatPrice(value: number | null | undefined) {

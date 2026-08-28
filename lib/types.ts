@@ -1,3 +1,4 @@
+import type { MoneyRate } from "@/lib/currency";
 import type { MarketContext } from "@/lib/market-context";
 
 export const TranscriptType = {
@@ -175,6 +176,18 @@ export type Trade = {
   fees: number | null;
   funding: number | null;
   netPnl: number | null;
+  /** The margin wallet the four money fields above are denominated in ("INR",
+   *  "USDT"). Stamped when an exchange match is accepted; absent on a
+   *  hand-logged trade, which is read as "already in the base currency" —
+   *  whatever the trader was thinking in when they typed it. Prices, quantity
+   *  and rMultiple are NOT in this currency: a price is in the pair's quote
+   *  currency and a quantity is in units of the coin. */
+  currency?: string | null;
+  /** What one unit of `currency` was worth in each currency at the time,
+   *  copied from the exchange's own ledger row. Frozen with the trade, like
+   *  marketContext: a total over last year's trades must use last year's rate,
+   *  and re-deriving it later would silently rewrite history. */
+  moneyRate?: MoneyRate | null;
   rMultiple: number | null;
   tags?: string[];
   /** The exchange position this trade has been reconciled against. Set once a

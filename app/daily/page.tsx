@@ -9,7 +9,8 @@ import { OptionChipRadio } from "@/components/OptionField";
 import { TagPicker } from "@/components/TagPicker";
 import { TagPills } from "@/components/TagPills";
 import { humanize } from "@/lib/constants";
-import { db, getFreeNotesForDay, getSymbolTagSuggestions, getTagVocabulary, getTodayJournal } from "@/lib/data";
+import { formatMoney } from "@/lib/currency";
+import { db, getFreeNotesForDay, getSymbolTagSuggestions, getTagVocabulary, getTodayJournal, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
 import { checklistGaps, getTradePnl } from "@/lib/metrics";
 import { practiceSuggestion } from "@/lib/coach";
@@ -22,7 +23,9 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
   const selectedDate = params?.date ? startOfDay(new Date(params.date)) : startOfDay(new Date());
   const dateParam = format(selectedDate, "yyyy-MM-dd");
   const [journal, allTrades, tagVocabulary, options, freeNotes, symbolTags, playbook] = await Promise.all([
-    getTodayJournal(selectedDate), db.list("trades"), getTagVocabulary(), getOptionCatalog(),
+    // getTradesWithMistakes, not db.list("trades"): it is the one read that puts
+    // an INR-account trade and a USDT-account one on the same number line.
+    getTodayJournal(selectedDate), getTradesWithMistakes(), getTagVocabulary(), getOptionCatalog(),
     getFreeNotesForDay(selectedDate), getSymbolTagSuggestions(), db.list("setups"),
   ]);
   // What the journal already knows you keep skipping. Offered, never imposed:
@@ -162,7 +165,7 @@ export default async function DailyPage({ searchParams }: { searchParams?: Promi
                       <span className="text-forge-muted"> · {humanize(trade.direction)} · {humanize(trade.status)}</span>
                     </span>
                     <span className={`shrink-0 font-medium ${pnl == null ? "text-forge-muted" : pnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                      {pnl == null ? "review →" : pnl.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                      {pnl == null ? "review →" : formatMoney(pnl, trade.baseCurrency)}
                     </span>
                   </Link>
                 );

@@ -3,7 +3,8 @@ import { format } from "date-fns";
 import { BinColumns, DisciplineLines, DivergingColumns, EmptyChart, Meter, MoneyBars } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
 import { humanize, sessionLabels } from "@/lib/constants";
-import { db, getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
+import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
+import { db, getBaseCurrency, getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog } from "@/lib/options";
 import { setupSteps, stepResolver } from "@/lib/setups";
 import {
@@ -35,11 +36,14 @@ import {
 // the one thing hurting me" in plain language. Everything deeper — distributions,
 // tilt, sessions, exit quality, the full tables — sits one tap away.
 export default async function AnalyticsPage() {
-  const [trades, setupNameById, options, playbook] = await Promise.all([
+  const [trades, setupNameById, options, playbook, base] = await Promise.all([
     getTradesWithMistakes(),
     getSetupNameMap(),
     getOptionCatalog(),
     db.list("setups"),
+    // Label only — the trades arrive already converted, which is what makes
+    // adding an INR-account trade to a USDT-account one give the right answer.
+    getBaseCurrency(),
   ]);
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const closedWithPnl = closed
@@ -76,7 +80,7 @@ export default async function AnalyticsPage() {
     label: trade.instrument,
     value: useR ? (trade.rMultiple ?? 0) : (getTradePnl(trade) ?? 0),
     tooltip: `${trade.instrument} ${humanize(trade.direction).toLowerCase()} · ${format(trade.tradeDateTime, "d MMM")} · ${
-      useR ? `${(trade.rMultiple ?? 0).toFixed(2)}R` : `P&L ${formatMoney(getTradePnl(trade) ?? 0)}`
+      useR ? `${(trade.rMultiple ?? 0).toFixed(2)}R` : `P&L ${formatMoney(getTradePnl(trade) ?? 0, base)}`
     }`,
   }));
 
@@ -96,7 +100,7 @@ export default async function AnalyticsPage() {
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-forge-muted">Where you stand · all time</p>
                 <p className={`mt-1 text-4xl font-semibold tracking-tight ${netTotal >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                  {signedMoney(netTotal)}
+                  {signedMoney(netTotal, base)}
                 </p>
                 <p className="mt-1 text-sm text-forge-muted">
                   across {closedWithPnl.length} closed trade{closedWithPnl.length === 1 ? "" : "s"} with P&L recorded
@@ -107,7 +111,7 @@ export default async function AnalyticsPage() {
                   <p>
                     A typical trade {expectancy.expectancyCurrency >= 0 ? "makes" : "costs"} you{" "}
                     <span className={`font-semibold ${expectancy.expectancyCurrency >= 0 ? "text-forge-green" : "text-forge-red"}`}>
-                      {formatMoney(Math.abs(expectancy.expectancyCurrency))}
+                      {formatMoney(Math.abs(expectancy.expectancyCurrency), base)}
                     </span>
                     .
                   </p>
@@ -116,7 +120,7 @@ export default async function AnalyticsPage() {
                   <p>
                     You win <span className="font-semibold">{(expectancy.winRate * 100).toFixed(0)}%</span> of the time
                     {expectancy.avgLoss ? (
-                      <> · wins average {formatMoney(expectancy.avgWin)}, losses {formatMoney(expectancy.avgLoss)}</>
+                      <> · wins average {formatMoney(expectancy.avgWin, base)}, losses {formatMoney(expectancy.avgLoss, base)}</>
                     ) : null}
                     .
                   </p>
@@ -148,7 +152,7 @@ export default async function AnalyticsPage() {
             {discipline.skippedCount + discipline.cappedCount > 0 && discipline.delta > 0 ? (
               <p className="mb-2 text-sm">
                 Following your own plan on every trade would have left you{" "}
-                <span className="font-semibold text-forge-green">{signedMoney(discipline.delta)}</span> better off.
+                <span className="font-semibold text-forge-green">{signedMoney(discipline.delta, base)}</span> better off.
               </p>
             ) : discipline.sample >= 2 ? (
               <p className="mb-2 text-sm text-forge-muted">
@@ -175,7 +179,7 @@ export default async function AnalyticsPage() {
               {worstMistake ? (
                 <>
                   &quot;{worstMistake.label}&quot; is your most expensive habit:{" "}
-                  <span className="font-semibold text-forge-red">{signedMoney(worstMistake.totalPnl)}</span> across{" "}
+                  <span className="font-semibold text-forge-red">{signedMoney(worstMistake.totalPnl, base)}</span> across{" "}
                   {worstMistake.count} trade{worstMistake.count === 1 ? "" : "s"}.
                 </>
               ) : ledger.length ? (
@@ -192,7 +196,7 @@ export default async function AnalyticsPage() {
                     label: entry.label,
                     value: entry.totalPnl,
                     sub: `${entry.count} trade${entry.count === 1 ? "" : "s"}`,
-                    tooltip: `${entry.label}: ${signedMoney(entry.totalPnl)} across ${entry.count} trade${entry.count === 1 ? "" : "s"}`,
+                    tooltip: `${entry.label}: ${signedMoney(entry.totalPnl, base)} across ${entry.count} trade${entry.count === 1 ? "" : "s"}`,
                   }))}
                 />
                 <p className="mt-2 text-[11px] text-forge-muted">
@@ -242,8 +246,8 @@ export default async function AnalyticsPage() {
                 </p>
                 {tilt.afterLoss.count >= 4 ? (
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <TiltCard title={`Soon after a loss (${tilt.afterLoss.count} trades)`} stats={tilt.afterLoss} highlight />
-                    <TiltCard title={`Everything else (${tilt.baseline.count} trades)`} stats={tilt.baseline} />
+                    <TiltCard title={`Soon after a loss (${tilt.afterLoss.count} trades)`} stats={tilt.afterLoss} currency={base} highlight />
+                    <TiltCard title={`Everything else (${tilt.baseline.count} trades)`} stats={tilt.baseline} currency={base} />
                   </div>
                 ) : (
                   <EmptyChart
@@ -263,7 +267,7 @@ export default async function AnalyticsPage() {
                         label: session.label,
                         value: session.netPnl,
                         sub: `${session.count} trade${session.count === 1 ? "" : "s"}${session.winRate != null ? ` · wins ${(session.winRate * 100).toFixed(0)}%` : ""}`,
-                        tooltip: `${session.label}: ${signedMoney(session.netPnl)} over ${session.count} trades`,
+                        tooltip: `${session.label}: ${signedMoney(session.netPnl, base)} over ${session.count} trades`,
                       }))}
                     />
                     {sessions.some((session) => session.count < 5) ? (
@@ -329,20 +333,22 @@ export default async function AnalyticsPage() {
                 </section>
               ) : null}
 
-              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={setups} firstColLabel="Setup" />
-              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={sessions} firstColLabel="Session" />
-              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={conditions} firstColLabel="Condition" />
+              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={setups} firstColLabel="Setup" currency={base} />
+              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={sessions} firstColLabel="Session" currency={base} />
+              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={conditions} firstColLabel="Condition" currency={base} />
               <BucketTable
                 title="By timeframe"
                 subtitle="Which charts you actually make money on. A trade counts in every timeframe it used, so these add up to more than your trade count."
                 rows={timeframes}
                 firstColLabel="Timeframe"
+                currency={base}
               />
               <BucketTable
                 title="By mechanism"
                 subtitle="What the entry was built out of — FVG, order block, sweep. The one table that tells you which part of the model is carrying you."
                 rows={mechanisms}
                 firstColLabel="Mechanism"
+                currency={base}
                 hrefFor={(row) => `/mechanisms/${row.key}`}
               />
               {checklist.length ? (
@@ -351,6 +357,7 @@ export default async function AnalyticsPage() {
                   subtitle="Closed trades on a setup with a checklist, split by whether every step was actually there. If these two rows look the same, the checklist isn't earning its place yet."
                   rows={checklist}
                   firstColLabel="Checklist"
+                  currency={base}
                 />
               ) : null}
             </div>
@@ -372,7 +379,7 @@ function LeakCard({ leak }: { leak: LeakInsight }) {
   );
 }
 
-function TiltCard({ title, stats, highlight = false }: { title: string; stats: TiltStats; highlight?: boolean }) {
+function TiltCard({ title, stats, currency, highlight = false }: { title: string; stats: TiltStats; currency: Currency; highlight?: boolean }) {
   return (
     <div className={`rounded-lg border p-3 ${highlight ? "border-forge-red/40 bg-red-50/40" : "border-forge-line bg-forge-panel"}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-forge-muted">{title}</p>
@@ -389,7 +396,7 @@ function TiltCard({ title, stats, highlight = false }: { title: string; stats: T
         </div>
         <div>
           <p className="text-[11px] text-forge-muted">Net P&L</p>
-          <p className={`font-semibold ${stats.netPnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>{signedMoney(stats.netPnl)}</p>
+          <p className={`font-semibold ${stats.netPnl >= 0 ? "text-forge-green" : "text-forge-red"}`}>{signedMoney(stats.netPnl, currency)}</p>
         </div>
       </div>
     </div>
@@ -401,12 +408,15 @@ function BucketTable({
   subtitle,
   rows,
   firstColLabel,
+  currency,
   hrefFor,
 }: {
   title: string;
   subtitle: string;
   rows: BucketStats[];
   firstColLabel: string;
+  /** What the Net P&L column is in. Every row is already converted to it. */
+  currency: Currency;
   /** Optional: makes the first column a link (mechanisms have their own page). */
   hrefFor?: (row: BucketStats) => string;
 }) {
@@ -457,7 +467,7 @@ function BucketTable({
                       <td className={`px-3 py-2 font-medium ${row.expectancyR == null ? (light ? "text-forge-muted" : "") : tone(row.expectancyR >= 0)}`}>
                         {row.expectancyR == null ? "NA" : `${row.expectancyR.toFixed(2)}R`}
                       </td>
-                      <td className={`px-3 py-2 ${tone(row.netPnl >= 0)}`}>{row.netPnl.toFixed(2)}</td>
+                      <td className={`px-3 py-2 ${tone(row.netPnl >= 0)}`}>{formatMoney(row.netPnl, currency)}</td>
                       <td className={`px-3 py-2 ${light ? "text-forge-muted" : ""}`}>{row.avgProcessScore == null ? "NA" : `${row.avgProcessScore.toFixed(0)}`}</td>
                     </tr>
                   );
@@ -488,10 +498,12 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
   );
 }
 
-function formatMoney(value: number) {
-  return Math.abs(value).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+// The app's one money formatter, with the currency required at every call
+// site: two margin accounts make an unlabelled total impossible to check.
+function formatMoney(value: number, currency: Currency) {
+  return sharedFormatMoney(value, currency, { absolute: true });
 }
 
-function signedMoney(value: number) {
-  return `${value < 0 ? "−" : "+"}${formatMoney(value)}`;
+function signedMoney(value: number, currency: Currency) {
+  return sharedFormatMoney(value, currency, { signed: true });
 }
