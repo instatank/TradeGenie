@@ -882,9 +882,13 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - **Raw rows are stored (`exchangeFills`, `exchangeLedger`); positions are NOT.** Positions
     are recomputed on read by `reconstructPositions()`. One source of truth, no sync state to
     drift, and the fold can improve without a migration. Storing raw rows is also the only
-    defence against the exchange's own limit: **the ledger reaches back ~3 weeks while fills
-    reach back ten months**, so funding not captured today is gone for good. Positions
-    predating the ledger are *named* on `/import`, never presented as complete.
+    defence against the exchange's own limit: the ledger is **finite (~178 rows on the first
+    real sync)** and stops at a fixed point — measured 08 Jan 2026, against fills reaching back
+    to Nov 2025 — so funding not captured today is gone for good. (An earlier estimate of
+    "~3 weeks" was wrong: an empty page 3 during probing meant *few rows*, not a short window.
+    The real sync disproved it — only 12 of 89 positions lack funding.) Positions predating the
+    ledger are *named* on `/import`, never presented as complete, and the copy derives the date
+    from the data rather than asserting a span.
   - **A trap that cost a round:** a transaction's `fill_id` is its OWN id (v1 UUID), not the
     trades endpoint's `fill_id` (v4). The link to a trade is `parent_id` → `order_id`. Joining
     on `fill_id` looks right and matches nothing; a test pins it.

@@ -11,6 +11,7 @@ import {
 import { ImportCsvClient } from "@/components/ImportCsvClient";
 import { MatchCard, UnmatchedCard } from "@/components/ExchangeReconcile";
 import { PageTitle } from "@/components/Fields";
+import { SubmitButton } from "@/components/SubmitButton";
 import { credentialsFromEnv } from "@/lib/coindcx";
 import { exchangeView, positionKey } from "@/lib/coindcx-sync";
 import { db } from "@/lib/data";
@@ -60,11 +61,16 @@ export default async function ImportPage() {
   // is not a numeric diff. Filtering on numbers alone would have hidden exactly
   // the case this is most useful for: a position closed on the exchange days ago
   // that the journal never caught up with.
-  const needsReview = matches.filter(
-    (match) => willCloseTrade(match) || changedFields(diffTrade(match.trade, match.position)).length > 0,
-  );
+  // Newest first, like every other list in this app (trades, notes, inbox).
+  // matchPositions returns matches ordered by how CLOSE each match was, which
+  // is an implementation detail and reads as random to a human.
+  const needsReview = matches
+    .filter((match) => willCloseTrade(match) || changedFields(diffTrade(match.trade, match.position)).length > 0)
+    .sort((a, b) => b.position.openedAt.getTime() - a.position.openedAt.getTime());
   const agreed = matches.length - needsReview.length;
-  const toJournal = unmatched.filter((position) => !dismissed.has(positionKey(position)));
+  const toJournal = unmatched
+    .filter((position) => !dismissed.has(positionKey(position)))
+    .sort((a, b) => b.openedAt.getTime() - a.openedAt.getTime());
   const hiddenCount = unmatched.length - toJournal.length;
 
   const lastFill = storedFills.length
@@ -96,10 +102,13 @@ export default async function ImportPage() {
             </p>
           </div>
           <form action={syncExchangeAction}>
-            <button className="button" type="submit" disabled={!configured}>
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            <SubmitButton
+              disabled={!configured}
+              pendingLabel="Syncing…"
+              icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}
+            >
               Sync now
-            </button>
+            </SubmitButton>
           </form>
         </div>
 
@@ -108,9 +117,9 @@ export default async function ImportPage() {
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-forge-gold" aria-hidden="true" />
             <span>
               <span className="font-medium">{view.positionsMissingFunding.length} older position{view.positionsMissingFunding.length === 1 ? "" : "s"}</span>{" "}
-              opened before {view.ledgerFrom ? format(view.ledgerFrom, "dd MMM yyyy") : "the ledger starts"}. CoinDCX&apos;s transaction
-              ledger only reaches back about three weeks, so those have exact prices and fees but no funding — their net P&amp;L
-              understates the real cost. Everything after that date is complete, and stays complete now it is being captured daily.
+              opened before {view.ledgerFrom ? format(view.ledgerFrom, "dd MMM yyyy") : "the ledger starts"}, which is as far back as
+              CoinDCX&apos;s transaction ledger goes. Those have exact prices and fees but no funding, so their net P&amp;L understates
+              the real cost slightly. Everything after that date is complete, and stays complete now it is captured daily.
             </span>
           </p>
         ) : null}
@@ -136,7 +145,9 @@ export default async function ImportPage() {
           </div>
           {needsReview.length > 1 ? (
             <form action={acceptAllExchangeMatchesAction}>
-              <button className="button-secondary" type="submit">Accept all {needsReview.length}</button>
+              <SubmitButton className="button-secondary" pendingLabel="Reconciling…">
+                Accept all {needsReview.length}
+              </SubmitButton>
             </form>
           ) : null}
         </div>

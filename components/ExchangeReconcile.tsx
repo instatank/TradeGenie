@@ -2,6 +2,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { ArrowRight, Check, EyeOff } from "lucide-react";
 import { acceptExchangeMatchAction, dismissExchangePositionAction } from "@/app/actions";
+import { SubmitButton } from "@/components/SubmitButton";
 import { TagPills } from "@/components/TagPills";
 import { changedFields, diffTrade, willCloseTrade, type Match } from "@/lib/reconcile";
 import type { ReconstructedPosition } from "@/lib/positions";
@@ -98,10 +99,9 @@ export function MatchCard({ match, positionKey }: { match: Match; positionKey: s
           <form action={acceptExchangeMatchAction} className="mt-3">
             <input type="hidden" name="tradeId" value={trade.id} />
             <input type="hidden" name="exchangeKey" value={positionKey} />
-            <button className="button" type="submit">
-              <Check className="h-4 w-4" aria-hidden="true" />
+            <SubmitButton pendingLabel="Applying…" icon={<Check className="h-4 w-4" aria-hidden="true" />}>
               Use the exchange&apos;s numbers
-            </button>
+            </SubmitButton>
           </form>
           <p className="mt-2 text-xs text-forge-muted">
             Only these numbers change. Your thesis, mood, setup, mistakes and lesson are never touched.
@@ -144,9 +144,9 @@ export function UnmatchedCard({ position, positionKey }: { position: Reconstruct
         <Link href={logHref} className="button min-h-8 px-3 text-sm">Log this trade</Link>
         <form action={dismissExchangePositionAction}>
           <input type="hidden" name="exchangeKey" value={positionKey} />
-          <button className="button-secondary min-h-8 px-2 text-sm" type="submit" title="Stop showing this">
-            <EyeOff className="h-4 w-4" aria-hidden="true" />
-          </button>
+          <SubmitButton className="button-secondary min-h-8 px-2 text-sm" icon={<EyeOff className="h-4 w-4" aria-hidden="true" />}>
+            <span className="sr-only">Stop showing this</span>
+          </SubmitButton>
         </form>
       </div>
     </article>
