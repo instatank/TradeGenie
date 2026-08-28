@@ -60,10 +60,18 @@ export type Probe = {
 //                             too, so both accounts arrive together and the
 //                             split happens client-side off each record.
 //
-// Known limitation, deliberately not worked around: the ledger only reaches
-// back ~3 weeks while fills reach back 10 months, so older positions import
-// with exact fees but no funding. The sync reports that coverage rather than
-// implying a completeness it doesn't have.
+// TWO CURRENCIES, and they are not the same one. `B-SOL_USDT` is PRICED in
+// USDT — price and fee_amount on a fill both arrive in USDT — while
+// margin_currency_short_name says which WALLET settles it, which for this
+// trader is sometimes INR. Treating the wallet as the money unit made an
+// INR-margined position's P&L come out ~100x too small wearing an INR label,
+// and it was invisible because it is correct whenever the two happen to match
+// (i.e. on every USDT-margined trade). quoteCurrencyOf() is the split.
+//
+// Known limitation: the ledger is finite and stops at a fixed point (measured
+// 08 Jan 2026) while fills reach back to Nov 2025, so the oldest positions
+// import with exact fees but no funding. The sync reports that coverage rather
+// than implying a completeness it doesn't have.
 //
 // The probes below stay as the connection test — they are how a future change
 // checks the shapes still hold rather than trusting this comment.
@@ -217,6 +225,18 @@ export function normalizePair(pair: string): string {
   return match ? match[1] : pair.trim();
 }
 
+/**
+ * `B-SOL_USDT` → `USDT`: what the pair is PRICED in.
+ *
+ * Not the same thing as margin_currency_short_name, which is the wallet the
+ * money settles in. An INR-margined SOL trade is still quoted in USDT, and
+ * conflating the two made an INR position's P&L come out ~100x too small.
+ */
+export function quoteCurrencyOf(pair: string): string {
+  const match = /_([A-Z]+)$/.exec(pair.trim());
+  return match ? match[1] : "";
+}
+
 type RawTrade = {
   fill_id?: unknown;
   pair?: unknown;
@@ -261,6 +281,7 @@ export function parseFill(record: unknown): Fill | null {
     // decoration: positions are grouped by instrument AND currency, and the
     // same symbol in both accounts must never fold into one position.
     currency: typeof raw.margin_currency_short_name === "string" ? raw.margin_currency_short_name : "",
+    quoteCurrency: quoteCurrencyOf(pair),
     side,
     quantity,
     price,

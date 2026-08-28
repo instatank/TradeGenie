@@ -151,6 +151,13 @@ export type FieldDiff = {
   exchange: number | null;
   /** True when accepting would actually change the stored value. */
   changed: boolean;
+  /**
+   * What this row is measured in. Deliberately per-row, because a single
+   * position mixes three: prices in the quote currency, money in the settlement
+   * wallet, and quantity in units of the coin — which is not a currency at all.
+   * Labelling a quantity of 4.67 SOL as "4.670 INR" is how a unit bug hides.
+   */
+  unit: string;
 };
 
 // Below this, two numbers are the same number wearing different rounding.
@@ -171,22 +178,27 @@ function differs(logged: number | null, exchange: number | null): boolean {
  * subjective half safe by construction rather than by care.
  */
 export function diffTrade(trade: Trade, position: ReconstructedPosition): FieldDiff[] {
-  const rows: Array<[keyof Trade, string, number | null, number | null]> = [
-    ["entryPrice", "Entry price", trade.entryPrice, position.entryPrice],
-    ["exitPrice", "Exit price", trade.exitPrice, position.exitPrice],
-    ["quantity", "Quantity", trade.quantity, position.quantity],
-    ["fees", "Fees", trade.fees, position.fees],
-    ["funding", "Funding", trade.funding, position.funding],
-    ["realizedPnl", "Realized P&L (gross)", trade.realizedPnl, position.status === "CLOSED" ? position.grossPnl : null],
-    ["netPnl", "Net P&L (after costs)", trade.netPnl, position.status === "CLOSED" ? position.netPnl : null],
+  const price = position.quoteCurrency || position.currency;
+  const money = position.currency;
+  const size = position.instrument;
+
+  const rows: Array<[keyof Trade, string, number | null, number | null, string]> = [
+    ["entryPrice", "Entry price", trade.entryPrice, position.entryPrice, price],
+    ["exitPrice", "Exit price", trade.exitPrice, position.exitPrice, price],
+    ["quantity", "Quantity", trade.quantity, position.quantity, size],
+    ["fees", "Fees", trade.fees, position.fees, money],
+    ["funding", "Funding", trade.funding, position.funding, money],
+    ["realizedPnl", "Realized P&L (gross)", trade.realizedPnl, position.status === "CLOSED" ? position.grossPnl : null, money],
+    ["netPnl", "Net P&L (after costs)", trade.netPnl, position.status === "CLOSED" ? position.netPnl : null, money],
   ];
 
-  return rows.map(([field, label, logged, exchange]) => ({
+  return rows.map(([field, label, logged, exchange, unit]) => ({
     field,
     label,
     logged,
     exchange,
     changed: differs(logged, exchange),
+    unit,
   }));
 }
 

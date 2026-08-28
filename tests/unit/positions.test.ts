@@ -185,6 +185,101 @@ describe("reconstructPositions", () => {
     assert.deepEqual(positions.map((position) => position.instrument).sort(), ["ETH", "ZEC"]);
   });
 
+  it("carries an INR-margined trade's money across, but not its price", () => {
+    // The owner's real SOL short: priced in USDT because the pair is
+    // B-SOL_USDT, settled in the INR wallet. Labelling the USDT figure "INR"
+    // made the P&L read ~100x too small — right by luck on every USDT-margined
+    // trade, and silently wrong on this one.
+    const rate = 1 / 0.010019036168720569; // 1 USDT = 99.81 INR, exchange-recorded
+    const inrFill = (id: string, side: "BUY" | "SELL", price: number, fee: number, iso: string): Fill => ({
+      ...fill(id, "SOL", side, 4.67, price, fee, iso),
+      currency: "INR",
+      quoteCurrency: "USDT",
+      settlementRate: rate,
+    });
+
+    const { positions } = reconstructPositions([
+      inrFill("s1", "SELL", 104.8, 0.2, "2026-08-27T13:45:00Z"),
+      inrFill("s2", "BUY", 107.54, 0.211807, "2026-08-27T15:30:00Z"),
+    ]);
+
+    const [sol] = positions;
+    assert.equal(sol.direction, "SHORT");
+    assert.equal(sol.currency, "INR", "money settles in the INR wallet");
+    assert.equal(sol.quoteCurrency, "USDT", "prices stay in the quote currency");
+
+    // Prices are NOT converted — 104.80 is a price a trader recognises;
+    // 10,460 INR is not.
+    closeTo(sol.entryPrice, 104.8);
+    closeTo(sol.exitPrice ?? NaN, 107.54);
+
+    // Money IS converted. (104.80 - 107.54) x 4.67 = -12.7958 USDT -> INR.
+    closeTo(sol.grossPnl, -12.7958 * rate, 1e-6);
+    closeTo(sol.fees, 0.411807 * rate, 1e-6);
+    // The owner's own expectation, computed at a flat 100:1, was -1279.6 gross
+    // and -1320.8 net. At the exchange's real rate it lands within 0.2%.
+    assert.ok(sol.grossPnl < -1270 && sol.grossPnl > -1285, `gross was ${sol.grossPnl}`);
+    assert.ok(sol.netPnl < -1310 && sol.netPnl > -1325, `net was ${sol.netPnl}`);
+  });
+
+  it("leaves a USDT-margined trade completely alone", () => {
+    // The ZEC round trip the owner confirmed was already correct. Quote and
+    // wallet agree, so the rate is 1 and nothing moves.
+    const { positions } = reconstructPositions(
+      ZEC_ROUND_TRIP.map((entry) => ({ ...entry, currency: "USDT", quoteCurrency: "USDT", settlementRate: 1 })),
+    );
+    closeTo(positions[0].grossPnl, 15.3813);
+    closeTo(positions[0].fees, 0.24);
+  });
+
+  it("gathers a multi-day scale-in and multi-TP scale-out into ONE position", () => {
+    // The owner's HYPE trade ran for days with several adds and several take
+    // profits. Every leg must land on one position: the entry a size-weighted
+    // average, the exit likewise, every fee counted once, and funding across
+    // the whole hold folded in.
+    const legs: Fill[] = [
+      fill("h1", "HYPE", "BUY", 5, 77.0, 0.19, "2026-08-22T13:13:00Z"),
+      fill("h2", "HYPE", "BUY", 4, 78.2, 0.16, "2026-08-22T18:40:00Z"),
+      fill("h3", "HYPE", "BUY", 3.87, 78.6, 0.15, "2026-08-23T09:02:00Z"),
+      fill("h4", "HYPE", "SELL", 3, 81.0, 0.12, "2026-08-24T11:00:00Z"),
+      fill("h5", "HYPE", "SELL", 5, 82.4, 0.21, "2026-08-25T15:30:00Z"),
+      fill("h6", "HYPE", "SELL", 4.87, 84.0, 0.20, "2026-08-26T20:15:00Z"),
+    ];
+    const funding: FundingEvent[] = Array.from({ length: 12 }, (_, index) => ({
+      id: `hf${index}`,
+      instrument: "HYPE",
+      amount: -0.0687,
+      timestamp: new Date(Date.parse("2026-08-22T17:00:00Z") + index * 8 * 3600_000),
+    }));
+
+    const { positions, unattributedFunding } = reconstructPositions(legs, funding);
+    assert.equal(positions.length, 1, "six legs over four days are ONE trade");
+    const [hype] = positions;
+
+    // Size is the peak held, not the sum of the legs (which would be 25.74).
+    closeTo(hype.quantity, 12.87);
+    closeTo(hype.closedQuantity, 12.87);
+    assert.equal(hype.status, "CLOSED");
+
+    // Entry and exit are size-weighted, not plain averages of the prices.
+    closeTo(hype.entryPrice, (5 * 77.0 + 4 * 78.2 + 3.87 * 78.6) / 12.87);
+    closeTo(hype.exitPrice ?? NaN, (3 * 81.0 + 5 * 82.4 + 4.87 * 84.0) / 12.87);
+
+    // Every fee counted exactly once.
+    closeTo(hype.fees, 0.19 + 0.16 + 0.15 + 0.12 + 0.21 + 0.2);
+
+    // Funding across the whole multi-day hold, none of it lost.
+    closeTo(hype.funding, -0.0687 * 12, 1e-9);
+    assert.equal(unattributedFunding.length, 0, "no funding may go missing");
+    assert.equal(hype.fundingIds.length, 12);
+
+    // Gross must equal exit notional minus entry notional, exactly.
+    const entryNotional = 5 * 77.0 + 4 * 78.2 + 3.87 * 78.6;
+    const exitNotional = 3 * 81.0 + 5 * 82.4 + 4.87 * 84.0;
+    closeTo(hype.grossPnl, exitNotional - entryNotional, 1e-9);
+    closeTo(hype.netPnl, exitNotional - entryNotional - hype.fees + hype.funding, 1e-9);
+  });
+
   it("does not leave a position open on float dust", () => {
     const { positions } = reconstructPositions([
       fill("d1", "HYPE", "BUY", 0.1, 80, 0, "2026-08-27T01:00:00Z"),

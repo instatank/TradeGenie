@@ -15,6 +15,18 @@
 // in the opposite direction (a flip), which is the case naive importers get
 // wrong and then quietly report as one enormous trade.
 //
+// **Two currencies, and they are not the same one.** A pair like `B-SOL_USDT`
+// is PRICED in USDT — that is the quote currency, and it is what entry, exit
+// and the raw fee arrive in. Which wallet the money actually moves in is a
+// separate fact: this trader runs both an INR and a USDT margin account, and an
+// INR-margined SOL trade is still priced in USDT. Computing P&L from prices and
+// then labelling it with the margin currency produced a number ~100x too small
+// wearing an INR label — right by luck whenever the two happened to match, and
+// silently wrong whenever they did not. So money derived from PRICES is scaled
+// by `settlementRate` into the wallet's currency, funding (which the exchange
+// already reports in the wallet's currency) is added as-is, and prices stay in
+// the quote currency because a price converted to INR is unrecognisable.
+//
 // Two deliberate refusals:
 //   - Nothing here rounds or "tidies" a number. The exchange UI shows fees to
 //     2dp (a 106.75 USDT fill shows "0.06" for a true 0.0534); the whole point
@@ -38,6 +50,14 @@ export type Fill = {
    *  net one against the other and corrupt both. Defaults to "" for callers
    *  with a single account, which groups exactly as before. */
   currency?: string;
+  /** What `price` and `fee` are denominated in — the pair's quote currency
+   *  ("USDT" for `B-SOL_USDT`). Distinct from `currency`, which is the wallet. */
+  quoteCurrency?: string;
+  /** How many units of the settlement wallet's currency one unit of the quote
+   *  currency was worth at this fill (~99.81 for a USDT-priced trade settling
+   *  in INR; 1 when the two are the same). Money derived from prices is scaled
+   *  by this; prices themselves are not. Defaults to 1. */
+  settlementRate?: number;
   side: "BUY" | "SELL";
   quantity: number;
   price: number;
@@ -59,9 +79,13 @@ export type FundingEvent = {
 
 export type ReconstructedPosition = {
   instrument: string;
-  /** The margin currency every number on this position is denominated in.
-   *  Never convert it here — see the note at the top of the file. */
+  /** The wallet this settled in. `fees`, `grossPnl`, `funding` and `netPnl` are
+   *  in THIS currency. */
   currency: string;
+  /** What `entryPrice` and `exitPrice` are in — the pair's quote currency.
+   *  Deliberately not converted: SOL at 104.80 is a price a trader recognises;
+   *  the same price as 10,460 INR is not. */
+  quoteCurrency: string;
   direction: "LONG" | "SHORT";
   openedAt: Date;
   /** null while the position is still open. */
@@ -102,6 +126,7 @@ const SIZE_EPSILON = 1e-9;
 type OpenPosition = {
   instrument: string;
   currency: string;
+  quoteCurrency: string;
   sign: 1 | -1;
   openedAt: Date;
   size: number;
@@ -131,9 +156,12 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
   for (const fill of ordered) {
     if (!(fill.quantity > SIZE_EPSILON)) continue;
     const sign: 1 | -1 = fill.side === "BUY" ? 1 : -1;
+    // Into the wallet's currency. 1 when quote and wallet already agree, which
+    // is every USDT-margined trade.
+    const rate = fill.settlementRate ?? 1;
     // Fees are charged per fill but a single fill can span two positions on a
     // flip, so spread the fee over the units it actually paid for.
-    const feePerUnit = fill.fee / fill.quantity;
+    const feePerUnit = (fill.fee * rate) / fill.quantity;
     let remaining = fill.quantity;
 
     const bookKey = positionKey(fill.instrument, fill.currency);
@@ -145,6 +173,7 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
         current = {
           instrument: fill.instrument,
           currency: fill.currency ?? "",
+          quoteCurrency: fill.quoteCurrency ?? fill.currency ?? "",
           sign,
           openedAt: fill.timestamp,
           size: 0,
@@ -175,7 +204,9 @@ export function reconstructPositions(fills: Fill[], funding: FundingEvent[] = []
       // loops round to open a fresh one the other way.
       const closing = Math.min(remaining, current.size);
       const entryVwap = current.entryNotional / current.entryQuantity;
-      current.grossPnl += (fill.price - entryVwap) * closing * current.sign;
+      // Realized in the quote currency, then carried into the wallet at the
+      // rate that applied when it was realized.
+      current.grossPnl += (fill.price - entryVwap) * closing * current.sign * rate;
       current.exitNotional += fill.price * closing;
       current.exitQuantity += closing;
       current.size -= closing;
@@ -212,6 +243,7 @@ function finalize(current: OpenPosition, closedAt: Date | null): ReconstructedPo
   return {
     instrument: current.instrument,
     currency: current.currency,
+    quoteCurrency: current.quoteCurrency,
     direction: current.sign === 1 ? "LONG" : "SHORT",
     openedAt: current.openedAt,
     closedAt,

@@ -386,6 +386,8 @@ async function main() {
     await db.create("exchangeFills", {
       id, createdAt: exchangeNow, source: "coindcx", instrument, currency,
       side, quantity, price, fee, executedAt, orderId: `order-${id}`,
+      // Every CoinDCX perp here is USDT-quoted, whichever wallet it settles in.
+      quoteCurrency: "USDT",
     });
   }
 
@@ -412,7 +414,16 @@ async function main() {
 
   // Still open, and in the other margin account — proves the two accounts stay
   // apart and that an open position renders without exit numbers.
-  await seedFill("seed-fill-5", "SOL", "INR", "BUY", 4.67, 10740.2, 29.6, new Date(exchangeNow.getTime() - 5 * 3600_000));
+  // INR wallet, USDT price — the case that was ~100x wrong. Paired with an INR
+  // ledger row so the fold has a real rate to carry it across.
+  await seedFill("seed-fill-5", "SOL", "INR", "BUY", 4.67, 104.8, 0.29, new Date(exchangeNow.getTime() - 5 * 3600_000));
+  await db.create("exchangeLedger", {
+    id: "seed-funding-inr", createdAt: exchangeNow, source: "coindcx",
+    instrument: "SOL", currency: "INR", stage: "funding", kind: "FUNDING",
+    amount: -2.6, fee: 0, positionId: "seed-position-2", orderId: null,
+    rateInr: 1, rateUsdt: 0.010019036168720569,
+    occurredAt: new Date(exchangeNow.getTime() - 4 * 3600_000),
+  });
 
   console.log("Seed complete.");
 }

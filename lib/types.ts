@@ -371,6 +371,9 @@ export type ExchangeFill = {
   fee: number;
   executedAt: Date;
   orderId: string | null;
+  /** What price and fee are denominated in — the pair's quote currency. NOT
+   *  the same as `currency`, which is the wallet it settled in. */
+  quoteCurrency: string;
 };
 
 /** One row of the exchange's transaction ledger: funding, an exit, or P&L. */

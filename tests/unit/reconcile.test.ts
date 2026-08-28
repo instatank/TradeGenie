@@ -18,6 +18,7 @@ function position(overrides: Partial<ReconstructedPosition> = {}): Reconstructed
   return {
     instrument: "ETH",
     currency: "USDT",
+    quoteCurrency: "USDT",
     direction: "LONG",
     openedAt: new Date("2026-08-27T02:00:00Z"),
     closedAt: new Date("2026-08-27T06:00:00Z"),

@@ -28,10 +28,10 @@ function InfoChip({ label }: { label: string }) {
   return <span className="shrink-0 rounded-full bg-forge-panel px-2 py-0.5 text-xs font-medium text-forge-muted">{label}</span>;
 }
 
-function money(value: number | null, currency: string): string {
+function money(value: number | null, unit: string): string {
   if (value === null) return "—";
   const decimals = Math.abs(value) >= 100 ? 2 : Math.abs(value) >= 1 ? 3 : 6;
-  return `${value.toFixed(decimals)} ${currency}`;
+  return `${value.toFixed(decimals)} ${unit}`;
 }
 
 export function MatchCard({ match, positionKey }: { match: Match; positionKey: string }) {
@@ -46,7 +46,7 @@ export function MatchCard({ match, positionKey }: { match: Match; positionKey: s
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{position.instrument}</span>
             <DirectionBadge direction={position.direction} />
-            <InfoChip label={position.currency} />
+            <InfoChip label={`${position.currency} wallet`} />
             {position.status === "OPEN" ? <InfoChip label="Still open" /> : null}
           </div>
           <p className="mt-1 text-sm text-forge-muted">
@@ -89,8 +89,8 @@ export function MatchCard({ match, positionKey }: { match: Match; positionKey: s
                 {changes.map((row) => (
                   <tr key={String(row.field)} className="border-t border-forge-line">
                     <td className="px-3 py-2">{row.label}</td>
-                    <td className="px-3 py-2 text-forge-muted">{money(row.logged, position.currency)}</td>
-                    <td className="px-3 py-2 font-medium">{money(row.exchange, position.currency)}</td>
+                    <td className="px-3 py-2 text-forge-muted">{money(row.logged, row.unit)}</td>
+                    <td className="px-3 py-2 font-medium">{money(row.exchange, row.unit)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -130,13 +130,13 @@ export function UnmatchedCard({ position, positionKey }: { position: Reconstruct
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold">{position.instrument}</span>
           <DirectionBadge direction={position.direction} />
-          <InfoChip label={position.currency} />
+          <InfoChip label={`${position.currency} wallet`} />
         </div>
         <p className="mt-1 text-sm text-forge-muted">
           {format(position.openedAt, "dd MMM HH:mm")}
           {" · "}
-          {position.quantity} @ {position.entryPrice.toFixed(4)}
-          {position.status === "CLOSED" ? ` → ${position.exitPrice?.toFixed(4)}` : " · still open"}
+          {position.quantity} {position.instrument} @ {position.entryPrice.toFixed(4)}
+          {position.status === "CLOSED" ? ` → ${position.exitPrice?.toFixed(4)} ${position.quoteCurrency}` : " · still open"}
           {position.status === "CLOSED" ? ` · net ${money(position.netPnl, position.currency)}` : ""}
         </p>
       </div>

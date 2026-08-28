@@ -892,6 +892,16 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - **A trap that cost a round:** a transaction's `fill_id` is its OWN id (v1 UUID), not the
     trades endpoint's `fill_id` (v4). The link to a trade is `parent_id` → `order_id`. Joining
     on `fill_id` looks right and matches nothing; a test pins it.
+  - **Price currency and wallet currency are different things.** `B-SOL_USDT` is priced in
+    USDT — `price` and `fee_amount` on a fill are both USDT — while
+    `margin_currency_short_name` names the wallet that settles it, which is sometimes INR.
+    Labelling price-derived money with the wallet made an INR-margined position read ~100x too
+    small, and it hid perfectly because it is correct whenever the two match, i.e. on every
+    USDT-margined trade. Now: **prices stay in the quote currency** (SOL at 104.80 is a price a
+    trader recognises; ₹10,460 is not), **money is carried into the wallet** at the rate the
+    exchange stamped on the nearest ledger row, and **quantity is in units of the coin** — it is
+    not a currency at all, and rendering "4.670 INR" is exactly how a unit bug hides in plain
+    sight. Every diff row now carries its own unit.
   - **Positions key on instrument AND margin currency.** The trader runs separate INR and USDT
     accounts, and a SOL long in one against a SOL short in the other would otherwise fold into
     one position and net out — silent corruption in the one module that decides what a trade was.

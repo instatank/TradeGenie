@@ -29,6 +29,7 @@ import {
   type CoindcxTransaction,
 } from "@/lib/coindcx";
 import { reconstructPositions, type Fill, type FundingEvent, type ReconstructedPosition } from "@/lib/positions";
+import { FALLBACK_INR_PER_USDT } from "@/lib/currency";
 import { createRecord, listRecords } from "@/lib/store";
 import type { ExchangeFill, ExchangeLedgerEntry } from "@/lib/types";
 
@@ -164,6 +165,7 @@ function toStoredFill(fill: Fill): Omit<ExchangeFill, "id"> & { id: string } {
     fee: fill.fee,
     executedAt: fill.timestamp,
     orderId: fill.orderId ?? null,
+    quoteCurrency: fill.quoteCurrency ?? "",
   };
 }
 
@@ -263,6 +265,51 @@ export async function syncExchange(credentials: CoindcxCredentials): Promise<Syn
   return report;
 }
 
+type RatePoint = { at: number; perUsdt: number };
+type RateHistory = Map<string, RatePoint[]>;
+
+/**
+ * Wallet currency -> observed "units per 1 USDT", oldest first.
+ *
+ * Read off `price_in_usdt`, which is the value of ONE unit of that row's wallet
+ * currency in USDT. Inverting it gives units-per-USDT. A USDT row reads 1 and
+ * inverts to 1, which is exactly right.
+ */
+function buildRateHistory(ledger: ExchangeLedgerEntry[]): RateHistory {
+  const history: RateHistory = new Map();
+  for (const entry of ledger) {
+    const perUnitUsdt = entry.rateUsdt;
+    if (!entry.currency || typeof perUnitUsdt !== "number" || !Number.isFinite(perUnitUsdt) || perUnitUsdt <= 0) continue;
+    const points = history.get(entry.currency) ?? [];
+    points.push({ at: entry.occurredAt.getTime(), perUsdt: 1 / perUnitUsdt });
+    history.set(entry.currency, points);
+  }
+  for (const points of history.values()) points.sort((a, b) => a.at - b.at);
+  return history;
+}
+
+/**
+ * The rate to carry money priced in `quote` into the `wallet` currency.
+ *
+ * 1 when they are the same currency — every USDT-margined trade — so the common
+ * case does no work and cannot drift. Falls back to the flat 100:1 only when the
+ * ledger has nothing for that wallet at all, which is the pre-ledger window.
+ */
+function settlementRateFor(history: RateHistory, wallet: string, quote: string, at: Date): number {
+  if (!wallet || !quote || wallet === quote) return 1;
+  if (quote !== "USDT") return 1; // Every pair here is USDT-quoted; refuse to guess otherwise.
+
+  const points = history.get(wallet);
+  if (!points?.length) return wallet === "INR" ? FALLBACK_INR_PER_USDT : 1;
+
+  const target = at.getTime();
+  let nearest = points[0];
+  for (const point of points) {
+    if (Math.abs(point.at - target) < Math.abs(nearest.at - target)) nearest = point;
+  }
+  return nearest.perUsdt;
+}
+
 /** A stable handle for a reconstructed position. One book per instrument per
  *  margin currency, so two positions cannot open in the same millisecond. */
 export function positionKey(position: ReconstructedPosition): string {
@@ -291,10 +338,19 @@ export async function exchangeView(): Promise<ExchangeView> {
     listRecords("exchangeLedger"),
   ]);
 
+  // How many units of each wallet currency one USDT was worth, over time. The
+  // exchange stamps this on every ledger row (an INR row reads price_in_usdt
+  // 0.010019, i.e. 1 USDT = 99.81 INR), so no FX feed is needed — and using the
+  // rate NEAREST each fill keeps a year-old trade converted at the rate that
+  // actually applied rather than today's.
+  const rateHistory = buildRateHistory(storedLedger);
+
   const fills: Fill[] = storedFills.map((fill) => ({
     id: fill.id,
     instrument: fill.instrument,
     currency: fill.currency,
+    quoteCurrency: fill.quoteCurrency || "",
+    settlementRate: settlementRateFor(rateHistory, fill.currency, fill.quoteCurrency || "", fill.executedAt),
     side: fill.side,
     quantity: fill.quantity,
     price: fill.price,
