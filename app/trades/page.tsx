@@ -6,6 +6,7 @@ import { PageTitle, SelectField } from "@/components/Fields";
 import { PaginationControls, ViewTabs, normalizePage, normalizePageSize, paginate } from "@/components/ListControls";
 import { SavedViews } from "@/components/SavedViews";
 import { TagPills } from "@/components/TagPills";
+import { TradeFilterBox } from "@/components/TradeFilterBox";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
@@ -13,6 +14,7 @@ import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize
 import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
 import { db, getBaseCurrency, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog, type OptionChoice } from "@/lib/options";
+import { filterTradesByQuery } from "@/lib/search";
 import { calculateTotalR, calculateWinRate, getTradePnl, tradeNeedsReview } from "@/lib/metrics";
 import { checklistScore, setupSteps } from "@/lib/setups";
 import type { Setup } from "@/lib/types";
@@ -44,8 +46,13 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
   const page = normalizePage(params.page);
   const pageSize = normalizePageSize(params.pageSize, [10, 25, 50], 25);
   const calendarRange = getCalendarRange(params);
+  const query = params.q ?? "";
   const thisWeek = startOfWeek(new Date(), { weekStartsOn: 1 });
-  const trades = allTrades
+  // The free-text box runs LAST in spirit but first in the chain: it is the
+  // same grammar global search uses, over the same trade text, so one typed
+  // word reaches the setup, the mood, a mechanism, a mistake label, a #tag or
+  // anything the trader wrote — without needing to know which dropdown owns it.
+  const trades = filterTradesByQuery(allTrades, query, options)
     .filter((trade) => applyTradeView(trade, view, thisWeek))
     .filter((trade) => isWithinCalendarRange(trade.tradeDateTime, calendarRange))
     .filter((trade) => !params.instrument || trade.instrument.includes(params.instrument.toUpperCase()))
@@ -101,6 +108,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
 
       <form className="mb-4 flex flex-wrap items-end gap-2">
         <input type="hidden" name="view" value={view} />
+        <TradeFilterBox value={query} params={params} matchCount={trades.length} />
         <label className="field">
           <span className="text-xs font-medium text-forge-muted">Symbol</span>
           <input name="instrument" defaultValue={params.instrument} placeholder="BTC…" className="input w-28 uppercase placeholder:normal-case" />
@@ -232,7 +240,17 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
         ))}
         {!trades.length ? (
           <div className="panel muted">
-            No trades match this view. <Link href="/trades/new" className="text-forge-blue hover:underline">Log your first one</Link> — symbol and direction is all it takes.
+            {query.trim() ? (
+              <>
+                Nothing matches <span className="font-medium text-forge-ink">{query.trim()}</span>. Words match anywhere in a
+                trade (setup, mood, mechanism, thesis, lesson, mistake); <span className="font-medium text-forge-ink">#tag</span> matches
+                that exact tag. <Link href={clearedQueryPath(params)} className="text-forge-blue hover:underline">Clear the search</Link>.
+              </>
+            ) : (
+              <>
+                No trades match this view. <Link href="/trades/new" className="text-forge-blue hover:underline">Log your first one</Link> — symbol and direction is all it takes.
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -593,6 +611,17 @@ function rowUrl(params: Record<string, string | undefined>, tradeId: string) {
   }
   next.set("open", tradeId);
   return `/trades?${next.toString()}#trade-${tradeId}`;
+}
+
+/** The same page, minus the free-text search — what "clear the search" means
+ *  when nothing matched but the other filters are still worth keeping. */
+function clearedQueryPath(params: Record<string, string | undefined>) {
+  const next = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value && key !== "q" && !TRANSIENT_PARAMS.includes(key)) next.set(key, value);
+  }
+  const query = next.toString();
+  return query ? `/trades?${query}` : "/trades";
 }
 
 function pickEnum(options: readonly string[], value: string | undefined) {

@@ -1043,6 +1043,47 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     would outlive its usefulness), and any change to the going-forward mechanic — you open the
     trade, the sync adds the numbers on top.
 
+- **Same-route filter links were dead — the loading skeleton was eating them.** Every
+  navigation that changes only the query string on the page you are already on (the `/trades`
+  view tabs, pagination, saved views, "Clear", the `?open=` row links, `/notes`' filter chips,
+  and the toast dropping `?feedback=` out of the URL) silently did **nothing** with JS on. The
+  router fetched the new RSC payload, got a 200, aborted it and never committed; waiting 15
+  seconds or clicking a second time changed nothing. Only the plain `<form>` GET buttons
+  worked, because those are full page loads.
+  - **The cause is a Suspense boundary above the page — i.e. `app/loading.tsx`.** Reproduced on
+    Next 15.5.19 and 15.5.24; a route-level `app/trades/loading.tsx` and a hand-rolled
+    `<Suspense>` around `{children}` in the layout both reproduce it, and deleting the boundary
+    fixes every one of those controls at once. So the skeleton is gone, and
+    `tests/unit/navigation.test.ts` fails if a `loading.tsx` ever comes back — without that
+    tripwire this returns as "the tabs stopped working" months later.
+  - **The feedback it existed for is kept**: `components/LinkPending.tsx` (`useLinkStatus`, a
+    child of the nav `<Link>`s) spins on the tapped item while a navigation is in flight, so a
+    tap still visibly does something. Verified in a real browser: it appears on a slow
+    navigation and clears on arrival. What is genuinely lost is the full-page skeleton for a
+    cold cross-route jump — measured at ~200–300ms here, prefetched, versus the multi-second
+    waits the skeleton was written for before the Mumbai region move.
+
+- **The one-filter-at-a-time box on `/trades`** (`?q=`, `filterTradesByQuery` in `lib/search.ts`,
+  `components/TradeFilterBox.tsx`). "More filters & sorting" is right when you are deliberately
+  combining filters and wrong when you remember exactly one thing about a trade — a setup name,
+  a mood, a mechanism, a mistake, a word from the thesis, a `#tag` — and have to work out which
+  dropdown owns it first.
+  - **It is the same grammar and the same trade text as global search.** `tradeSearchDoc()` is
+    now the ONE definition of a trade's searchable fields, used by `buildSearchIndex()` and by
+    the filter, so `#fomo btc` means the same thing on `/trades` as on `/search`, and a field
+    added to one appears in both. Two copies of "what text belongs to a trade" would drift the
+    way two tag tokenizers did in DayOS.
+  - **The URL stays the truth.** `?q=` is a real filter: the server does the filtering, so the
+    summary line, the day groups and the pagination agree with what is on screen, it survives
+    the view tabs, and `SavedViews` picks it up for free. The client component only makes it
+    feel live — a 250ms debounce into `router.replace` inside a transition, which keeps the
+    caret and the old rows in place while the new list is fetched (~1s here end to end).
+  - **It degrades to a plain form field.** With JS off it is an ordinary `<input name="q">`
+    inside the page's existing filter form, so "Filter" and Enter work like every other field.
+  - Deliberately NOT done: a second matcher on the client (a browser-side "quick match" over the
+    rendered rows would be exactly the two-tokenizer mistake), AI-assisted querying, and any
+    stored index — the scan is over the trades already loaded.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

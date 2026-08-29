@@ -1,7 +1,7 @@
 import { format } from "date-fns";
 import { humanize } from "@/lib/constants";
-import { db, getTradesWithMistakes } from "@/lib/data";
-import { getOptionCatalog } from "@/lib/options";
+import { db, getTradesWithMistakes, type TradeInBaseCurrency } from "@/lib/data";
+import { getOptionCatalog, type OptionCatalog } from "@/lib/options";
 import { normalizeTag } from "@/lib/tags";
 
 // One unified search index over every collection. Each record becomes a flat
@@ -87,33 +87,7 @@ export async function buildSearchIndex(): Promise<SearchDoc[]> {
 
   const docs: SearchDoc[] = [];
 
-  for (const trade of trades) {
-    docs.push({
-      kind: "trade",
-      id: trade.id,
-      href: `/trades/${trade.id}`,
-      title: `${trade.instrument} · ${humanize(trade.direction)} · ${humanize(trade.status)}`,
-      subtitle: trade.setupName ?? "No setup",
-      date: trade.tradeDateTime,
-      tags: trade.tags ?? [],
-      fields: fields([
-        ["Instrument", trade.instrument],
-        ["Setup", trade.setupName],
-        ["Thesis", trade.entryThesis],
-        ["Pre-mortem", trade.premortem],
-        ["Invalidation", trade.invalidation],
-        ["Concern", trade.concern],
-        ["Exit reason", trade.exitReason],
-        ["Lesson", trade.lesson],
-        ["Notes", trade.notes],
-        ["Mistakes", trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")],
-        ["Conditions", (trade.conditions ?? []).map(options.labeler("condition")).join(", ")],
-        ["Timeframes", (trade.timeframes ?? []).map(options.labeler("tradeTimeframe")).join(", ")],
-        ["Mechanisms", (trade.mechanisms ?? []).map(options.labeler("mechanism")).join(", ")],
-        ["Mind state", options.label("mindState", trade.emotionalState)],
-      ]),
-    });
-  }
+  for (const trade of trades) docs.push(tradeSearchDoc(trade, options));
 
   for (const transcript of transcripts) {
     docs.push({
@@ -306,12 +280,74 @@ export function searchIndex(docs: SearchDoc[], query: string): SearchResult[] {
   if (!parsed.tags.length && !parsed.terms.length) return [];
   const results: SearchResult[] = [];
   for (const doc of docs) {
-    if (!parsed.tags.every((tag) => doc.tags.includes(tag))) continue;
-    const haystack = docHaystack(doc);
-    if (!parsed.terms.every((term) => haystack.includes(term))) continue;
+    if (!matchesQuery(doc, parsed)) continue;
     results.push({ ...doc, snippet: buildSnippet(doc, parsed) });
   }
   return results;
+}
+
+/** Does one record satisfy a parsed query? The one place the grammar is
+ *  actually applied — global search and the /trades filter box share it, so
+ *  the same words can never mean two different things in two places. */
+export function matchesQuery(doc: SearchDoc, parsed: ParsedQuery): boolean {
+  if (!parsed.tags.every((tag) => doc.tags.includes(tag))) return false;
+  if (!parsed.terms.length) return true;
+  const haystack = docHaystack(doc);
+  return parsed.terms.every((term) => haystack.includes(term));
+}
+
+/**
+ * The searchable form of a trade — ONE definition, used by the global search
+ * index above and by the free-text filter on /trades.
+ *
+ * That sharing is the whole point: a trade's setup name, mind state, mechanism
+ * labels, mistake labels and tags are searchable in exactly the same way from
+ * either surface, and a field added here shows up in both at once. Two copies
+ * of "what text belongs to a trade" would drift the same way two tag
+ * tokenizers did in DayOS.
+ */
+export function tradeSearchDoc(trade: TradeInBaseCurrency, options: OptionCatalog): SearchDoc {
+  return {
+    kind: "trade",
+    id: trade.id,
+    href: `/trades/${trade.id}`,
+    // Direction and status live in the title, so "long" and "closed" are
+    // typeable words on the trades filter without their own fields.
+    title: `${trade.instrument} · ${humanize(trade.direction)} · ${humanize(trade.status)}`,
+    subtitle: trade.setupName ?? "No setup",
+    date: trade.tradeDateTime,
+    tags: trade.tags ?? [],
+    fields: fields([
+      ["Instrument", trade.instrument],
+      ["Setup", trade.setupName],
+      ["Thesis", trade.entryThesis],
+      ["Pre-mortem", trade.premortem],
+      ["Invalidation", trade.invalidation],
+      ["Concern", trade.concern],
+      ["Exit reason", trade.exitReason],
+      ["Lesson", trade.lesson],
+      ["Notes", trade.notes],
+      ["Mistakes", trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")],
+      ["Conditions", (trade.conditions ?? []).map(options.labeler("condition")).join(", ")],
+      ["Timeframes", (trade.timeframes ?? []).map(options.labeler("tradeTimeframe")).join(", ")],
+      ["Mechanisms", (trade.mechanisms ?? []).map(options.labeler("mechanism")).join(", ")],
+      ["Mind state", options.label("mindState", trade.emotionalState)],
+      ["Grade", trade.entryGrade && trade.entryGrade !== "NA" ? `Grade ${trade.entryGrade}` : null],
+    ]),
+  };
+}
+
+/** The /trades free-text box: the same grammar as search, applied to the list
+ *  already on screen. An empty query filters nothing (unlike `searchIndex`,
+ *  which returns no results — a filter's neutral state is "everything"). */
+export function filterTradesByQuery<T extends TradeInBaseCurrency>(
+  trades: T[],
+  query: string,
+  options: OptionCatalog,
+): T[] {
+  const parsed = parseQuery(query);
+  if (!parsed.tags.length && !parsed.terms.length) return trades;
+  return trades.filter((trade) => matchesQuery(tradeSearchDoc(trade, options), parsed));
 }
 
 export type TagUsage = { tag: string; count: number; kinds: SearchKind[] };

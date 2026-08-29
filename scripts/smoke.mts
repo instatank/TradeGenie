@@ -102,6 +102,10 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/import", "Log as archive", "the per-position archive button"],
   ["/import", "Log all", "the bulk archive control"],
   ["/trades", "Rebuilt from exchange fills", "the archive badge on a trade that was never journaled"],
+  ["/trades", "Setup, mood, mechanism", "the free-text filter box"],
+  // Proves the box filters on the SERVER, not just in the browser: a query
+  // nothing can match must empty the list, not render it unchanged.
+  ["/trades?q=zzznotatrade", "Nothing matches", "the free-text filter actually narrowing the list"],
 ];
 
 async function fetchBody(route: string): Promise<string> {
