@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { LinkPending } from "@/components/LinkPending";
 
 export function MoreNav({ items }: { items: { href: string; label: string }[] }) {
   const [open, setOpen] = useState(false);
@@ -45,9 +46,10 @@ export function MoreNav({ items }: { items: { href: string; label: string }[] })
               key={item.href}
               href={item.href}
               onClick={() => setOpen(false)}
-              className="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink"
+              className="flex items-center whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-forge-muted transition hover:bg-forge-panel hover:text-forge-ink"
             >
               {item.label}
+              <LinkPending />
             </Link>
           ))}
         </div>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { LinkPending } from "@/components/LinkPending";
 
 // Primary nav with an active-page highlight so you always know where you are.
 export function NavLinks({ items }: { items: { href: string; label: string }[] }) {
@@ -15,11 +16,12 @@ export function NavLinks({ items }: { items: { href: string; label: string }[] }
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
+            className={`inline-flex items-center whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
               active ? "bg-forge-ink text-white" : "text-forge-muted hover:bg-forge-panel hover:text-forge-ink"
             }`}
           >
             {item.label}
+            <LinkPending />
           </Link>
         );
       })}
