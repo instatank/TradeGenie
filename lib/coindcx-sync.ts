@@ -409,6 +409,10 @@ export function positionKey(position: ReconstructedPosition): string {
 
 export type ExchangeView = {
   positions: ReconstructedPosition[];
+  /** The fills the positions were folded from, enriched with the conversion
+   *  rates that applied at each. Carried out so an export can show the raw
+   *  execution log behind a position without re-deriving the rates. */
+  fills: Fill[];
   unattributedFunding: FundingEvent[];
   /** Positions opened before the ledger begins, so their funding is missing
    *  and their net P&L understates the true cost. Named, never hidden. */
@@ -488,6 +492,7 @@ export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[]): Ex
 
   return {
     positions,
+    fills,
     unattributedFunding,
     positionsMissingFunding,
     ledgerFrom: ledgerSpan.from,

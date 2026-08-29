@@ -1,6 +1,7 @@
 import { credentialsFromEnv } from "@/lib/coindcx";
 import { liveExchangeView } from "@/lib/coindcx-sync";
 import { formatMoney, sumInCurrency, type Amount, type Currency } from "@/lib/currency";
+import { closedBefore, istMidnight, istStamp } from "@/lib/tax-export";
 import type { ReconstructedPosition } from "@/lib/positions";
 
 // Futures activity for a tax year, read STRAIGHT FROM THE EXCHANGE.
@@ -25,27 +26,18 @@ import type { ReconstructedPosition } from "@/lib/positions";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/**
- * The Indian financial year runs 1 April → 31 March in IST, so the boundary is
- * 18:30 UTC the day before. This is not pedantry: a trade closed at 02:00 IST on
- * 1 April is 20:30 UTC on 31 March, and a UTC-midnight cutoff would file it in
- * the wrong year.
- */
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-function istMidnight(iso: string): Date {
-  return new Date(new Date(`${iso}T00:00:00.000Z`).getTime() - IST_OFFSET_MS);
-}
-
+/** IST wall-clock to the minute; the seconds are noise in a summary. */
 function istDate(date: Date): string {
-  return new Date(date.getTime() + IST_OFFSET_MS).toISOString().replace("T", " ").slice(0, 16);
+  return istStamp(date, false);
 }
 
-/** A closed position is realized on its CLOSE — that is the taxable event. */
+/**
+ * The window rule, shared with the CSV via `closedBefore` so the summary and the
+ * evidence behind it can never select different trades.
+ */
 function closedInWindow(position: ReconstructedPosition, from: Date | null, to: Date): boolean {
-  if (position.status !== "CLOSED" || !position.closedAt) return false;
-  const at = position.closedAt.getTime();
-  return at < to.getTime() && (from === null || at >= from.getTime());
+  if (!closedBefore(position, to)) return false;
+  return from === null || position.closedAt!.getTime() >= from.getTime();
 }
 
 function totals(positions: ReconstructedPosition[], target: Currency) {
@@ -124,6 +116,26 @@ function summarize(
   if (combined.net.dropped > 0) {
     lines.push(`      WARNING: ${combined.net.dropped} trade(s) could not be converted at all and are MISSING from the combined figure.`);
   }
+  lines.push("");
+
+  // Turnover, for the CA. Under the ICAI guidance note for derivatives this is
+  // the sum of ABSOLUTE differences — a loss adds to turnover exactly as a win
+  // does — which is why it is computed here rather than left as "net P&L, but
+  // positive". Both bases are given because practice differs on whether the
+  // costs of the trade come out first; the CA picks, and the CSV carries the
+  // per-trade columns either one is built from.
+  const turnover = totals(
+    positions.map((position) => ({
+      ...position,
+      grossPnl: Math.abs(position.grossPnl),
+      netPnl: Math.abs(position.netPnl),
+    })),
+    base,
+  );
+  lines.push(`  TURNOVER (sum of absolute profits and losses), in ${base}:`);
+  lines.push(`      On gross P&L : ${formatMoney(turnover.gross.value, base)}`);
+  lines.push(`      On net P&L   : ${formatMoney(turnover.net.value, base)}`);
+  lines.push("      Which basis your CA wants is their call — both are in the CSV, per trade.");
   lines.push("");
 }
 
@@ -271,6 +283,15 @@ export async function GET(request: Request) {
     lines.push("Add &base=USDT to see combined totals in USDT instead of INR.");
     lines.push("");
   }
+
+  lines.push("CSV FOR YOUR CA");
+  lines.push("-".repeat(15));
+  lines.push("  One row per trade (the turnover basis — carries abs_gross_pnl and abs_net_pnl):");
+  lines.push(`    /api/tax-export?before=${beforeParam}`);
+  lines.push("  One row per individual execution (the raw audit trail back to the statement):");
+  lines.push(`    /api/tax-export?before=${beforeParam}&rows=fills`);
+  lines.push("  Both download as .csv and open straight in Excel.");
+  lines.push("");
 
   lines.push("=".repeat(70));
   lines.push("These are the exchange's own numbers, folded into positions — not the");
