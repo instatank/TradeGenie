@@ -292,6 +292,7 @@ function TradeRow({
             <span className="text-xs">{trade.setupName ?? ""}</span>
           )}
         </span>
+        {trade.reconstructed ? <ArchiveBadge /> : null}
         <PlanBadge plan={trade.followedPlan} />
         {trade.entryGrade && trade.entryGrade !== "NA" ? <GradeBadge grade={trade.entryGrade} /> : null}
         {trade.mistakeTags.length ? (
@@ -476,6 +477,20 @@ function TradePreview({
 
 function InfoChip({ label }: { label: string }) {
   return <span className="rounded-full bg-forge-panel px-2 py-0.5 text-xs text-forge-muted">{label}</span>;
+}
+
+// A trade rebuilt from exchange fills, never journaled. Marked because
+// otherwise a row with no thesis, no plan and no grade is indistinguishable
+// from one you logged and then neglected — and only the second is a problem.
+function ArchiveBadge() {
+  return (
+    <span
+      className="hidden shrink-0 rounded-full bg-forge-panel px-2 py-0.5 text-xs font-medium text-forge-muted sm:inline"
+      title="Rebuilt from exchange fills — the numbers are real, nothing was written at the time"
+    >
+      archive
+    </span>
+  );
 }
 
 function PlanBadge({ plan }: { plan: string | null }) {

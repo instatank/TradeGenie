@@ -991,6 +991,58 @@ field). Old stored values still render via `humanize()`; we just stop offering r
   - Deliberately NOT done: converting stored values, a per-page currency toggle, and any FX
     lookup. The rate always comes from the exchange's own row or is reported as inexact.
 
+- **The back catalogue, logged as archive trades** (`archiveTradeRecord` in `lib/reconcile.ts`,
+  `Trade.reconstructed`, the three `archive…ExchangePositionsAction`s). Ten months of real
+  trades sat on `/import` under "Not journaled" with no way into the journal short of retyping
+  each one, because the app's standing rule is that **nothing auto-creates a trade**. That rule
+  is right and stays — it is what stops this being a P&L spreadsheet — but it was answering the
+  wrong question for a position from March: refusing to store the trade does not bring back a
+  thesis that was never written, it just leaves the P&L history incomplete too.
+  - **The exception is explicit, opt-in, and never runs during a sync.** Three buttons on the
+    "Not journaled" list — per-position **Log as archive**, **Log selected as archive**, and
+    **Log all N as archive** — and nothing else in the app reaches the builder. **Log this
+    trade** stays the primary button on every card: for anything recent, writing why is still
+    the point.
+  - **Half a trade, and honest about which half.** Every number comes from `diffTrade()` — the
+    same short list a sync is allowed to touch — so the create path inherits the same structural
+    guarantee the update path has. Every subjective field is left **empty**: not "NA", not a
+    placeholder sentence, not a machine-minted `#archive` tag. Same line already drawn for
+    AI-proposed tags and categories: the vocabulary grows from the trader's own typing.
+    `marketContext` is null (snapshotting today's market onto a March trade would be a
+    fabrication with a timestamp on it) and `stopPrice`/`targetPrice`/`rMultiple` are null
+    because a stop is *plan*, not execution, and back-solving one invents the missing thing.
+  - **`reconstructed: true` is the whole reason this needed thought.** "Closed with no
+    followedPlan" means "review me" everywhere in the app, and for these it means "there was
+    nothing to review". Without the flag, eighty archived positions would nag `Review →` on
+    Today forever — burying the one trade from this morning that genuinely needs ten seconds —
+    and would each score 20/100 on `tradeProcessScore`, permanently triggering the coach's
+    "you're often breaking your own rules" about trades taken before there were rules.
+    So `tradeNeedsReview()` returns false and `tradeProcessScore()` returns **null, not zero**
+    for them. They still count in P&L, win rate, the equity curve and the calendar — which is
+    the entire point of logging them. `calculateRuleAdherenceRate` already ignored an
+    unanswered plan; a test pins that so a later "count NA as a miss" cannot indict the archive.
+  - **Idempotent by construction, not by a guard.** Each archived trade carries the position's
+    `exchangeKey`, so on the next render `matchPositions()` links it as an established match and
+    the position is no longer unjournaled — with zero changed fields, so it never lands in
+    "Needs review" either. Pressing the button twice cannot mint a second copy; a test proves it.
+  - **Status follows the exchange**, so a position still open is logged `OPEN` and the ordinary
+    mechanic — you close it, the sync fills in the exit — takes over from there. `createdAt` is
+    *now* while `tradeDateTime` is when the position opened: back-dating the record would credit
+    the journaling streak with days the trader never showed up, which is the one thing that
+    streak must never do.
+  - Marked wherever it shows: an `archive` chip on the `/trades` row and a plain-English notice
+    on the trade page. A record with real numbers and not one word otherwise reads as a page
+    that failed to load — and only a *neglected* trade should look like a problem.
+  - `SubmitButton` gained an optional `formAction` so one set of checkboxes drives both bulk
+    actions; two forms would have meant two selections that could disagree.
+  - The seed now creates one archived trade with the real builder (so it cannot drift), and
+    `npm run smoke` asserts the archive controls and the badge actually render — all conditional
+    renders `next build` cannot reach.
+  - Deliberately NOT done: auto-archiving during a sync, back-filling words from anywhere, an
+    "archive" filter tab on `/trades` (the badge answers it, and a tab for a one-time backfill
+    would outlive its usefulness), and any change to the going-forward mechanic — you open the
+    trade, the sync adds the numbers on top.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

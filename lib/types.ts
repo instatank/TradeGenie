@@ -195,6 +195,21 @@ export type Trade = {
    *  never re-guessed by the proximity matcher. Absent on every hand-logged
    *  trade that has not been reconciled, which is the normal state. */
   exchangeKey?: string | null;
+  /**
+   * This trade was never journaled. It was rebuilt from exchange fills after
+   * the fact, so it carries the objective numbers and no words at all — no
+   * thesis, no plan, no grade, no lesson, because none were ever written.
+   *
+   * The flag exists because "closed with no followedPlan" normally means
+   * "review me", and for these it means "there was nothing to review". Without
+   * it, an archive backfill would nag on Today forever and score 20/100 on a
+   * process metric measuring a process that was never recorded. See
+   * `tradeNeedsReview` and `tradeProcessScore` in lib/metrics.ts.
+   *
+   * It is provenance, so it never clears: reviewing one of these later fills in
+   * the words, but it stays true that nothing was written at the time.
+   */
+  reconstructed?: boolean;
   // What the market looked like when this trade was entered, copied once from
   // SignalDesk and frozen. Never recomputed — the point is what it looked like
   // THEN. Absent on every trade logged before the bridge existed, and null

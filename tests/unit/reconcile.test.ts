@@ -7,7 +7,7 @@
 // tries to steal, and the subjective fields that must never be touched.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { acceptPatch, changedFields, diffTrade, matchPositions, willCloseTrade, MATCH_WINDOW_HOURS, PROVENANCE_FIELDS } from "@/lib/reconcile";
+import { acceptPatch, archiveTradeRecord, changedFields, diffTrade, matchPositions, willCloseTrade, ARCHIVE_IDENTITY_FIELDS, MATCH_WINDOW_HOURS, PROVENANCE_FIELDS, SUBJECTIVE_FIELDS } from "@/lib/reconcile";
 import type { ReconstructedPosition } from "@/lib/positions";
 import type { Trade } from "@/lib/types";
 
@@ -264,5 +264,104 @@ describe("willCloseTrade", () => {
   it("never closes a trade the exchange still shows open", () => {
     assert.equal(willCloseTrade(match("OPEN", "OPEN")), false);
     assert.equal(acceptPatch(match("OPEN", "OPEN"), "k").status, undefined);
+  });
+});
+
+// The archive path — the one place exchange data becomes a NEW trade.
+//
+// The danger here is the opposite of the accept path's. An accept can only
+// overwrite fields diffTrade lists, so the subjective half is safe by
+// construction. A create writes every field on the record, so nothing stops it
+// putting "imported from CoinDCX" in the notes, "NA" in the plan, or an
+// #archive tag into the trader's own vocabulary — each of which would be the
+// machine writing words in their name. These tests are the guard.
+describe("archiveTradeRecord", () => {
+  it("takes every number from the exchange and nothing else", () => {
+    const source = position();
+    const record = archiveTradeRecord(source, "ETH|USDT|1", { marketType: "CRYPTO_PERP", now: new Date("2026-08-29T09:00:00Z") });
+
+    assert.equal(record.entryPrice, source.entryPrice);
+    assert.equal(record.exitPrice, source.exitPrice);
+    assert.equal(record.quantity, source.quantity);
+    assert.equal(record.fees, source.fees);
+    assert.equal(record.funding, source.funding);
+    assert.equal(record.realizedPnl, source.grossPnl);
+    assert.equal(record.netPnl, source.netPnl);
+    assert.equal(record.instrument, "ETH");
+    assert.equal(record.direction, "LONG");
+    assert.equal(record.status, "CLOSED");
+    assert.equal(record.exchangeKey, "ETH|USDT|1");
+    assert.equal(record.currency, "USDT");
+    assert.deepEqual(record.moneyRate, { inr: 99.81, usdt: 1 });
+    assert.equal(record.reconstructed, true);
+  });
+
+  it("writes not one word of the trader's", () => {
+    const record = archiveTradeRecord(position(), "k", { marketType: "CRYPTO_PERP", now: new Date() });
+    for (const field of SUBJECTIVE_FIELDS) {
+      const value = record[field];
+      const empty = value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+      assert.ok(empty, `${field} must be empty on an archived trade, got ${JSON.stringify(value)}`);
+    }
+    // NA is the enum's own "nothing recorded", not a grade being asserted.
+    assert.equal(record.entryGrade, "NA");
+    // A stop and a target are plan, not execution: back-solving one would
+    // invent the very thing that was never written.
+    assert.equal(record.stopPrice, null);
+    assert.equal(record.targetPrice, null);
+    assert.equal(record.rMultiple, null);
+    // Today's market on a trade from March would be a fabrication with a
+    // timestamp on it. The bridge captures entry conditions or nothing.
+    assert.equal(record.marketContext, null);
+  });
+
+  it("files the trade by when it was taken and the record by when it was made", () => {
+    const now = new Date("2026-08-29T09:00:00Z");
+    const record = archiveTradeRecord(position(), "k", { marketType: "CRYPTO_PERP", now });
+    // Back-dating createdAt would credit the journaling streak with days the
+    // trader never showed up — the one thing that streak must never do.
+    assert.equal(record.createdAt.getTime(), now.getTime());
+    assert.equal(record.tradeDateTime.getTime(), new Date("2026-08-27T02:00:00Z").getTime());
+  });
+
+  it("logs a position still open on the exchange as open, not closed", () => {
+    const live = position({ status: "OPEN", closedAt: null, exitPrice: null, grossPnl: 0, netPnl: 0 });
+    const record = archiveTradeRecord(live, "k", { marketType: "CRYPTO_PERP", now: new Date() });
+    assert.equal(record.status, "OPEN");
+    assert.equal(record.exitPrice, null);
+    // Neither P&L figure is knowable until it closes, so neither is asserted.
+    assert.equal(record.realizedPnl, null);
+    assert.equal(record.netPnl, null);
+  });
+
+  it("carries the position key, so logging it twice cannot mint a second copy", () => {
+    const source = position();
+    const key = keyOf(source);
+    const archived = { ...archiveTradeRecord(source, key, { marketType: "CRYPTO_PERP", now: new Date() }), id: "a1" };
+    const { matches, unmatched } = matchPositions([source], [archived], keyOf);
+    assert.equal(unmatched.length, 0, "an archived position must no longer look unjournaled");
+    assert.equal(matches[0]?.confirmed, true);
+    // And it arrives already agreeing, so it never lands in "Needs review".
+    assert.equal(changedFields(diffTrade(archived, source)).length, 0);
+  });
+
+  it("touches no field outside the three named lists", () => {
+    // The same containment guarantee acceptPatch has, extended to the create
+    // path: if a field appears here that is in none of the lists, either it is
+    // a new exception that should be named, or it is the journal's half being
+    // written by the exchange.
+    const allowed = new Set<string>([
+      ...diffTrade(trade(), position()).map((row) => String(row.field)),
+      ...PROVENANCE_FIELDS,
+      ...ARCHIVE_IDENTITY_FIELDS,
+      ...SUBJECTIVE_FIELDS,
+      // The record's own bookkeeping, plus the fields explicitly nulled above.
+      "createdAt", "updatedAt", "marketType", "entryGrade",
+      "stopPrice", "targetPrice", "maePrice", "mfePrice", "totalOrderValue", "leverage", "rMultiple", "marketContext",
+    ]);
+    const record = archiveTradeRecord(position(), "k", { marketType: "CRYPTO_PERP", now: new Date() });
+    for (const field of Object.keys(record)) {
+      assert.ok(allowed.has(field), `${field} is written by the archive path but named in no list`);
+    }
   });
 });

@@ -15,6 +15,8 @@ export type MetricTrade = {
   checklistSteps?: string[];
   emotionalState?: string | null;
   followedPlan?: string | null;
+  /** Rebuilt from exchange fills, never journaled — see lib/types.ts. */
+  reconstructed?: boolean;
   entryPrice?: number | null;
   stopPrice?: number | null;
   exitPrice?: number | null;
@@ -185,7 +187,14 @@ export function getTradePnl(trade: MetricTrade) {
 // three never disagree. Answering "did I follow my plan?" is what closes the
 // loop — the lesson is nudged, never required (an empty lesson used to leave a
 // reviewed trade nagging as "Review →" forever).
-export function tradeNeedsReview(trade: { status?: string | null; followedPlan?: string | null }) {
+//
+// A reconstructed trade is excluded, and that is not a loophole: it was never
+// journaled, so there is no plan to have followed and no decision of yours to
+// grade. Nagging a back catalogue of eighty archived positions would bury the
+// one trade from this morning that genuinely does need ten seconds of thought —
+// which is the only job this nudge has.
+export function tradeNeedsReview(trade: { status?: string | null; followedPlan?: string | null; reconstructed?: boolean }) {
+  if (trade.reconstructed) return false;
   return trade.status === "CLOSED" && (trade.followedPlan ?? "NA") === "NA";
 }
 
@@ -193,6 +202,12 @@ export function tradeNeedsReview(trade: { status?: string | null; followedPlan?:
 // This is the beginner's real KPI. A losing trade can be A-grade process;
 // a winning trade can be terrible process. We score the second kind down.
 export function tradeProcessScore(trade: MetricTrade): number | null {
+  // Null, not zero. A trade rebuilt from exchange fills has no plan, no
+  // invalidation and no grade because none were ever written — scoring that as
+  // 20/100 would read as "you broke your own rules" about trades taken before
+  // there were rules to break, and would drag the average (and the coach's
+  // "you're often breaking your own rules" insight) down permanently.
+  if (trade.reconstructed) return null;
   const reviewed = trade.status === "CLOSED" || (trade.followedPlan != null && trade.followedPlan !== "NA");
   if (!reviewed) return null;
   let score = 0;

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { format } from "date-fns";
-import { ArrowRight, Check, EyeOff } from "lucide-react";
-import { acceptExchangeMatchAction, dismissExchangePositionAction } from "@/app/actions";
+import { Archive, ArrowRight, Check, EyeOff } from "lucide-react";
+import { acceptExchangeMatchAction, archiveExchangePositionAction, dismissExchangePositionAction } from "@/app/actions";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TagPills } from "@/components/TagPills";
 import { changedFields, diffTrade, willCloseTrade, type Match } from "@/lib/reconcile";
@@ -145,9 +145,17 @@ export function MatchCard({
 /**
  * A position with no journal entry.
  *
- * Deliberately NOT auto-created as a trade. The prompt to log it is the point:
- * an app that silently filled these in would leave you with a P&L spreadsheet
- * instead of a journal, and the writing-down is the habit worth protecting.
+ * Nothing here is ever auto-created. The prompt to log it is the point: an app
+ * that silently filled these in would leave you with a P&L spreadsheet instead
+ * of a journal, and the writing-down is the habit worth protecting.
+ *
+ * Three doors, in the order they deserve to be taken:
+ *   - **Log this trade** opens the real form, where you write why. This is the
+ *     one that keeps the journal a journal, so it stays the primary button.
+ *   - **Log as archive** stores the exchange's numbers with every subjective
+ *     field left empty, for a trade whose reasoning is genuinely gone — taken
+ *     before the journal existed. It is secondary and it says what it costs.
+ *   - **Hide** takes it out of the nudge and changes nothing.
  */
 export function UnmatchedCard({
   position,
@@ -156,10 +164,13 @@ export function UnmatchedCard({
 }: {
   position: ReconstructedPosition;
   positionKey: string;
-  /** The id of the "Dismiss selected" form elsewhere on the page. Same `form`
-   *  attribute trick as MatchCard — nothing here ever bulk-logs a trade, since
-   *  each one still needs its own thesis, so the only bulk action is hiding.
-   *  Omitted when there is nothing to bulk-act on. */
+  /** The id of the bulk form elsewhere on the page. Same `form` attribute trick
+   *  as MatchCard: a checkbox cannot sit inside this card's own per-item forms,
+   *  so it submits to a form it names. That form carries both bulk actions —
+   *  dismiss, and archive the back catalogue — and neither of them is the
+   *  default: boxes start unchecked here, because logging or hiding a batch of
+   *  real trades is a deliberate act, not the common case. Omitted when there is
+   *  nothing to bulk-act on. */
   bulkFormId?: string;
 }) {
   const logHref = `/trades/new?instrument=${encodeURIComponent(position.instrument)}&direction=${position.direction}`;
@@ -192,8 +203,18 @@ export function UnmatchedCard({
           {position.status === "CLOSED" ? ` · net ${money(position.netPnl, position.currency)}` : ""}
         </p>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
         <Link href={logHref} className="button min-h-8 px-3 text-sm">Log this trade</Link>
+        <form action={archiveExchangePositionAction}>
+          <input type="hidden" name="exchangeKey" value={positionKey} />
+          <SubmitButton
+            className="button-secondary min-h-8 px-3 text-sm"
+            pendingLabel="Logging…"
+            icon={<Archive className="h-4 w-4" aria-hidden="true" />}
+          >
+            Log as archive
+          </SubmitButton>
+        </form>
         <form action={dismissExchangePositionAction}>
           <input type="hidden" name="exchangeKey" value={positionKey} />
           <SubmitButton className="button-secondary min-h-8 px-2 text-sm" icon={<EyeOff className="h-4 w-4" aria-hidden="true" />}>

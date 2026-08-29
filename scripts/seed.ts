@@ -2,6 +2,7 @@ import { addDays, startOfDay, subDays } from "date-fns";
 import { defaultMistakeTags } from "../lib/constants";
 import { db } from "../lib/data";
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple } from "../lib/metrics";
+import { archiveTradeRecord } from "../lib/reconcile";
 import {
   CurrentState,
   Direction,
@@ -437,6 +438,42 @@ async function main() {
     rateInr: 1, rateUsdt: 0.010019036168720569,
     occurredAt: new Date(exchangeNow.getTime() - 4 * 3600_000),
   });
+
+  // One trade already logged as an archive: a position from before the journal
+  // was being kept, taken from /import for the numbers alone. Built with the
+  // real archiveTradeRecord() rather than a hand-written literal, so the seed
+  // cannot drift from what the button actually writes. No fills back it, so it
+  // stays out of the reconcile lists and only exercises the journal side — the
+  // "archive" badge on /trades and the notice on the trade page, both of which
+  // are conditional renders `next build` cannot reach.
+  const archivedOpened = new Date(exchangeNow.getTime() - 40 * 24 * 3600_000);
+  await db.create(
+    "trades",
+    archiveTradeRecord(
+      {
+        instrument: "ARB",
+        currency: "USDT",
+        quoteCurrency: "USDT",
+        moneyRate: { inr: 99.88, usdt: 1 },
+        direction: "LONG",
+        openedAt: archivedOpened,
+        closedAt: new Date(archivedOpened.getTime() + 5 * 3600_000),
+        status: "CLOSED",
+        quantity: 240,
+        entryPrice: 0.4211,
+        exitPrice: 0.4388,
+        closedQuantity: 240,
+        grossPnl: 4.248,
+        fees: 0.19,
+        funding: -0.06,
+        netPnl: 3.998,
+        fillIds: [],
+        fundingIds: [],
+      },
+      `ARB|USDT|${archivedOpened.getTime()}`,
+      { marketType: MarketType.CRYPTO_PERP, now: exchangeNow },
+    ),
+  );
 
   console.log("Seed complete.");
 }

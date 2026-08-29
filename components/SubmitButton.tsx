@@ -22,6 +22,7 @@ export function SubmitButton({
   icon,
   className = "button",
   disabled = false,
+  formAction,
 }: {
   children: ReactNode;
   /** Shown instead of the label while the action runs. */
@@ -30,11 +31,16 @@ export function SubmitButton({
   icon?: ReactNode;
   className?: string;
   disabled?: boolean;
+  /** A different action for this button, when one form offers two (the
+   *  unjournaled list's checkboxes drive both "log as archive" and "dismiss").
+   *  A server action passed through as a reference, which is why this button
+   *  must never also carry a `name` — React rejects that combination. */
+  formAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const { pending } = useFormStatus();
 
   return (
-    <button className={className} type="submit" disabled={disabled || pending} aria-busy={pending}>
+    <button className={className} type="submit" formAction={formAction} disabled={disabled || pending} aria-busy={pending}>
       {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : icon}
       {pending ? (pendingLabel ?? children) : children}
     </button>
