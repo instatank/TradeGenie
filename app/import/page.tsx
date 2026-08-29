@@ -4,6 +4,8 @@ import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react";
 import {
   acceptAllExchangeMatchesAction,
   acceptSelectedExchangeMatchesAction,
+  archiveAllExchangePositionsAction,
+  archiveSelectedExchangePositionsAction,
   deleteImportBatchAction,
   deleteRawExecutionAction,
   dismissSelectedExchangePositionsAction,
@@ -187,15 +189,35 @@ export default async function ImportPage() {
             </p>
           </div>
           {toJournal.length > 1 ? (
-            <form id={UNJOURNALED_BULK_FORM_ID} action={dismissSelectedExchangePositionsAction}>
-              <SubmitButton className="button-secondary" pendingLabel="Hiding…">Dismiss selected</SubmitButton>
-            </form>
+            <div className="flex flex-wrap gap-2">
+              {/* One set of checkboxes, two bulk actions. The second button
+                  overrides the form's action rather than duplicating the list
+                  into a second form — two forms would mean two sets of boxes
+                  that could disagree about what is selected. */}
+              <form id={UNJOURNALED_BULK_FORM_ID} action={archiveSelectedExchangePositionsAction} className="flex flex-wrap gap-2">
+                <SubmitButton className="button-secondary" pendingLabel="Logging…">Log selected as archive</SubmitButton>
+                <SubmitButton className="button-secondary" pendingLabel="Hiding…" formAction={dismissSelectedExchangePositionsAction}>
+                  Dismiss selected
+                </SubmitButton>
+              </form>
+              <form action={archiveAllExchangePositionsAction}>
+                <SubmitButton className="button-secondary" pendingLabel="Logging…">
+                  Log all {toJournal.length} as archive
+                </SubmitButton>
+              </form>
+            </div>
           ) : null}
         </div>
-        {toJournal.length > 1 ? (
-          <p className="mb-3 text-xs text-forge-muted">
-            Checking a box here only hides it from this list — logging a trade always needs its own thesis, so there is no
-            bulk &quot;log selected&quot;. Use the checkbox to clear out the ones you don&apos;t plan to journal.
+        {toJournal.length ? (
+          <p className="mb-3 rounded-lg bg-forge-panel px-3 py-2 text-xs text-forge-muted">
+            <span className="font-medium text-forge-ink">Two ways to clear this list.</span>{" "}
+            <span className="font-medium">Log this trade</span> opens the normal form, where you write down why — that is the
+            one worth taking for anything recent. <span className="font-medium">Log as archive</span> is for the back
+            catalogue: it stores the exchange&apos;s prices, size, fees, funding and P&amp;L exactly as they are, closes the
+            trade if the exchange has it closed, and leaves every field that is yours — thesis, mood, setup, grade, mistakes,
+            lesson, tags — empty, because nothing was written at the time and nothing will be invented now. Archived trades
+            count in your P&amp;L and win rate, and are skipped by the review nudge and the process score. Nothing is logged
+            twice: an archived position moves out of this list for good.
           </p>
         ) : null}
         <div className="space-y-3">

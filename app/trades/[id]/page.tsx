@@ -94,6 +94,16 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
               {format(trade.tradeDateTime, "dd MMM yyyy HH:mm")} · {humanize(trade.marketType)} · {trade.setupName ?? "No setup"}
             </p>
             <TagPills tags={trade.tags} className="mt-2" />
+            {/* Says what an empty trade IS. Without this, a record with real
+                numbers and not one word reads as a page that failed to load. */}
+            {trade.reconstructed ? (
+              <p className="mt-2 rounded-lg bg-forge-panel px-3 py-2 text-xs text-forge-muted">
+                <span className="font-medium text-forge-ink">Archive trade.</span> Rebuilt from your CoinDCX fills, not
+                journaled at the time — so the numbers are exact and everything below is blank because nothing was written.
+                It counts in your P&amp;L and win rate, and is left out of the review nudge and the process score. You can
+                still fill any of it in from memory; nothing here is locked.
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-medium text-forge-muted">
             {trade.mistakeTags.length ? <span className="rounded-md bg-forge-panel px-2 py-1">{trade.mistakeTags.length} mistake tag{trade.mistakeTags.length === 1 ? "" : "s"}</span> : null}

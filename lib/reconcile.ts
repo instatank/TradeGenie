@@ -13,7 +13,12 @@
 //     mechanisms, grade, mistakes, lesson, tags. Nothing here ever writes those.
 //   - A position you never journaled is NOT silently turned into a trade. It is
 //     surfaced so you can log it. Auto-creating trades would remove the reason
-//     the journal exists, which is the habit of writing down why.
+//     the journal exists, which is the habit of writing down why. The one
+//     deliberate exception is archiveTradeRecord() at the foot of this file:
+//     a back catalogue from before the journal existed, logged only when the
+//     trader explicitly asks, with every subjective field left empty and the
+//     record flagged as never-journaled. It is opt-in and it never runs during
+//     a sync.
 //
 // Pure and store-free, so the matching can be tested without a network or a
 // database — the same reasoning as lib/calculator.ts and lib/positions.ts.
@@ -256,4 +261,144 @@ export function acceptPatch(match: Match, key: string): Partial<Trade> {
   }
   if (willCloseTrade(match)) patch.status = "CLOSED";
   return patch;
+}
+
+/**
+ * Fields an archive log writes that are neither numbers from the diff nor
+ * provenance: what the trade WAS. An exchange position knows the symbol, the
+ * side, and when it opened, and those are facts about the trade rather than
+ * judgements about it — so they are named here for the same reason
+ * PROVENANCE_FIELDS is, and a test asserts an archived record touches nothing
+ * outside diffTrade ∪ PROVENANCE_FIELDS ∪ this set ∪ the record's own
+ * bookkeeping (id / createdAt / updatedAt / marketType).
+ */
+export const ARCHIVE_IDENTITY_FIELDS = ["instrument", "direction", "tradeDateTime", "reconstructed"] as const;
+
+/**
+ * Every field on a Trade that carries the trader's own judgement or words. An
+ * archived position has none of them, and a test asserts each one comes back
+ * empty — which is what makes "the exchange never writes your words" checkable
+ * on the create path as well as on the update path.
+ */
+export const SUBJECTIVE_FIELDS = [
+  "setupName",
+  "setupId",
+  "entryThesis",
+  "invalidation",
+  "concern",
+  "premortem",
+  "conditions",
+  "timeframes",
+  "mechanisms",
+  "checklistSteps",
+  "emotionalState",
+  "riskPosture",
+  "confidenceScore",
+  "exitReason",
+  "followedPlan",
+  "lesson",
+  "notes",
+  "tags",
+] as const;
+
+/**
+ * An exchange position, as a journal trade with nothing invented.
+ *
+ * This is the deliberate exception to "nothing auto-creates a trade", and it
+ * exists for exactly one situation: a back catalogue of trades taken before the
+ * journal was being kept. The habit this app protects is writing down WHY, and
+ * for a trade from eight months ago that why is gone — it was never recorded
+ * and cannot be recovered by pretending. Refusing to store the trade does not
+ * bring the reasoning back; it just leaves the P&L history incomplete too.
+ *
+ * So the archive path stores the half that survives and is honest about the
+ * half that doesn't:
+ *
+ *   - Every number comes from diffTrade(), the same short list the sync is
+ *     allowed to touch. Nothing else can be written, by construction.
+ *   - Every subjective field is left empty. Not "NA", not a placeholder
+ *     sentence, not a machine-minted tag — empty, because nothing was thought.
+ *   - `reconstructed: true` records that this trade was never journaled, so the
+ *     review nudge and the process score skip it rather than treating a missing
+ *     plan as an unreviewed one (see lib/metrics.ts).
+ *   - `marketContext` is null. The bridge captures what the market looked like
+ *     AT ENTRY; snapshotting today's market onto a trade from March would be a
+ *     fabrication wearing a timestamp.
+ *   - Status follows the exchange. A position still open on the exchange is
+ *     logged OPEN, and the ordinary mechanic — you close it, the sync fills in
+ *     the exit — takes over from there.
+ *
+ * `createdAt` is now, not the trade's date: the record really was created
+ * today, and back-dating it would credit the journaling streak with days the
+ * trader did not show up. `tradeDateTime` is when the position opened, which is
+ * what every list, calendar and analytic actually files a trade by.
+ */
+export function archiveTradeRecord(
+  position: ReconstructedPosition,
+  key: string,
+  context: { marketType: Trade["marketType"]; now: Date },
+): Omit<Trade, "id"> {
+  const blank = { entryPrice: null, exitPrice: null, quantity: null, fees: null, funding: null, realizedPnl: null, netPnl: null } as Trade;
+  const numbers: Partial<Trade> = {};
+  for (const row of diffTrade(blank, position)) {
+    if (row.exchange === null) continue;
+    (numbers as Record<string, unknown>)[row.field] = row.exchange;
+  }
+
+  return {
+    createdAt: context.now,
+    updatedAt: context.now,
+    tradeDateTime: position.openedAt,
+    marketType: context.marketType,
+    instrument: position.instrument,
+    direction: position.direction,
+    status: position.status === "CLOSED" ? "CLOSED" : "OPEN",
+    reconstructed: true,
+    exchangeKey: key,
+    currency: position.currency || null,
+    moneyRate: position.moneyRate ?? null,
+
+    // Not in the diff and not knowable from fills: a stop and a target are
+    // plan, not execution, and leverage is a margin setting the fills don't
+    // report. Left null rather than back-solved from anything.
+    stopPrice: null,
+    targetPrice: null,
+    maePrice: null,
+    mfePrice: null,
+    totalOrderValue: null,
+    leverage: null,
+    // R is measured against the stop that was planned. There wasn't one.
+    rMultiple: null,
+    marketContext: null,
+
+    // Nothing was written down. Nothing gets written down now.
+    setupName: null,
+    setupId: null,
+    entryThesis: null,
+    invalidation: null,
+    concern: null,
+    premortem: null,
+    conditions: [],
+    timeframes: [],
+    mechanisms: [],
+    checklistSteps: [],
+    emotionalState: null,
+    riskPosture: null,
+    confidenceScore: null,
+    entryGrade: "NA",
+    exitReason: null,
+    followedPlan: null,
+    lesson: null,
+    notes: null,
+    tags: [],
+
+    entryPrice: null,
+    exitPrice: null,
+    quantity: null,
+    fees: null,
+    funding: null,
+    realizedPnl: null,
+    netPnl: null,
+    ...numbers,
+  };
 }

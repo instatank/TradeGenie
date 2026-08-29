@@ -7,7 +7,7 @@ import { endOfDay, format, isSameDay, startOfDay } from "date-fns";
 import { checkAiConnection } from "@/lib/ai-status";
 import { credentialsFromEnv } from "@/lib/coindcx";
 import { exchangeView, positionKey, syncExchange } from "@/lib/coindcx-sync";
-import { acceptPatch, changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
+import { acceptPatch, archiveTradeRecord, changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 import { defaultMistakeTagNames } from "@/lib/constants";
 import {
@@ -2005,6 +2005,98 @@ export async function acceptSelectedExchangeMatchesAction(formData: FormData) {
   await redirectBackWithFeedback(
     applied ? `Reconciled ${applied} selected trade${applied === 1 ? "" : "s"}.` : "Nothing in the selection needed a change.",
     "/import",
+  );
+}
+
+/**
+ * Log exchange positions that were never journaled, as archive records.
+ *
+ * This is the one place in the app that creates a trade from exchange data, and
+ * it only ever runs because the trader pressed a button that says so. It exists
+ * for a back catalogue: months of real trades taken before the journal was
+ * being kept, whose numbers are recoverable from the exchange and whose
+ * reasoning is not.
+ *
+ * What it writes is deliberately half a trade — the objective half. See
+ * archiveTradeRecord() in lib/reconcile.ts for the field-by-field rules; the
+ * short version is that no thesis, mood, setup, grade, mistake, lesson or tag
+ * is invented, and each record is flagged `reconstructed` so the review nudge
+ * and the process score leave it alone instead of reading a missing plan as an
+ * unreviewed one.
+ *
+ * Idempotent by construction: each new trade carries the position's key, so on
+ * the next render matchPositions() links it as an established match and the
+ * position is no longer unjournaled. Pressing the button twice cannot mint a
+ * second copy.
+ *
+ * Going forward the normal mechanic is unchanged — you open the trade in your
+ * own words, and the sync adds the numbers on top.
+ */
+async function archiveExchangePositions(keys: Set<string> | null) {
+  const [view, trades, settings] = await Promise.all([exchangeView(), db.list("trades"), getSettings()]);
+  const { unmatched } = matchPositions(view.positions, trades, positionKey);
+  const dismissed = new Set(settings.dismissedExchangeKeys ?? []);
+  const now = new Date();
+  const marketType = enumValue(MarketType, settings.defaultMarketType, MarketType.CRYPTO_PERP);
+
+  // `keys === null` means "everything currently listed", which is every
+  // unmatched position minus the ones already dismissed — exactly what the page
+  // shows, so the button can never log something the trader cannot see.
+  const targets = unmatched.filter((position) => {
+    const key = positionKey(position);
+    return keys ? keys.has(key) : !dismissed.has(key);
+  });
+
+  let logged = 0;
+  for (const position of targets) {
+    const key = positionKey(position);
+    await db.create("trades", archiveTradeRecord(position, key, { marketType, now }));
+    logged += 1;
+  }
+  return logged;
+}
+
+export async function archiveExchangePositionAction(formData: FormData) {
+  const key = toText(formData.get("exchangeKey"));
+  if (!key) {
+    await redirectBackWithFeedback("Nothing to log.", "/import");
+    return;
+  }
+  const logged = await archiveExchangePositions(new Set([key]));
+  revalidateEverything();
+  await redirectBackWithFeedback(
+    logged
+      ? "Logged as an archive trade — the exchange's numbers, none of your words."
+      : "That position is no longer unjournaled — re-sync and try again.",
+    "/import",
+    logged ? "success" : "error",
+  );
+}
+
+export async function archiveSelectedExchangePositionsAction(formData: FormData) {
+  const selected = formData.getAll("selected").map(String).filter(Boolean);
+  if (!selected.length) {
+    await redirectBackWithFeedback("Nothing selected.", "/import");
+    return;
+  }
+  const logged = await archiveExchangePositions(new Set(selected));
+  revalidateEverything();
+  await redirectBackWithFeedback(
+    logged ? `Logged ${logged} archive trade${logged === 1 ? "" : "s"} from the exchange.` : "Nothing in the selection was still unjournaled.",
+    "/import",
+    logged ? "success" : "error",
+  );
+}
+
+export async function archiveAllExchangePositionsAction() {
+  const logged = await archiveExchangePositions(null);
+  revalidateEverything();
+  await redirectBackWithFeedback(
+    logged
+      ? `Logged ${logged} archive trade${logged === 1 ? "" : "s"}. Numbers only — nothing was written in your name.`
+      : "Every exchange position already has a journal entry.",
+    "/import",
+    logged ? "success" : "error",
   );
 }
 

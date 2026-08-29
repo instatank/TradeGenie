@@ -99,6 +99,9 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/import", "older position", "the missing-funding warning"],
   ["/import", "Accept selected", "the bulk-select accept control (seed keeps 2+ review items for this)"],
   ["/import", "Dismiss selected", "the bulk-select dismiss control"],
+  ["/import", "Log as archive", "the per-position archive button"],
+  ["/import", "Log all", "the bulk archive control"],
+  ["/trades", "Rebuilt from exchange fills", "the archive badge on a trade that was never journaled"],
 ];
 
 async function fetchBody(route: string): Promise<string> {
