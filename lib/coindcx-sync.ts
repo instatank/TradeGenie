@@ -135,25 +135,38 @@ async function fetchPage(
  * end), the page cap, or an error. An error stops paging but keeps everything
  * already collected — a partial sync that says so beats losing a good page to a
  * bad one.
+ *
+ * `truncated` says the paging did NOT reach a natural end — it hit the cap or
+ * an error, so the rows are a prefix of the history rather than all of it. The
+ * sync only needs this to be honest about coverage; a total computed off these
+ * rows needs it to avoid stating a confidently wrong number, which is why it is
+ * reported rather than inferred from `error` alone.
  */
 async function fetchAll(
   credentials: CoindcxCredentials,
   path: string,
-): Promise<{ rows: unknown[]; pages: number; error: string | null }> {
+): Promise<{ rows: unknown[]; pages: number; error: string | null; truncated: boolean }> {
   const rows: unknown[] = [];
   let pages = 0;
+  let truncated = true;
 
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const result = await fetchPage(credentials, path, page);
     pages += 1;
-    if (result.error) return { rows, pages, error: result.error };
-    if (!result.rows.length) break;
+    if (result.error) return { rows, pages, error: result.error, truncated: true };
+    if (!result.rows.length) {
+      truncated = false;
+      break;
+    }
     rows.push(...result.rows);
-    if (result.rows.length < PAGE_SIZE) break;
+    if (result.rows.length < PAGE_SIZE) {
+      truncated = false;
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
   }
 
-  return { rows, pages, error: null };
+  return { rows, pages, error: null, truncated };
 }
 
 function toStoredFill(fill: Fill): Omit<ExchangeFill, "id"> & { id: string } {
@@ -310,13 +323,13 @@ type RateHistory = Map<string, RatePoint[]>;
  * currency in USDT. Inverting it gives units-per-USDT. A USDT row reads 1 and
  * inverts to 1, which is exactly right.
  */
-function buildRateHistory(ledger: ExchangeLedgerEntry[]): RateHistory {
+function buildRateHistory(ledger: CoindcxTransaction[]): RateHistory {
   const history: RateHistory = new Map();
   for (const entry of ledger) {
-    const perUnitUsdt = entry.rateUsdt;
+    const perUnitUsdt = entry.rate.usdt;
     if (!entry.currency || typeof perUnitUsdt !== "number" || !Number.isFinite(perUnitUsdt) || perUnitUsdt <= 0) continue;
     const points = history.get(entry.currency) ?? [];
-    points.push({ at: entry.occurredAt.getTime(), perUsdt: 1 / perUnitUsdt });
+    points.push({ at: entry.timestamp.getTime(), perUsdt: 1 / perUnitUsdt });
     history.set(entry.currency, points);
   }
   for (const points of history.values()) points.sort((a, b) => a.at - b.at);
@@ -403,6 +416,84 @@ export type ExchangeView = {
   ledgerFrom: Date | null;
 };
 
+/** A stored fill, back in the shape the fold works in. */
+function fromStoredFill(fill: ExchangeFill): Fill {
+  return {
+    id: fill.id,
+    instrument: fill.instrument,
+    currency: fill.currency,
+    quoteCurrency: quoteOf(fill),
+    side: fill.side,
+    quantity: fill.quantity,
+    price: fill.price,
+    fee: fill.fee,
+    timestamp: fill.executedAt,
+    orderId: fill.orderId,
+  };
+}
+
+/** A stored ledger row, back in the shape the parser produced. */
+function fromStoredLedger(entry: ExchangeLedgerEntry): CoindcxTransaction {
+  return {
+    id: entry.id,
+    instrument: entry.instrument,
+    currency: entry.currency,
+    stage: entry.stage,
+    kind: entry.kind,
+    amount: entry.amount,
+    fee: entry.fee,
+    positionId: entry.positionId,
+    orderId: entry.orderId,
+    rate: { inr: entry.rateInr, usdt: entry.rateUsdt },
+    timestamp: entry.occurredAt,
+  };
+}
+
+/**
+ * THE fold: raw fills plus the transaction ledger, in, positions out.
+ *
+ * Deliberately pure and source-blind, because there are now two callers —
+ * `exchangeView()` reading stored rows and `liveExchangeView()` reading the API
+ * — and they must produce byte-identical positions from the same underlying
+ * data. Two copies of this would be the DayOS two-tokenizer mistake wearing a
+ * different hat, and here the thing that would drift is money.
+ *
+ * The rate history is built from the ledger rather than an FX feed: every
+ * transaction stamps the value of its own wallet currency in both currencies
+ * (an INR row reads price_in_usdt 0.010019, i.e. 1 USDT = 99.81 INR), and using
+ * the rate NEAREST each fill keeps a year-old trade converted at the rate that
+ * actually applied rather than today's.
+ */
+export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[]): ExchangeView {
+  const rateHistory = buildRateHistory(ledger);
+
+  const fills: Fill[] = rawFills.map((fill) => {
+    const quote = quoteOf(fill);
+    const wallet = fill.currency ?? "";
+    return {
+      ...fill,
+      quoteCurrency: quote,
+      settlementRate: settlementRateFor(rateHistory, wallet, quote, fill.timestamp),
+      moneyRate: moneyRateFor(rateHistory, wallet, fill.timestamp),
+    };
+  });
+
+  const funding: FundingEvent[] = fundingEventsFrom(ledger);
+
+  const { positions, unattributedFunding } = reconstructPositions(fills, funding);
+  const ledgerSpan = span(ledger.map((entry) => entry.timestamp));
+  const positionsMissingFunding = ledgerSpan.from
+    ? positions.filter((position) => position.openedAt < ledgerSpan.from!)
+    : positions;
+
+  return {
+    positions,
+    unattributedFunding,
+    positionsMissingFunding,
+    ledgerFrom: ledgerSpan.from,
+  };
+}
+
 /**
  * Everything the exchange knows, folded into positions.
  *
@@ -416,54 +507,57 @@ export async function exchangeView(): Promise<ExchangeView> {
     listRecords("exchangeLedger"),
   ]);
 
-  // How many units of each wallet currency one USDT was worth, over time. The
-  // exchange stamps this on every ledger row (an INR row reads price_in_usdt
-  // 0.010019, i.e. 1 USDT = 99.81 INR), so no FX feed is needed — and using the
-  // rate NEAREST each fill keeps a year-old trade converted at the rate that
-  // actually applied rather than today's.
-  const rateHistory = buildRateHistory(storedLedger);
+  return foldExchange(storedFills.map(fromStoredFill), storedLedger.map(fromStoredLedger));
+}
 
-  const fills: Fill[] = storedFills.map((fill) => ({
-    id: fill.id,
-    instrument: fill.instrument,
-    currency: fill.currency,
-    quoteCurrency: quoteOf(fill),
-    settlementRate: settlementRateFor(rateHistory, fill.currency, quoteOf(fill), fill.executedAt),
-    moneyRate: moneyRateFor(rateHistory, fill.currency, fill.executedAt),
-    side: fill.side,
-    quantity: fill.quantity,
-    price: fill.price,
-    fee: fill.fee,
-    timestamp: fill.executedAt,
-    orderId: fill.orderId,
-  }));
+export type LiveExchangeView = ExchangeView & {
+  /** Rows the exchange returned that could not be parsed. Should be 0. */
+  unusable: number;
+  /** Stage values we have no rule for — loud, never a silent bucket. */
+  unknownStages: string[];
+  fillsSeen: number;
+  ledgerSeen: number;
+  /**
+   * Set when the history came back INCOMPLETE — an error mid-paging, or the
+   * page cap. Any total computed from a truncated history is a floor, not an
+   * answer, and a caller that reports one anyway is stating a wrong number
+   * confidently. Callers must check this before presenting a figure.
+   */
+  incomplete: string | null;
+};
 
-  const funding: FundingEvent[] = fundingEventsFrom(
-    storedLedger.map((entry) => ({
-      id: entry.id,
-      instrument: entry.instrument,
-      currency: entry.currency,
-      stage: entry.stage,
-      kind: entry.kind,
-      amount: entry.amount,
-      fee: entry.fee,
-      positionId: entry.positionId,
-      orderId: entry.orderId,
-      rate: { inr: entry.rateInr, usdt: entry.rateUsdt },
-      timestamp: entry.occurredAt,
-    })),
-  );
+/**
+ * The same fold, straight off the API, storing nothing.
+ *
+ * `exchangeView()` answers "what has the journal captured?"; this answers "what
+ * does the exchange say right now?". For a question the journal's own records
+ * are not the authority on — a tax total, a reconciliation of the store itself —
+ * the second is the one you want, and it must not depend on a sync having run.
+ *
+ * Read-only and side-effect free by construction: `callFutures` refuses any path
+ * outside the list/history allowlist, and nothing here writes to the store.
+ */
+export async function liveExchangeView(credentials: CoindcxCredentials): Promise<LiveExchangeView> {
+  const tradeResult = await fetchAll(credentials, TRADES_PATH);
+  const ledgerResult = await fetchAll(credentials, TRANSACTIONS_PATH);
 
-  const { positions, unattributedFunding } = reconstructPositions(fills, funding);
-  const ledgerSpan = span(storedLedger.map((entry) => entry.occurredAt));
-  const positionsMissingFunding = ledgerSpan.from
-    ? positions.filter((position) => position.openedAt < ledgerSpan.from!)
-    : positions;
+  const parsedFills = parseFills(tradeResult.rows);
+  const parsedLedger = parseTransactions(ledgerResult.rows);
+
+  const errors = [tradeResult.error, ledgerResult.error].filter(Boolean);
+  const capped: string[] = [];
+  if (tradeResult.truncated && !tradeResult.error) capped.push(`fills stopped at the ${MAX_PAGES}-page cap`);
+  if (ledgerResult.truncated && !ledgerResult.error) capped.push(`ledger stopped at the ${MAX_PAGES}-page cap`);
+  const incomplete = [...errors, ...capped].join(" · ") || null;
+
+  const view = foldExchange(parsedFills.fills, parsedLedger.transactions);
 
   return {
-    positions,
-    unattributedFunding,
-    positionsMissingFunding,
-    ledgerFrom: ledgerSpan.from,
+    ...view,
+    unusable: parsedFills.skipped + parsedLedger.skipped,
+    unknownStages: parsedLedger.unknownStages,
+    fillsSeen: parsedFills.fills.length,
+    ledgerSeen: parsedLedger.transactions.length,
+    incomplete,
   };
 }
