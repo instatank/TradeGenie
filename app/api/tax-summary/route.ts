@@ -155,8 +155,12 @@ export async function GET(request: Request) {
   if (Number.isNaN(cutoff.getTime())) {
     return text(`Bad "before" date: ${beforeParam}. Use YYYY-MM-DD.`, 400);
   }
-  // The financial year immediately before the cutoff, on the Indian Apr–Mar year.
-  const fyStart = istMidnight(`${Number(beforeParam.slice(0, 4)) - 1}-04-01`);
+  // The start of the Indian Apr–Mar financial year the cutoff falls in or ends.
+  // Labels below describe the window as [fyStart, cutoff) rather than asserting
+  // "→ 31 Mar": with a mid-year cutoff that claim would be plainly false, and a
+  // date range a filer trusts must never describe more than it covers.
+  const fyStartYear = Number(beforeParam.slice(0, 4)) - 1;
+  const fyStart = istMidnight(`${fyStartYear}-04-01`);
 
   const view = await liveExchangeView(credentials);
 
@@ -195,15 +199,15 @@ export async function GET(request: Request) {
   // guessed at: everything before the cutoff, and the Apr–Mar year before it.
   summarize(`ALL futures activity closed before ${beforeParam} (IST)`, closedBeforeCutoff, base, lines);
   summarize(
-    `Of which — financial year ${fyStart.getUTCFullYear()}-${String(Number(beforeParam.slice(0, 4))).slice(2)} (1 Apr ${fyStart.getUTCFullYear()} → 31 Mar ${beforeParam.slice(0, 4)}, IST)`,
+    `Of which — FY ${fyStartYear}-${String(fyStartYear + 1).slice(2)}: closed from 1 Apr ${fyStartYear} up to ${beforeParam} (IST)`,
     closedInFy,
     base,
     lines,
   );
 
   if (closedBeforeCutoff.length === closedInFy.length && closedBeforeCutoff.length > 0) {
-    lines.push("(The two sets above are identical — there is no closed activity before");
-    lines.push(` 1 Apr ${fyStart.getUTCFullYear()}, so \"everything prior to April 1\" and \"the previous FY\" are the same set.)`);
+    lines.push(`(The two sets above are identical — nothing closed before 1 Apr ${fyStartYear}, so`);
+    lines.push(' "everything prior to April 1" and "the previous financial year" are the same set.)');
     lines.push("");
   }
 
