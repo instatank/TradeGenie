@@ -1,7 +1,6 @@
 import { Suspense } from "react";
 import { format } from "date-fns";
-import { Download, Eye, EyeOff, Lock, Pencil, Stethoscope, Tags, X } from "lucide-react";
-import { logoutAction } from "@/app/login/actions";
+import { Download, Eye, EyeOff, Lock, Pencil, ShieldCheck, Stethoscope, Tags, X } from "lucide-react";
 import {
   hideTagAction,
   removeCustomMistakeTagAction,
@@ -19,8 +18,9 @@ import { defaultMistakeTagNames, marketTypes } from "@/lib/constants";
 import { db, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
 import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
+import { getRole } from "@/lib/role";
 import { getSettings } from "@/lib/settings-store";
-import { siteAuthConfigured } from "@/lib/site-auth";
+import { siteAuthConfigured, viewerAuthConfigured } from "@/lib/site-auth";
 import { storageStatus } from "@/lib/store";
 import { colocation, deploymentInfo } from "@/lib/deployment-info";
 
@@ -41,6 +41,8 @@ export default async function SettingsPage({
   const aiCheckDetail = single(params.aiCheckDetail);
   const aiCheckModel = single(params.aiCheckModel);
   const siteLocked = siteAuthConfigured();
+  const role = await getRole();
+  const viewerLocked = viewerAuthConfigured();
 
   return (
     <main className="page-shell max-w-4xl">
@@ -52,14 +54,30 @@ export default async function SettingsPage({
             <div className="flex items-center gap-2 text-sm">
               <Lock className="h-4 w-4 text-forge-blue" aria-hidden="true" />
               <div>
-                <div className="font-medium">Site is password-locked</div>
+                <div className="font-medium">
+                  Site is password-locked{role === "viewer" ? " — you're signed in read-only" : ""}
+                </div>
                 <div className="text-forge-muted">A password gate covers the whole app. This clears your login on this device.</div>
               </div>
             </div>
-            <form action={logoutAction}>
-              <button className="button-secondary" type="submit">Log out</button>
-            </form>
+            <a className="button-secondary" href="/logout">Log out</a>
           </div>
+
+          {role === "owner" ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg bg-forge-panel p-3 text-sm">
+              <ShieldCheck className={`h-4 w-4 ${viewerLocked ? "text-forge-green" : "text-forge-muted"}`} aria-hidden="true" />
+              <div>
+                <div className="font-medium">
+                  Viewer access {viewerLocked ? "is on" : "is off"}
+                </div>
+                <div className="text-forge-muted">
+                  {viewerLocked
+                    ? "Anyone with the viewer password can browse every page but can't save, delete, or export anything."
+                    : "Set a VIEWER_PASSWORD in Vercel → Settings → Environment Variables to hand someone a read-only link, without giving them your own password."}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

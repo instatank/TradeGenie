@@ -5,6 +5,7 @@ import { BookOpenCheck, Search } from "lucide-react";
 import { ActionFeedback } from "@/components/ActionFeedback";
 import { MoreNav } from "@/components/MoreNav";
 import { NavLinks } from "@/components/NavLinks";
+import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 import { moreNavItems, primaryNavItems } from "@/lib/constants";
 import "./globals.css";
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Suspense fallback={null}>
           <ActionFeedback />
         </Suspense>
+        <ReadOnlyBanner />
         <header className="sticky top-0 z-40 border-b border-forge-line bg-white/85 backdrop-blur">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

@@ -45,6 +45,11 @@ Development happens entirely in Claude Code cloud containers. There is no local 
     No `SITE_PASSWORD` means no gate at all, same "off until configured" rule as
     everything else here. Built because Vercel's own Deployment Protection is a
     paid Pro feature and this app has exactly one user.
+  - `VIEWER_PASSWORD` — optional second, weaker password for handing the journal to
+    someone else to browse. Requires `SITE_PASSWORD` to be set too. A viewer can GET
+    every page but every write (every server action, `/api/import`, plus the full-dump
+    `/api/export` and `/api/tax-export` routes) is blocked in `middleware.ts` — see the
+    decisions log in `CLAUDE.md` for how.
 - Do not commit secrets, service account JSON, `.env`, `.env.local`, or local data exports.
 - Screenshot uploads use Firebase Storage when Firebase is configured; local disk under `public/uploads` is only a development fallback.
 

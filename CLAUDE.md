@@ -766,8 +766,59 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     list, so "log out" (`/settings` → Log out) only clears the browser's cookie — a copied
     cookie value stays valid until the password is rotated. Acceptable for keeping a personal
     URL private; not a defense against a captured cookie.
-  - `middleware.ts` matcher excludes only `/login` and Next's own static/image assets, so it
-    covers every page, every server action, and `/api/export` (the full-backup dump) alike.
+  - `middleware.ts` matcher excludes only `/login`, `/logout` and Next's own static/image
+    assets, so it covers every page, every server action, and `/api/export` (the full-backup
+    dump) alike.
+
+- **Read-only viewer access — a second, weaker password** (`VIEWER_PASSWORD`, `lib/site-auth.ts`,
+  `middleware.ts`). The owner wanted to hand the journal to someone else to look at without
+  handing over their own password or write access — a second trader, a mentor, anyone reviewing
+  the trades. Built on the site password gate rather than beside it: one more env var, no new
+  auth system.
+  - **One cookie still, now cryptographically two roles.** The owner and viewer tokens are both
+    `SHA-256(salt : role-tag : password)` (`roleTag()` in `lib/site-auth.ts`) — different inputs,
+    so the two hashes can never collide and a cookie's value alone says which role it is. The
+    owner's tag is left empty so this change signs nobody already logged in out.
+    `roleForToken()` is the one place a cookie is turned back into a role, used by both
+    `middleware.ts` (Edge) and `lib/role.ts` (Node server components) — same reasoning as one
+    tag tokenizer: a role check duplicated in two places is a role check that will drift.
+  - **The block is a method check, not an action-by-action allowlist.** Every write in this
+    app — every server action bound to a `<form>` or `useActionState`, JS or no JS, plus the one
+    POST route handler `/api/import` — arrives as a POST; that is fixed React/Next dispatch
+    behavior, not a convention this app follows. So `middleware.ts` blocking non-GET/HEAD/OPTIONS
+    for a viewer cookie is the one choke point that covers every present and future write action
+    without an opt-in list to keep in sync — the same shape as `revalidateEverything()` and
+    `dehydrate()`. A blocked request gets a small standalone "Read-only access" HTML page rather
+    than a bare 403, since most forms in this app are real full-page POSTs (zero client JS is a
+    deliberate pattern here), not fetches — so a bare JSON body would otherwise render as the
+    page.
+  - **Two GET routes are owner-only anyway**: `/api/export` and `/api/tax-export` hand over the
+    whole journal (or a tax CSV of it) as one file. That's bulk exfiltration, not "browse the
+    app," so they're excluded from the viewer's GET allowance even though GET is otherwise safe.
+    `/api/tax-summary`, `/api/coindcx-probe` and `/api/screenshots/[id]` stay viewer-reachable —
+    numbers, a diagnostic, and the images a trade's own page needs to render.
+  - **Logout moved off a server action onto a plain `GET /logout`** (`app/logout/route.ts`), so
+    clearing your own cookie doesn't have to fight the same POST block it now exists to enforce.
+    Both `/login` and `/logout` are excluded from `middleware.ts`'s matcher.
+  - **A second, non-secret cookie is a UI courtesy, not access control.** `ROLE_COOKIE`
+    (`tg_role`) is set alongside the real httpOnly auth cookie but is deliberately readable, so a
+    client component can say "read-only" without ever touching the credential. `SaveBar` — the
+    one save control on nearly every page (see "One button saves the page" above) — reads it to
+    disable its own button and swap the label, instead of leaving a click to silently 403.
+    Smaller scattered write buttons (delete a note, run a setup, accept a sync) are **not**
+    individually disabled in this pass; they still hit the middleware block if pressed. The
+    server-side gate is what actually matters — losing or forging `tg_role` can only make the UI
+    look wrong, never let a write through.
+  - Login is one form for both roles: whichever password is entered, `authenticate()` tries the
+    owner password first, then the viewer one, and the two never need to be distinguished by the
+    person typing.
+  - `/settings` shows the owner (not the viewer) whether `VIEWER_PASSWORD` is configured, so the
+    owner has somewhere to check before handing out a link.
+  - Deliberately NOT done: per-viewer identity or a viewer list (still one shared viewer
+    password, same "no accounts" shape as the owner gate), disabling every individual write
+    control in the UI, and any server-side write-permission check beyond the middleware method
+    gate — a second check inside `app/actions.ts` would be exactly the two-tokenizer mistake in
+    new clothes.
 
 - **Page-load latency — first pass** (owner: "any action that requires a page load takes a few
   seconds"). Benchmarked first: rendering a page against a local store is **7–57ms**, so
@@ -1104,7 +1155,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)

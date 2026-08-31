@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AUTH_COOKIE, checkPassword, siteAuthConfigured } from "@/lib/site-auth";
+import { AUTH_COOKIE, ROLE_COOKIE, authenticate, siteAuthConfigured } from "@/lib/site-auth";
 
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
@@ -15,22 +15,27 @@ export async function loginAction(formData: FormData) {
     redirect(safeNext);
   }
 
-  const token = await checkPassword(password);
-  if (!token) {
+  const result = await authenticate(password);
+  if (!result) {
     redirect(`/login?next=${encodeURIComponent(safeNext)}&error=1`);
   }
 
-  (await cookies()).set(AUTH_COOKIE, token, {
+  const jar = await cookies();
+  jar.set(AUTH_COOKIE, result.token, {
     httpOnly: true,
     secure: true,
     sameSite: "lax",
     maxAge: ONE_YEAR_SECONDS,
     path: "/",
   });
+  // Readable, non-secret: lets client components (e.g. SaveBar) show a
+  // read-only affordance without ever seeing the real auth cookie.
+  jar.set(ROLE_COOKIE, result.role, {
+    httpOnly: false,
+    secure: true,
+    sameSite: "lax",
+    maxAge: ONE_YEAR_SECONDS,
+    path: "/",
+  });
   redirect(safeNext);
-}
-
-export async function logoutAction() {
-  (await cookies()).delete(AUTH_COOKIE);
-  redirect("/login");
 }
