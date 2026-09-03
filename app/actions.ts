@@ -653,6 +653,7 @@ export async function createTradeAction(formData: FormData) {
     riskPosture: await options.resolve("riskPosture", formData, "riskPosture"),
     confidenceScore: toNumber(formData.get("confidenceScore")),
     entryGrade: enumValue(EntryGrade, formData.get("entryGrade"), EntryGrade.NA),
+    setupGrade: await options.resolve("setupGrade", formData, "setupGrade"),
     exitReason: null,
     followedPlan: null,
     lesson: null,
@@ -705,6 +706,7 @@ export async function quickLogTradeAction(formData: FormData) {
     riskPosture: null,
     confidenceScore: null,
     entryGrade: EntryGrade.NA,
+    setupGrade: null,
     exitReason: null,
     followedPlan: null,
     lesson: null,
@@ -794,6 +796,7 @@ export async function startTradeFromSetupAction(formData: FormData) {
     riskPosture: null,
     confidenceScore: null,
     entryGrade: EntryGrade.NA,
+    setupGrade: null,
     exitReason: null,
     followedPlan: null,
     lesson: null,
@@ -902,6 +905,10 @@ export async function saveTradeAction(formData: FormData) {
     riskPosture: presentOption("riskPosture") ? await options.resolve("riskPosture", formData, "riskPosture") : trade.riskPosture,
     confidenceScore: num("confidenceScore", trade.confidenceScore),
     entryGrade: present("entryGrade") ? enumValue(EntryGrade, formData.get("entryGrade"), trade.entryGrade) : trade.entryGrade,
+    // How good the setup was, as opposed to how well it was taken. Extendable,
+    // so it resolves through the catalog and a typed grade is registered as a
+    // button for next time — same path as mind state and risk posture.
+    setupGrade: presentOption("setupGrade") ? await options.resolve("setupGrade", formData, "setupGrade") : trade.setupGrade,
     followedPlan: present("followedPlan")
       ? optionalEnum(FollowedPlan, formData.get("followedPlan")) ?? trade.followedPlan
       : trade.followedPlan,
@@ -1628,6 +1635,7 @@ async function createTradeFromEntry(
     riskPosture: extendedValue(options, "riskPosture", entry.riskPosture) ?? RiskPosture.UNKNOWN,
     confidenceScore: entry.confidenceScore,
     entryGrade: EntryGrade.NA,
+    setupGrade: null,
     exitReason: null,
     followedPlan: null,
     lesson: null,

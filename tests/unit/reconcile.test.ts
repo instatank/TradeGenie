@@ -183,7 +183,7 @@ describe("diffTrade", () => {
     // The guarantee is structural: a field absent from the diff can never be
     // written by a sync, no matter what the apply path does.
     const fields = diffTrade(trade(), position()).map((row) => row.field);
-    for (const owned of ["entryThesis", "lesson", "notes", "emotionalState", "entryGrade", "setupName", "tags"]) {
+    for (const owned of ["entryThesis", "lesson", "notes", "emotionalState", "entryGrade", "setupGrade", "setupName", "tags"]) {
       assert.ok(!fields.includes(owned as keyof Trade), `${owned} must never be synced`);
     }
   });

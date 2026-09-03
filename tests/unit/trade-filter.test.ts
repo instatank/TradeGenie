@@ -15,6 +15,7 @@ const labels: Record<string, string> = {
   FVG: "Fair value gap",
   ANXIOUS: "Anxious",
   M15: "15m",
+  A_PLUS: "A+",
   LOW_LIQUIDITY: "Low liquidity",
 };
 const options = {
@@ -65,6 +66,7 @@ const world = [
   trade({ id: "setup", instrument: "SOL", setupName: "London reversal" }),
   trade({ id: "mood", instrument: "ETH", emotionalState: "ANXIOUS" }),
   trade({ id: "mech", instrument: "XRP", mechanisms: ["FVG"], timeframes: ["M15"] }),
+  trade({ id: "graded", instrument: "AVAX", setupGrade: "A_PLUS" }),
   trade({ id: "tagged", instrument: "DOGE", tags: ["fomo"] }),
   trade({ id: "tagged-longer", instrument: "ADA", tags: ["fomophobia"] }),
   trade({
@@ -106,6 +108,12 @@ describe("filterTradesByQuery", () => {
   it("finds a trade by mechanism and by timeframe label", () => {
     assert.deepEqual(ids("fair value"), ["mech"]);
     assert.deepEqual(ids("15m"), ["mech"]);
+  });
+
+  it("finds a trade by its setup grade, through the label the trader sees", () => {
+    // The trader searches for "A+", never for the stored "A_PLUS".
+    assert.deepEqual(ids("a+"), ["graded"]);
+    assert.deepEqual(ids("setup grade"), ["graded"]);
   });
 
   it("finds a trade by a mistake label", () => {

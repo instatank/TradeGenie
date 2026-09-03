@@ -1135,6 +1135,47 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     rendered rows would be exactly the two-tokenizer mistake), AI-assisted querying, and any
     stored index — the scan is over the trades already loaded.
 
+- **Two grades, because they answer different questions** (`Trade.setupGrade`, the `setupGrade`
+  option group, `setupGradePerformance`). The journal graded the execution (A/B/C) and nothing
+  else, so a B setup taken perfectly and an A+ setup fumbled scored the same and were
+  indistinguishable afterwards. **Grade the setup** now sits directly above **Grade the
+  execution** in the review — same big-button style, `A+ · A · B` — and the two read as the
+  pair they are: how good the opportunity was, then how well it was taken.
+  - **It is extendable and the execution grade is not**, which looks inconsistent and isn't.
+    `entryGrade` stays a closed enum because `tradeProcessScore` keys off A/B/C — a custom
+    value there would quietly break the maths, which is the line `lib/options.ts` already
+    draws. Nothing computes off `setupGrade`, so it is a preference, and the vocabulary is
+    the trader's: type `A-` or `F` and it is a button from next time, renameable/removable
+    under `/settings → Your own labels` like every other custom label.
+  - **One normalizer, one variation, declared by the group** (`shape: "grade"`). The prose
+    rules are actively wrong for a grade: `A+`, `A` and `A-` all strip to `A`, so three
+    grades would collapse into one stored value, and the two-character minimum rejects `A`
+    outright. So a grade spells its modifier out (`A+` → `A_PLUS`) and one character is a
+    whole label. Everything else — casing, spacing, charset, length cap — is identical,
+    because the point of one normalizer is that re-typing a label *selects* it rather than
+    minting a near-duplicate. A group declares its shape; it never brings its own tokenizer.
+  - **Built for filtering from the start**, which is what the owner actually asked for:
+    stored on the trade, a `setupGrade` dropdown in "More filters & sorting", a labelled
+    field in `tradeSearchDoc` (so the `/trades` box and global search both find `a+` — the
+    label the trader sees, never `A_PLUS`), a badge on the row and a chip in the row
+    preview, and a **By setup grade** table in advanced analytics.
+  - **The analytics table is ordered by the grade scale, not by volume**
+    (`singleValuePerformance`, the single-value sibling of `multiValuePerformance`), and
+    **ungraded trades are left out entirely** — "ungraded" is not a grade, and a bucket of
+    them would be the biggest row on the table for months while saying nothing about any
+    setup. Thin rows grey out at `MIN_SAMPLE` like every other table.
+  - **Trader-owned, so the exchange can never write it**: added to `SUBJECTIVE_FIELDS` and
+    absent from `diffTrade()`, so the structural guarantee covers it, and an archived trade
+    gets `null` rather than a guess. The capture pipeline writes `null` too — same line
+    already drawn for tags and note categories: the vocabulary grows from the trader's own
+    typing, never from model output.
+  - Deliberately NOT done: putting it on the 30-second quick log (it would grow the one path
+    that must stay fast — it is one tap away in the row preview), feeding it into
+    `tradeProcessScore` (that measures execution; folding in a self-assessment of the setup
+    would let a generous grade inflate the process score), a coach's-corner leak over it
+    (worth doing once there are enough graded trades to say anything true), and any
+    AI-suggested grade.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1155,7 +1196,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)

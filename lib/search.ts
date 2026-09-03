@@ -333,6 +333,11 @@ export function tradeSearchDoc(trade: TradeInBaseCurrency, options: OptionCatalo
       ["Mechanisms", (trade.mechanisms ?? []).map(options.labeler("mechanism")).join(", ")],
       ["Mind state", options.label("mindState", trade.emotionalState)],
       ["Grade", trade.entryGrade && trade.entryGrade !== "NA" ? `Grade ${trade.entryGrade}` : null],
+      // Indexed as its own labelled field, so "setup grade A+" reads as such in
+      // a search snippet and the /trades filter box finds it without needing
+      // the dropdown. The label, not the stored value: the trader searches for
+      // "A+", never for "A_PLUS".
+      ["Setup grade", trade.setupGrade ? `Setup grade ${options.label("setupGrade", trade.setupGrade)}` : null],
     ]),
   };
 }

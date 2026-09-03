@@ -109,6 +109,58 @@ export function OptionChipCheckbox({
   );
 }
 
+/** The big side-by-side buttons of `BigChoice` (Long/Short, the A/B/C execution
+ *  grade) with a "type another" box on the end — for a one-of row that is a
+ *  real decision worth a big target, but whose vocabulary is the trader's.
+ *
+ *  Auto-fit columns rather than one-per-option: a typed grade adds a button,
+ *  and a fixed `repeat(n)` grid would squeeze them thinner every time. */
+export function OptionBigChoice({
+  label,
+  name,
+  choices,
+  defaultValue,
+  placeholder,
+  hint,
+  toneByValue = {},
+}: {
+  label?: string;
+  name: string;
+  choices: OptionChoice[];
+  defaultValue?: string | null;
+  placeholder: string;
+  hint?: string;
+  toneByValue?: Record<string, keyof typeof toneChecked>;
+}) {
+  return (
+    <fieldset className="field">
+      {label ? <span className="label">{label}</span> : null}
+      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(5.5rem, 1fr))" }}>
+        {choices.map((choice) => (
+          <label key={choice.value} className="flex" title={choice.hint}>
+            <input
+              type="radio"
+              name={name}
+              value={choice.value}
+              defaultChecked={defaultValue === choice.value}
+              className="peer sr-only"
+            />
+            <span
+              className={`flex w-full cursor-pointer select-none flex-col items-center justify-center rounded-lg border border-forge-line bg-white px-3 py-2.5 text-center transition hover:border-forge-muted ${toneChecked[toneByValue[choice.value] ?? "neutral"]}`}
+            >
+              <span className="text-sm font-semibold">{choice.label}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <CustomBox name={name} placeholder={placeholder} />
+        {hint ? <p className="text-xs text-forge-muted">{hint}</p> : null}
+      </div>
+    </fieldset>
+  );
+}
+
 /** Dropdown version, for the folded editors that already use selects. */
 export function OptionSelectField({
   label,

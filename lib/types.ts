@@ -29,6 +29,10 @@ export const TradeStatus = { IDEA: "IDEA", OPEN: "OPEN", CLOSED: "CLOSED", CANCE
 export const EmotionalState = { CALM: "CALM", SHARP: "SHARP", TIRED: "TIRED", DISTRACTED: "DISTRACTED", ANXIOUS: "ANXIOUS", TILTED: "TILTED", BORED: "BORED", OVERCONFIDENT: "OVERCONFIDENT", FOMO: "FOMO", REVENGE: "REVENGE", UNKNOWN: "UNKNOWN" } as const;
 export const RiskPosture = { REDUCED: "REDUCED", NORMAL: "NORMAL", AGGRESSIVE: "AGGRESSIVE", UNKNOWN: "UNKNOWN" } as const;
 export const EntryGrade = { A: "A", B: "B", C: "C", NA: "NA" } as const;
+// How good the SETUP was — a different question from how well it was executed
+// (EntryGrade). Extendable by typing, so these three are the starting
+// vocabulary, not the whole of it; see the setupGrade group in lib/options.ts.
+export const SetupGrade = { A_PLUS: "A_PLUS", A: "A", B: "B" } as const;
 export const FollowedPlan = { YES: "YES", NO: "NO", PARTIAL: "PARTIAL", NA: "NA" } as const;
 export const LessonSourceType = { TRADE: "TRADE", DAILY_REVIEW: "DAILY_REVIEW", WEEKLY_REVIEW: "WEEKLY_REVIEW", TRANSCRIPT: "TRANSCRIPT", MANUAL: "MANUAL" } as const;
 export const LessonCategory = { ENTRY_DISCIPLINE: "ENTRY_DISCIPLINE", EXIT_DISCIPLINE: "EXIT_DISCIPLINE", RISK_MANAGEMENT: "RISK_MANAGEMENT", PSYCHOLOGY: "PSYCHOLOGY", MARKET_CONDITION: "MARKET_CONDITION", SETUP_SPECIFIC: "SETUP_SPECIFIC", PROCESS: "PROCESS", OTHER: "OTHER" } as const;
@@ -49,6 +53,7 @@ export type TradeStatus = ValueOf<typeof TradeStatus>;
 export type EmotionalState = ValueOf<typeof EmotionalState>;
 export type RiskPosture = ValueOf<typeof RiskPosture>;
 export type EntryGrade = ValueOf<typeof EntryGrade>;
+export type SetupGrade = ValueOf<typeof SetupGrade>;
 export type FollowedPlan = ValueOf<typeof FollowedPlan>;
 export type LessonSourceType = ValueOf<typeof LessonSourceType>;
 export type LessonCategory = ValueOf<typeof LessonCategory>;
@@ -159,6 +164,12 @@ export type Trade = {
   riskPosture: Extendable<RiskPosture> | null;
   confidenceScore: number | null;
   entryGrade: EntryGrade;
+  /** How good the setup itself was, graded at entry: A+ / A / B out of the box,
+   *  plus anything the trader types. Deliberately NOT an enum — unlike
+   *  entryGrade, nothing in the app's maths keys off it, so it is a preference
+   *  and the vocabulary is the trader's (lib/options.ts, group "setupGrade").
+   *  Absent on every trade logged before this existed; null means ungraded. */
+  setupGrade?: Extendable<SetupGrade> | null;
   exitReason: string | null;
   followedPlan: FollowedPlan | null;
   lesson: string | null;

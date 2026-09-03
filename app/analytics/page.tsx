@@ -26,6 +26,7 @@ import {
   sessionPerformance,
   setupPerformance,
   tiltAnalysis,
+  setupGradePerformance,
   timeframePerformance,
   type BucketStats,
   type LeakInsight,
@@ -61,6 +62,12 @@ export default async function AnalyticsPage() {
   const conditions = conditionPerformance(trades, options.labeler("condition"));
   const timeframes = timeframePerformance(trades, options.labeler("tradeTimeframe"));
   const mechanisms = mechanismPerformance(trades, options.labeler("mechanism"));
+  // Ordered by the vocabulary itself (A+ before A before B), not by volume.
+  const setupGrades = setupGradePerformance(
+    trades,
+    options.labeler("setupGrade"),
+    options.choices("setupGrade").map((choice) => choice.value),
+  );
   // How many steps each setup's checklist has, so a trade can be graded against
   // the model it was actually taken on.
   const stepTotals = new Map(playbook.map((setup) => [setup.id, setupSteps(setup.checklist).length]));
@@ -341,6 +348,13 @@ export default async function AnalyticsPage() {
                 subtitle="Which charts you actually make money on. A trade counts in every timeframe it used, so these add up to more than your trade count."
                 rows={timeframes}
                 firstColLabel="Timeframe"
+                currency={base}
+              />
+              <BucketTable
+                title="By setup grade"
+                subtitle="Your own read on the opportunity, scored against what it paid. If your A+ setups don't out-earn your Bs, the grading isn't measuring what you think it is — and if they do, taking fewer Bs is the cheapest edge you have."
+                rows={setupGrades}
+                firstColLabel="Setup grade"
                 currency={base}
               />
               <BucketTable

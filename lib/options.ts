@@ -39,7 +39,8 @@ export type OptionGroupKey =
   | "tradingMode"
   | "noteCategory"
   | "tradeTimeframe"
-  | "mechanism";
+  | "mechanism"
+  | "setupGrade";
 
 export type OptionChoice = { value: string; label: string; hint?: string; isCustom?: boolean };
 
@@ -49,6 +50,10 @@ type OptionGroupDef = {
   /** Placeholder inside the "type another" box. */
   placeholder: string;
   builtin: OptionChoice[];
+  /** How a typed label becomes a stored value. "label" (the default) is the
+   *  ordinary prose normalizer; "grade" keeps + and - and allows a single
+   *  character, because in a grade vocabulary those ARE the meaning. */
+  shape?: OptionShape;
 };
 
 export const optionGroups: Record<OptionGroupKey, OptionGroupDef> = {
@@ -124,6 +129,22 @@ export const optionGroups: Record<OptionGroupKey, OptionGroupDef> = {
       { value: "RETEST", label: "Retest", hint: "Entered on the return to a broken level, not on the break" },
     ],
   },
+  setupGrade: {
+    title: "Setup grades",
+    placeholder: "or type another, e.g. C…",
+    // How good the SETUP was, which is a different question from how well it
+    // was executed (that's entryGrade, and it stays a closed A/B/C enum because
+    // the process score keys off it). Three built-ins, because a beginner
+    // grading setups needs "the best one I take", "a normal one" and "a
+    // stretch" — not a ten-point scale. Extendable like every other pill row:
+    // an A- or an F is one typed label away.
+    shape: "grade",
+    builtin: [
+      { value: "A_PLUS", label: "A+", hint: "Everything lined up — the trade I'm trying to repeat" },
+      { value: "A", label: "A", hint: "A clean setup, one thing short of perfect" },
+      { value: "B", label: "B", hint: "Playable, but I was reaching for it" },
+    ],
+  },
   tradingMode: {
     title: "Trading mode (morning check-in)",
     placeholder: "or type another…",
@@ -147,16 +168,34 @@ export const noOptionChoice: OptionChoice = { value: "", label: "No category" };
 const MIN_LENGTH = 2;
 const MAX_LENGTH = 40;
 
+/** How a group's typed labels normalize. Still ONE function below — a group
+ *  declares the shape of its vocabulary, it does not bring its own tokenizer. */
+export type OptionShape = "label" | "grade";
+
 /** The one normalizer. "Cut winner early!" → "CUT_WINNER_EARLY". Returns null
- *  if there is nothing usable left, so a stray space can never become an option. */
-export function normalizeOptionValue(input: string | null | undefined): string | null {
-  const value = String(input ?? "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  if (value.length < MIN_LENGTH || value.length > MAX_LENGTH) return null;
+ *  if there is nothing usable left, so a stray space can never become an option.
+ *
+ *  The "grade" shape is the one variation, and it exists because the default
+ *  rules are actively wrong for a grade: "A+" and "A-" both strip to "A", so
+ *  three different grades would collapse into one stored value, and the
+ *  two-character minimum rejects "A" outright. So a grade spells its modifier
+ *  out (A+ → A_PLUS) and one character is a whole label. Everything else —
+ *  casing, spacing, the charset, the length cap — is identical, because the
+ *  point of one normalizer is that re-typing a label selects it instead of
+ *  minting a near-duplicate. */
+export function normalizeOptionValue(input: string | null | undefined, shape: OptionShape = "label"): string | null {
+  const raw = String(input ?? "").trim().toUpperCase();
+  const source = shape === "grade" ? raw.replace(/\+/g, "_PLUS_").replace(/-/g, "_MINUS_") : raw;
+  const value = source.replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const min = shape === "grade" ? 1 : MIN_LENGTH;
+  if (value.length < min || value.length > MAX_LENGTH) return null;
   return value;
+}
+
+/** normalizeOptionValue with the group's own shape applied. Every registration
+ *  path goes through this, so a group can never be normalized two ways. */
+export function normalizeForGroup(group: OptionGroupKey, input: string | null | undefined): string | null {
+  return normalizeOptionValue(input, optionGroups[group].shape ?? "label");
 }
 
 /** What gets shown on the pill: exactly what was typed, tidied only of stray whitespace. */
@@ -225,7 +264,7 @@ export async function getOptionCatalog(): Promise<OptionCatalog> {
   // one — that's what keeps the vocabulary from growing near-duplicates.
   const register = async (group: OptionGroupKey, rawLabel: string): Promise<string | null> => {
     const label = cleanOptionLabel(rawLabel);
-    const value = normalizeOptionValue(label);
+    const value = normalizeForGroup(group, label);
     if (!value) return null;
     // Match on the normalized VALUE or on the normalized existing LABEL, and
     // return the value that is already stored. A couple of built-ins carry a
@@ -233,7 +272,7 @@ export async function getOptionCatalog(): Promise<OptionCatalog> {
     // without the label check, typing one of those would quietly mint a second
     // chip reading exactly the same thing.
     const existing = choicesFor(group).find(
-      (choice) => choice.value === value || normalizeOptionValue(choice.label) === value,
+      (choice) => choice.value === value || normalizeForGroup(group, choice.label) === value,
     );
     if (existing) return existing.value;
     const now = new Date();

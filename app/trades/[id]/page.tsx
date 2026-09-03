@@ -138,7 +138,12 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             {needsReview ? (trade.status === "OPEN" ? "Close & review this trade" : "Review this trade — one minute") : "Review — done (tap to edit)"}
           </summary>
           <div className="mt-4 space-y-4">
-            <TradeReviewFields trade={trade} mistakeTags={primaryTags} selectedMistakes={selectedMistakes} />
+            <TradeReviewFields
+              trade={trade}
+              mistakeTags={primaryTags}
+              setupGradeChoices={options.choices("setupGrade")}
+              selectedMistakes={selectedMistakes}
+            />
           </div>
         </details>
 

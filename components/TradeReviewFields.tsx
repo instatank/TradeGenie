@@ -1,5 +1,6 @@
 import { BigChoice, ChipRadioGroup } from "@/components/Chips";
-import { OptionChipCheckbox } from "@/components/OptionField";
+import { OptionBigChoice, OptionChipCheckbox } from "@/components/OptionField";
+import { optionGroups, type OptionChoice } from "@/lib/options";
 
 export type ReviewMistakeTag = { id: string; label: string; description?: string | null };
 
@@ -9,6 +10,7 @@ export type ReviewableTrade = {
   realizedPnl: number | null;
   followedPlan: string | null;
   entryGrade: string | null;
+  setupGrade?: string | null;
   lesson: string | null;
   exitReason: string | null;
 };
@@ -19,11 +21,14 @@ export type ReviewableTrade = {
 export function TradeReviewFields({
   trade,
   mistakeTags,
+  setupGradeChoices,
   selectedMistakes,
   compact = false,
 }: {
   trade: ReviewableTrade;
   mistakeTags: ReviewMistakeTag[];
+  /** The setup-grade vocabulary: A+ / A / B plus anything the trader has typed. */
+  setupGradeChoices: OptionChoice[];
   selectedMistakes: string[];
   compact?: boolean;
 }) {
@@ -66,6 +71,22 @@ export function TradeReviewFields({
         defaultValue={trade.followedPlan && trade.followedPlan !== "NA" ? trade.followedPlan : undefined}
         toneByValue={{ YES: "green", PARTIAL: "gold", NO: "red" }}
         hint={compact ? undefined : "Judge the plan, not the P&L. A rule-following loss is a good trade."}
+      />
+
+      {/* Two different questions, deliberately next to each other: how good the
+          setup WAS, and how well you took it. A B setup executed perfectly and
+          an A+ setup fumbled are opposite problems, and one grade can't tell
+          them apart. Unlike the execution grade below (a closed A/B/C the
+          process score keys off), this vocabulary is the trader's — type a
+          grade and it's a button from next time. */}
+      <OptionBigChoice
+        label="Grade the setup"
+        name="setupGrade"
+        choices={setupGradeChoices}
+        defaultValue={trade.setupGrade}
+        placeholder={optionGroups.setupGrade.placeholder}
+        hint={compact ? undefined : "How good was the opportunity itself, before you touched it?"}
+        toneByValue={{ A_PLUS: "green", A: "green", B: "gold" }}
       />
 
       <BigChoice

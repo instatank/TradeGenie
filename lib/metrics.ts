@@ -8,6 +8,7 @@ export type MetricTrade = {
   setupId?: string | null;
   setupName?: string | null;
   entryGrade?: string | null;
+  setupGrade?: string | null;
   invalidation?: string | null;
   conditions?: string[];
   timeframes?: string[];
@@ -341,6 +342,41 @@ export function multiValuePerformance(
   return Array.from(groups.entries())
     .map(([key, group]) => bucketStats(key, labelFor(key), group))
     .sort((a, b) => b.count - a.count);
+}
+
+// Group closed trades by a field holding ONE value (the setup grade). Unlike
+// multiValuePerformance the counts sum to the trade count, and the buckets keep
+// the vocabulary's own order (A+ before A before B) rather than sorting by
+// volume — a grade scale reads wrong in any other order. Trades with the field
+// unset are left out entirely: "ungraded" is not a grade, and a bucket of them
+// would be the biggest row on the table for months.
+export function singleValuePerformance(
+  trades: MetricTrade[],
+  valueOf: (trade: MetricTrade) => string | null | undefined,
+  labelFor: (value: string) => string,
+  order: string[] = [],
+): BucketStats[] {
+  const groups = new Map<string, MetricTrade[]>();
+  for (const trade of trades.filter((entry) => entry.status === "CLOSED")) {
+    const value = valueOf(trade);
+    if (!value) continue;
+    groups.set(value, [...(groups.get(value) ?? []), trade]);
+  }
+  const rank = (key: string) => {
+    const index = order.indexOf(key);
+    return index === -1 ? order.length : index;
+  };
+  return Array.from(groups.entries())
+    .map(([key, group]) => bucketStats(key, labelFor(key), group))
+    .sort((a, b) => rank(a.key) - rank(b.key) || b.count - a.count);
+}
+
+export function setupGradePerformance(
+  trades: MetricTrade[],
+  labelFor: (value: string) => string,
+  order: string[] = [],
+): BucketStats[] {
+  return singleValuePerformance(trades, (trade) => trade.setupGrade, labelFor, order);
 }
 
 export function conditionPerformance(trades: MetricTrade[], labelFor: (value: string) => string): BucketStats[] {

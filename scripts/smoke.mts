@@ -102,6 +102,14 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/import", "Log as archive", "the per-position archive button"],
   ["/import", "Log all", "the bulk archive control"],
   ["/trades", "Rebuilt from exchange fills", "the archive badge on a trade that was never journaled"],
+  // Both halves of the setup grade: the badge only renders on a trade that
+  // carries one, and the control only inside an expanded row's review — two
+  // conditional renders `next build` never reaches.
+  ["/trades", "Setup graded", "the setup-grade badge on a graded trade"],
+  ["/trades", "Grade the setup", "the setup-grade control in the inline review"],
+  // Proves the grade filter runs on the SERVER: a grade nothing carries must
+  // empty the list rather than render it unchanged.
+  ["/trades?setupGrade=ZZZNOGRADE", "No trades match this view", "the setup-grade filter actually narrowing the list"],
   ["/trades", "Setup, mood, mechanism", "the free-text filter box"],
   // Proves the box filters on the SERVER, not just in the browser: a query
   // nothing can match must empty the list, not render it unchanged.

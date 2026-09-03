@@ -68,6 +68,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
     .filter((trade) => !params.setupId || trade.setupId === params.setupId)
     .filter((trade) => !params.timeframe || (trade.timeframes ?? []).includes(params.timeframe))
     .filter((trade) => !params.mechanism || (trade.mechanisms ?? []).includes(params.mechanism))
+    .filter((trade) => !params.setupGrade || trade.setupGrade === params.setupGrade)
     .sort((a, b) => compareTrades(a, b, sort));
 
   const closed = trades.filter((trade) => trade.status === "CLOSED");
@@ -162,6 +163,15 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
               </select>
             </label>
             <label className="field">
+              <span className="label">Setup grade</span>
+              <select name="setupGrade" defaultValue={params.setupGrade ?? ""} className="input">
+                <option value="">Any</option>
+                {options.choices("setupGrade").map((choice) => (
+                  <option key={choice.value} value={choice.value}>{choice.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
               <span className="label">Mistake tag</span>
               <select name="mistakeTagId" defaultValue={params.mistakeTagId ?? ""} className="input">
                 <option value="">Any</option>
@@ -228,9 +238,11 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
                   mindStateLabel={options.label("mindState", trade.emotionalState)}
                   timeframeLabel={options.labeler("tradeTimeframe")}
                   mechanismLabel={options.labeler("mechanism")}
+                  setupGradeLabel={options.labeler("setupGrade")}
                   setups={setups}
                   timeframeChoices={options.choices("tradeTimeframe")}
                   mechanismChoices={options.choices("mechanism")}
+                  setupGradeChoices={options.choices("setupGrade")}
                   open={openRowId === trade.id}
                   backTo={rowUrl(params, trade.id)}
                 />
@@ -272,9 +284,11 @@ function TradeRow({
   mindStateLabel,
   timeframeLabel,
   mechanismLabel,
+  setupGradeLabel,
   setups,
   timeframeChoices,
   mechanismChoices,
+  setupGradeChoices,
   open,
   backTo,
 }: {
@@ -283,9 +297,11 @@ function TradeRow({
   mindStateLabel: string;
   timeframeLabel: (value: string) => string;
   mechanismLabel: (value: string) => string;
+  setupGradeLabel: (value: string) => string;
   setups: Setup[];
   timeframeChoices: OptionChoice[];
   mechanismChoices: OptionChoice[];
+  setupGradeChoices: OptionChoice[];
   open: boolean;
   backTo: string;
 }) {
@@ -312,6 +328,7 @@ function TradeRow({
         </span>
         {trade.reconstructed ? <ArchiveBadge /> : null}
         <PlanBadge plan={trade.followedPlan} />
+        {trade.setupGrade ? <SetupGradeBadge label={setupGradeLabel(trade.setupGrade)} /> : null}
         {trade.entryGrade && trade.entryGrade !== "NA" ? <GradeBadge grade={trade.entryGrade} /> : null}
         {trade.mistakeTags.length ? (
           <span className="hidden shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red sm:inline" title={trade.mistakeTags.map((link) => link.mistakeTag.label).join(", ")}>
@@ -349,9 +366,11 @@ function TradeRow({
         mindStateLabel={mindStateLabel}
         timeframeLabel={timeframeLabel}
         mechanismLabel={mechanismLabel}
+        setupGradeLabel={setupGradeLabel}
         setups={setups}
         timeframeChoices={timeframeChoices}
         mechanismChoices={mechanismChoices}
+        setupGradeChoices={setupGradeChoices}
         backTo={backTo}
       />
     </details>
@@ -369,9 +388,11 @@ function TradePreview({
   mindStateLabel,
   timeframeLabel,
   mechanismLabel,
+  setupGradeLabel,
   setups,
   timeframeChoices,
   mechanismChoices,
+  setupGradeChoices,
   backTo,
 }: {
   trade: TradeRowData;
@@ -381,9 +402,11 @@ function TradePreview({
   mindStateLabel: string;
   timeframeLabel: (value: string) => string;
   mechanismLabel: (value: string) => string;
+  setupGradeLabel: (value: string) => string;
   setups: Setup[];
   timeframeChoices: OptionChoice[];
   mechanismChoices: OptionChoice[];
+  setupGradeChoices: OptionChoice[];
   backTo: string;
 }) {
   const notes = [
@@ -439,6 +462,7 @@ function TradePreview({
                 {mechanismLabel(value)}
               </span>
             ))}
+            {trade.setupGrade ? <InfoChip label={`Setup grade: ${setupGradeLabel(trade.setupGrade)}`} /> : null}
             {trade.emotionalState && trade.emotionalState !== "UNKNOWN" ? <InfoChip label={`Mind: ${mindStateLabel}`} /> : null}
             {trade.mistakeTags.map((link) => (
               <span key={link.id} className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-forge-red">{link.mistakeTag.label}</span>
@@ -483,6 +507,7 @@ function TradePreview({
           <TradeReviewFields
             trade={trade}
             mistakeTags={primaryTags}
+            setupGradeChoices={setupGradeChoices}
             selectedMistakes={trade.mistakeTags.map((link) => link.mistakeTagId)}
             compact
           />
@@ -521,6 +546,20 @@ function PlanBadge({ plan }: { plan: string | null }) {
   const entry = config[plan];
   if (!entry) return null;
   return <span className={`hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline ${entry.className}`}>{entry.label}</span>;
+}
+
+// The setup's own grade, deliberately styled apart from the execution grade
+// beside it: this one is a read on the opportunity, that one is a mark on the
+// trader. Same row, different question.
+function SetupGradeBadge({ label }: { label: string }) {
+  return (
+    <span
+      className="hidden shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-forge-blue sm:inline"
+      title={`Setup graded ${label}`}
+    >
+      {label}
+    </span>
+  );
 }
 
 function GradeBadge({ grade }: { grade: string }) {
@@ -629,7 +668,7 @@ function pickEnum(options: readonly string[], value: string | undefined) {
 }
 
 function hasAdvancedFilters(params: Record<string, string | undefined>) {
-  return ["marketType", "direction", "status", "entryGrade", "followedPlan", "emotionalState", "mistakeTagId", "setupId", "timeframe", "mechanism", "sort", "pageSize"].some(
+  return ["marketType", "direction", "status", "entryGrade", "setupGrade", "followedPlan", "emotionalState", "mistakeTagId", "setupId", "timeframe", "mechanism", "sort", "pageSize"].some(
     (key) => params[key] && !(key === "sort" && params[key] === "date-desc") && !(key === "pageSize" && params[key] === "25"),
   );
 }
