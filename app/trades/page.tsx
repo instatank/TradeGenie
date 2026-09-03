@@ -9,12 +9,12 @@ import { TagPills } from "@/components/TagPills";
 import { TradeFilterBox } from "@/components/TradeFilterBox";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
-import { getCalendarRange, isWithinCalendarRange } from "@/lib/calendar";
+import { getCalendarRange } from "@/lib/calendar";
 import { directions, emotionalStates, entryGrades, followedPlanOptions, humanize, isPrimaryMistakeTag, marketTypes, tradeStatuses } from "@/lib/constants";
 import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
 import { db, getBaseCurrency, getTradesWithMistakes } from "@/lib/data";
 import { getOptionCatalog, type OptionChoice } from "@/lib/options";
-import { filterTradesByQuery } from "@/lib/search";
+import { applyTradeFilters, parseTradeFilters } from "@/lib/trade-filters";
 import { calculateTotalR, calculateWinRate, getTradePnl, tradeNeedsReview } from "@/lib/metrics";
 import { checklistScore, setupSteps } from "@/lib/setups";
 import type { Setup } from "@/lib/types";
@@ -39,8 +39,7 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
   // Filtering has to reach every mind state ever stored, so the filter list is
   // the old full enum plus whatever the trader has added since.
   const mindStateFilters = [...new Set([...emotionalStates, ...options.choices("mindState").map((choice) => choice.value)])];
-  const from = params.from ? new Date(params.from) : null;
-  const to = params.to ? new Date(`${params.to}T23:59:59`) : null;
+  const filters = parseTradeFilters(params);
   const view = params.view ?? "all";
   const sort = params.sort ?? "date-desc";
   const page = normalizePage(params.page);
@@ -48,27 +47,14 @@ export default async function TradesPage({ searchParams }: { searchParams?: Prom
   const calendarRange = getCalendarRange(params);
   const query = params.q ?? "";
   const thisWeek = startOfWeek(new Date(), { weekStartsOn: 1 });
-  // The free-text box runs LAST in spirit but first in the chain: it is the
-  // same grammar global search uses, over the same trade text, so one typed
-  // word reaches the setup, the mood, a mechanism, a mistake label, a #tag or
-  // anything the trader wrote — without needing to know which dropdown owns it.
-  const trades = filterTradesByQuery(allTrades, query, options)
+  // One predicate, shared with /analytics (lib/trade-filters.ts): the free-text
+  // box, the date range and every dropdown. The box is the same grammar global
+  // search uses, over the same trade text, so one typed word reaches the setup,
+  // the mood, a mechanism, a mistake label or a #tag without the trader needing
+  // to know which dropdown owns it. The view tabs, the sort and the pagination
+  // stay here — those are this page's own furniture, not filters.
+  const trades = applyTradeFilters(allTrades, filters, options, params)
     .filter((trade) => applyTradeView(trade, view, thisWeek))
-    .filter((trade) => isWithinCalendarRange(trade.tradeDateTime, calendarRange))
-    .filter((trade) => !params.instrument || trade.instrument.includes(params.instrument.toUpperCase()))
-    .filter((trade) => !pickEnum(marketTypes, params.marketType) || trade.marketType === params.marketType)
-    .filter((trade) => !pickEnum(directions, params.direction) || trade.direction === params.direction)
-    .filter((trade) => !pickEnum(tradeStatuses, params.status) || trade.status === params.status)
-    .filter((trade) => !pickEnum(entryGrades, params.entryGrade) || trade.entryGrade === params.entryGrade)
-    .filter((trade) => !pickEnum(followedPlanOptions, params.followedPlan) || trade.followedPlan === params.followedPlan)
-    .filter((trade) => !pickEnum(mindStateFilters, params.emotionalState) || trade.emotionalState === params.emotionalState)
-    .filter((trade) => !from || trade.tradeDateTime >= from)
-    .filter((trade) => !to || trade.tradeDateTime <= to)
-    .filter((trade) => !params.mistakeTagId || trade.mistakeTags.some((link) => link.mistakeTagId === params.mistakeTagId))
-    .filter((trade) => !params.setupId || trade.setupId === params.setupId)
-    .filter((trade) => !params.timeframe || (trade.timeframes ?? []).includes(params.timeframe))
-    .filter((trade) => !params.mechanism || (trade.mechanisms ?? []).includes(params.mechanism))
-    .filter((trade) => !params.setupGrade || trade.setupGrade === params.setupGrade)
     .sort((a, b) => compareTrades(a, b, sort));
 
   const closed = trades.filter((trade) => trade.status === "CLOSED");
@@ -663,9 +649,6 @@ function clearedQueryPath(params: Record<string, string | undefined>) {
   return query ? `/trades?${query}` : "/trades";
 }
 
-function pickEnum(options: readonly string[], value: string | undefined) {
-  return value && options.includes(value) ? value : undefined;
-}
 
 function hasAdvancedFilters(params: Record<string, string | undefined>) {
   return ["marketType", "direction", "status", "entryGrade", "setupGrade", "followedPlan", "emotionalState", "mistakeTagId", "setupId", "timeframe", "mechanism", "sort", "pageSize"].some(

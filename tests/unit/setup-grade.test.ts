@@ -5,7 +5,7 @@
 // grade order rather than in order of how often each grade was taken.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { setupGradePerformance, type MetricTrade } from "@/lib/metrics";
+import { isBucketSort, setupGradePerformance, sortBuckets, type BucketStats, type MetricTrade } from "@/lib/metrics";
 import { optionGroups } from "@/lib/options";
 
 const order = optionGroups.setupGrade.builtin.map((choice) => choice.value);
@@ -68,5 +68,51 @@ describe("setupGradePerformance", () => {
       order,
     );
     assert.deepEqual(rows.map((row) => row.key), ["A_PLUS", "A_MINUS"]);
+  });
+});
+
+// Sorting the analytics tables. Direction is the part worth pinning: the
+// comparator is written descending, so "asc" is what flips it — getting that
+// backwards silently puts your worst bucket at the top of a "best first" sort,
+// which is exactly the bug this caught in review.
+describe("sortBuckets", () => {
+  const row = (label: string, netPnl: number, count: number, winRate: number | null): BucketStats => ({
+    key: label,
+    label,
+    count,
+    winRate,
+    netPnl,
+    expectancyR: netPnl / 100,
+    avgProcessScore: null,
+  });
+  const rows = [row("Alpha", -50, 3, 0.2), row("Beta", 400, 10, 0.8), row("Gamma", 120, 5, null)];
+
+  it("puts the best bucket first when descending, and the worst first when ascending", () => {
+    assert.deepEqual(sortBuckets(rows, "netPnl", "desc").map((r) => r.netPnl), [400, 120, -50]);
+    assert.deepEqual(sortBuckets(rows, "netPnl", "asc").map((r) => r.netPnl), [-50, 120, 400]);
+  });
+
+  it("sinks rows with no number to the bottom in both directions", () => {
+    // "No win rate" is not a win rate of zero. Sorting it as one would put the
+    // emptiest rows at the top of an ascending sort and read as the worst.
+    assert.equal(sortBuckets(rows, "winRate", "desc").at(-1)?.label, "Gamma");
+    assert.equal(sortBuckets(rows, "winRate", "asc").at(-1)?.label, "Gamma");
+  });
+
+  it("sorts names alphabetically and leaves the natural order untouched", () => {
+    assert.deepEqual(sortBuckets(rows, "label", "asc").map((r) => r.label), ["Alpha", "Beta", "Gamma"]);
+    assert.deepEqual(sortBuckets(rows, "natural", "desc").map((r) => r.label), ["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("does not mutate the rows it was given", () => {
+    const before = rows.map((r) => r.label);
+    sortBuckets(rows, "netPnl", "asc");
+    assert.deepEqual(rows.map((r) => r.label), before);
+  });
+
+  it("only accepts sorts it knows", () => {
+    assert.equal(isBucketSort("netPnl"), true);
+    assert.equal(isBucketSort("nonsense"), false);
+    assert.equal(isBucketSort(undefined), false);
   });
 });

@@ -1176,6 +1176,62 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     (worth doing once there are enough graded trades to say anything true), and any
     AI-suggested grade.
 
+- **Analytics you can drill into** (`lib/trade-filters.ts`, `components/AnalyticsFilters.tsx`,
+  `sortBuckets`). `/analytics` was a fixed report: comprehensive, and the same every time. It
+  now takes filters — every stat, table and chart reflects only the trades you picked — and the
+  tables sort by any column. **Off by default**: with no filters the page is the page it was,
+  which is the bar a change to the one page you read for verdicts has to clear.
+  - **One filter at one boundary.** Every number on that page was already a pure function of a
+    single `trades` array, so the whole feature is `applyTradeFilters()` on the line after the
+    fetch: narrow there and the headline, the leaks, the discipline curve, the R histogram, the
+    tilt split, the mistake ledger and all seven tables follow, with no section able to forget.
+    Same shape as converting money on read in `getTradesWithMistakes` — the alternative was
+    threading a filter through twenty helpers, which is twenty chances to miss one.
+    `tests/unit/trade-filters.test.ts` guards it at the source level: no metric on that page may
+    be handed the unfiltered array. Verified by doing it and watching the test name the offender.
+  - **The predicate is SHARED with `/trades`**, which is the part that keeps it honest.
+    `/trades` had an inline chain of `.filter()` calls; that chain is now
+    `applyTradeFilters(allTrades, filters, options, params)` and the two pages read the same
+    param names, so `?direction=LONG&setupId=x` means the same thing on both, a saved view
+    carries across, and a dimension added later lands on both at once. Two copies of "which
+    trades am I looking at" would drift exactly the way two tag tokenizers did in DayOS.
+    Free text still goes through `filterTradesByQuery`, so there is no second grammar either.
+  - **Verified as a refactor, not assumed:** the old inline chain was reproduced from git and
+    run against the same seeded world over 32 query strings spanning every dimension; results
+    were identical 32/32, with result sizes spanning 0-6 of 6 trades so the cases genuinely
+    discriminate rather than trivially agreeing. **One intentional divergence**, measured and
+    bounded: a value no trade carries (`?direction=SIDEWAYS`, only reachable by hand-editing
+    the URL) now matches nothing where the old chain ignored it and returned everything.
+    Silently ignoring it renders the unfiltered page under a filtered heading, which is the
+    one outcome a filter must never produce — and `setupGrade`, `timeframe`, `mechanism` and
+    `setupId` already behaved this way, so this makes the dimensions consistent.
+  - **The page says what it is showing.** A scope banner ("Showing 5 of 6 trades - 3 closed..."),
+    the hardcoded "all time" labels now reading `filtered`, and a dismissible chip per active
+    filter naming it in English ("Setup grade: A+", never `setupGrade=A_PLUS`) with a
+    Clear all. A page whose numbers quietly describe a subset is worse than one that cannot
+    filter at all.
+  - **Sorting is opt-in and page-wide.** `natural` is the default and means *each table's own*
+    order — expectancy for setups, the clock for sessions, the grade scale for setup grades —
+    because those were each chosen as the right way to read that question. Clicking a column
+    sorts every table (a sort here is a way of reading the page, not a property of one table),
+    clicking again reverses, a third click restores natural order. Nulls sink in both
+    directions: "no win rate" is not a win rate of zero, and sorting it as one puts the
+    emptiest rows at the top of an ascending sort.
+  - **A real bug the types could not see:** the first cut had the comparator's sign inverted,
+    so "sort by net P&L, highest first" led with the biggest loser. Caught by reading actual
+    rendered rows rather than trusting a green build, and pinned by a test. A second apparent
+    failure right after it turned out to be a bad regex in the HTML scrape, not a defect —
+    which is why the sort is now verified against the pure function instead of the markup.
+  - **`/analytics` is dynamic now** (`f`, not `o`) because it reads `searchParams`. Measured
+    before accepting it: **46-62ms** per render against the built app, and the route was
+    already expired on every write by `revalidateEverything()`, so the prerender was buying
+    very little. Saved views work here for free — a filtered analytics view is just its URL.
+  - Deliberately NOT done: a compare-to-baseline mode (side-by-side "this setup vs everything
+    else" is a different feature and a bigger one), per-table sorts (eight controls to learn
+    instead of one), filtering the charts on a different set from the tables, and any stored
+    filter state — the URL is the filter, which is what keeps saved views working when this
+    file grows a dimension they have never heard of.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1196,7 +1252,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters + table sorting
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)

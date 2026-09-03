@@ -110,6 +110,16 @@ const CONTENT_CHECKS: [string, string, string][] = [
   // Proves the grade filter runs on the SERVER: a grade nothing carries must
   // empty the list rather than render it unchanged.
   ["/trades?setupGrade=ZZZNOGRADE", "No trades match this view", "the setup-grade filter actually narrowing the list"],
+  // The analytics drill-down. `next build` cannot reach any of this: the panel,
+  // the chips and the scope banner are all conditional on a filter being on.
+  ["/analytics", "Filter &amp; drill down", "the analytics filter panel"],
+  ["/analytics?direction=LONG", "Direction: Long", "an active-filter chip naming the filter in English"],
+  ["/analytics?direction=LONG", "describes only these", "the scope banner saying the numbers cover the filtered set only"],
+  ["/analytics?direction=LONG", "Clear all filters", "the escape hatch back to the whole journal"],
+  // Proves the filter runs on the SERVER: a filter nothing matches must empty
+  // the page, not render the unfiltered numbers under a filtered heading.
+  ["/analytics?instrument=ZZZNOSYMBOL", "No closed trades match these filters", "the analytics filter actually narrowing the page"],
+  ["/analytics?sort=netPnl&dir=desc", "sorted by net P&amp;L, highest first", "the table sort applying across the page"],
   ["/trades", "Setup, mood, mechanism", "the free-text filter box"],
   // Proves the box filters on the SERVER, not just in the browser: a query
   // nothing can match must empty the list, not render it unchanged.

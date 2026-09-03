@@ -275,6 +275,47 @@ export type BucketStats = {
   avgProcessScore: number | null;
 };
 
+/**
+ * How the analytics tables can be re-ordered.
+ *
+ * "natural" is the default and means *each table's own* order — expectancy for
+ * setups, the clock for sessions, the grade scale for setup grades, volume for
+ * the multi-value tables. Those orders are chosen per table because they are
+ * the right way to read that particular question, so sorting is strictly
+ * opt-in: until the trader picks a column, nothing about the page changes.
+ */
+export type BucketSort = "natural" | "count" | "winRate" | "expectancyR" | "netPnl" | "avgProcessScore" | "label";
+export type SortDirection = "asc" | "desc";
+
+export const bucketSorts: BucketSort[] = ["natural", "label", "count", "winRate", "expectancyR", "netPnl", "avgProcessScore"];
+
+export function isBucketSort(value: string | undefined): value is BucketSort {
+  return Boolean(value) && bucketSorts.includes(value as BucketSort);
+}
+
+/**
+ * Re-order bucket rows. Rows whose value is null (a win rate with no closed
+ * trades, an expectancy with no R) always sink to the bottom regardless of
+ * direction: "no number" is not a small number, and letting it sort as one
+ * would put the emptiest rows at the top of an ascending sort and read as if
+ * they were the worst.
+ */
+export function sortBuckets(rows: BucketStats[], sort: BucketSort, direction: SortDirection = "desc"): BucketStats[] {
+  if (sort === "natural") return rows;
+  // The comparator below is written descending — `right - left` puts the larger
+  // value first — so "asc" is the one that flips it, not the other way round.
+  const sign = direction === "asc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    if (sort === "label") return sign * -a.label.localeCompare(b.label);
+    const left = a[sort];
+    const right = b[sort];
+    if (left == null && right == null) return 0;
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return sign * (right - left) || a.label.localeCompare(b.label);
+  });
+}
+
 /** Exported so a page can score an arbitrary slice of trades (the mechanism
  *  reference does) with exactly the same maths the tables use. */
 export function bucketStatsFor(key: string, label: string, trades: MetricTrade[]): BucketStats {

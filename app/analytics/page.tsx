@@ -1,10 +1,21 @@
 import Link from "next/link";
-import { format } from "date-fns";
+import { format, startOfMonth, startOfYear, subDays } from "date-fns";
 import { BinColumns, DisciplineLines, DivergingColumns, EmptyChart, Meter, MoneyBars } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
-import { humanize, sessionLabels } from "@/lib/constants";
+import {
+  directions,
+  entryGrades,
+  followedPlanOptions,
+  humanize,
+  marketTypes,
+  sessionLabels,
+  tradeStatuses,
+} from "@/lib/constants";
 import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
+import { AnalyticsFilters, ActiveFilterChips, analyticsHref, type FilterChoice, type FilterSelect } from "@/components/AnalyticsFilters";
+import { SavedViews } from "@/components/SavedViews";
 import { db, getBaseCurrency, getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
+import { applyTradeFilters, hasActiveFilters, parseTradeFilters, MISTAKE_ANY, MISTAKE_NONE } from "@/lib/trade-filters";
 import { getOptionCatalog } from "@/lib/options";
 import { setupSteps, stepResolver } from "@/lib/setups";
 import {
@@ -18,6 +29,7 @@ import {
   expectancyBreakdown,
   fundingSummary,
   getTradePnl,
+  isBucketSort,
   isThinSample,
   mechanismPerformance,
   MIN_SAMPLE,
@@ -27,8 +39,11 @@ import {
   setupPerformance,
   tiltAnalysis,
   setupGradePerformance,
+  sortBuckets,
   timeframePerformance,
+  type BucketSort,
   type BucketStats,
+  type SortDirection,
   type LeakInsight,
   type TiltStats,
 } from "@/lib/metrics";
@@ -36,16 +51,50 @@ import {
 // Analytics in two tiers. The default view answers "how am I doing, and what is
 // the one thing hurting me" in plain language. Everything deeper — distributions,
 // tilt, sessions, exit quality, the full tables — sits one tap away.
-export default async function AnalyticsPage() {
-  const [trades, setupNameById, options, playbook, base] = await Promise.all([
+//
+// Every stat, table and chart below is a pure function of ONE array, so the
+// drill-down is one filter at one boundary rather than a parameter threaded
+// through twenty helpers: narrow `trades` and the whole page follows, with no
+// section able to forget. Same shape as converting money on read in
+// getTradesWithMistakes, and the reason that array is built here and nowhere
+// else on this page.
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | undefined>>;
+}) {
+  const params = await searchParams ?? {};
+  const [allTrades, setupNameById, options, playbook, savedViews, base] = await Promise.all([
     getTradesWithMistakes(),
     getSetupNameMap(),
     getOptionCatalog(),
     db.list("setups"),
+    db.list("savedViews"),
     // Label only — the trades arrive already converted, which is what makes
     // adding an INR-account trade to a USDT-account one give the right answer.
     getBaseCurrency(),
   ]);
+  const mistakeTags = await db.list("mistakeTags");
+
+  // THE boundary. Everything from here down reads `trades`, never `allTrades`.
+  const filters = parseTradeFilters(params);
+  const filtered = hasActiveFilters(filters);
+  const trades = applyTradeFilters(allTrades, filters, options, params);
+  const sort: BucketSort = isBucketSort(params.sort) ? params.sort : "natural";
+  const direction: SortDirection = params.dir === "asc" ? "asc" : "desc";
+  const order = (rows: BucketStats[]) => sortBuckets(rows, sort, direction);
+  // Clicking the active column flips direction; clicking it a third time drops
+  // back to each table's natural order, so there is always a way back to the
+  // page as designed without hunting for a reset.
+  const sortHref = (column: BucketSort) => {
+    // Names read A→Z first; every number reads best-first. Both are what you
+    // expect from a first click on that particular column.
+    if (sort !== column) return analyticsHref(params, { sort: column, dir: column === "label" ? "asc" : "desc" });
+    if (direction === "desc") return analyticsHref(params, { sort: column, dir: "asc" });
+    return analyticsHref(params, { sort: null, dir: null });
+  };
+  const scopeLabel = filtered ? "filtered" : "all time";
+
   const closed = trades.filter((trade) => trade.status === "CLOSED");
   const closedWithPnl = closed
     .filter((trade) => getTradePnl(trade) != null)
@@ -93,19 +142,83 @@ export default async function AnalyticsPage() {
 
   const smallSample = closedWithPnl.length < 5;
 
+  // The drill-down controls. Every dropdown offers the vocabulary actually in
+  // use — the option catalog plus the trader's own labels — so a filter can
+  // never list a value no trade could carry, and never miss one it could.
+  const selects: FilterSelect[] = [
+    { name: "direction", label: "Direction", choices: choices(directions) },
+    { name: "status", label: "Status", choices: choices(tradeStatuses) },
+    { name: "marketType", label: "Market type", choices: choices(marketTypes) },
+    {
+      name: "setupId",
+      label: "Setup",
+      anyLabel: "Any setup",
+      choices: [...playbook].sort((a, b) => a.name.localeCompare(b.name)).map((setup) => ({ value: setup.id, label: setup.name })),
+    },
+    { name: "timeframe", label: "Timeframe", choices: optionChoices(options.choices("tradeTimeframe")) },
+    { name: "mechanism", label: "Mechanism", choices: optionChoices(options.choices("mechanism")) },
+    { name: "condition", label: "Market condition", choices: optionChoices(options.choices("condition")) },
+    { name: "emotionalState", label: "Mind state", choices: optionChoices(options.choices("mindState")) },
+    { name: "riskPosture", label: "Risk posture", choices: optionChoices(options.choices("riskPosture")) },
+    { name: "setupGrade", label: "Setup grade", choices: optionChoices(options.choices("setupGrade")) },
+    { name: "entryGrade", label: "Execution grade", choices: choices(entryGrades) },
+    { name: "followedPlan", label: "Followed plan", choices: choices(followedPlanOptions) },
+  ];
+  const mistakeChoices: FilterChoice[] = [...mistakeTags]
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .map((tag) => ({ value: tag.id, label: tag.label }));
+  const chips = activeChips(params, selects, mistakeChoices);
+  const datePresets = buildDatePresets(params);
+  const analyticsViews = savedViews.filter((view) => view.path.startsWith("/analytics"));
+  const currentPath = analyticsHref(params, {});
+  // A sort is furniture, not a filter: a view worth saving has narrowed something.
+  const savable = chips.length > 0;
+
   return (
     <main className="page-shell">
       <PageTitle title="Analytics" subtitle="How you're actually doing, and the one thing to fix. The deep end is one tap away." />
 
+      <SavedViews
+        views={analyticsViews}
+        currentPath={currentPath}
+        hasFilters={savable}
+        emptyHint="Narrow the numbers, then name it to keep that view one tap away."
+      />
+      <ActiveFilterChips params={params} chips={chips} />
+      <AnalyticsFilters
+        params={params}
+        selects={selects}
+        mistakeChoices={mistakeChoices}
+        datePresets={datePresets}
+        open={chips.length > 0}
+      />
+
+      {filtered ? (
+        <p className="mb-4 rounded-lg border border-forge-blue/30 bg-sky-50 px-3 py-2 text-sm">
+          Showing <span className="font-semibold">{trades.length}</span> of {allTrades.length} trades
+          {closed.length !== trades.length ? <> · {closed.length} closed</> : null}. Every number, table and chart below
+          describes only these — not your whole journal.
+        </p>
+      ) : null}
+
       {!closed.length ? (
-        <div className="panel muted">No closed trades yet. Patterns appear here once you start closing trades with prices filled in.</div>
+        <div className="panel muted">
+          {filtered ? (
+            <>
+              No closed trades match these filters. <Link href={analyticsHref({}, {})} className="text-forge-blue hover:underline">Clear them</Link> to
+              see the whole journal.
+            </>
+          ) : (
+            <>No closed trades yet. Patterns appear here once you start closing trades with prices filled in.</>
+          )}
+        </div>
       ) : (
         <div className="space-y-5">
           {/* ——— Basic view: readable with zero jargon ——— */}
           <section className="panel bg-gradient-to-r from-white via-white to-sky-50/60">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-forge-muted">Where you stand · all time</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-forge-muted">Where you stand · {scopeLabel}</p>
                 <p className={`mt-1 text-4xl font-semibold tracking-tight ${netTotal >= 0 ? "text-forge-green" : "text-forge-red"}`}>
                   {signedMoney(netTotal, base)}
                 </p>
@@ -154,7 +267,7 @@ export default async function AnalyticsPage() {
           <section className="panel">
             <div className="mb-1 flex items-baseline justify-between gap-2">
               <h2 className="font-semibold">Discipline, in money</h2>
-              <span className="text-xs text-forge-muted">all time</span>
+              <span className="text-xs text-forge-muted">{scopeLabel}</span>
             </div>
             {discipline.skippedCount + discipline.cappedCount > 0 && discipline.delta > 0 ? (
               <p className="mb-2 text-sm">
@@ -340,38 +453,55 @@ export default async function AnalyticsPage() {
                 </section>
               ) : null}
 
-              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={setups} firstColLabel="Setup" currency={base} />
-              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={sessions} firstColLabel="Session" currency={base} />
-              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={conditions} firstColLabel="Condition" currency={base} />
+              <p className="text-xs text-forge-muted">
+                {sort === "natural"
+                  ? "Tap any column heading to re-order every table below. Tap it again to reverse, once more to go back to this order."
+                  : `Every table is sorted by ${sortLabel(sort)}, ${direction === "asc" ? "lowest" : "highest"} first. Tap that heading again to ${direction === "asc" ? "go back to each table's own order" : "reverse it"}.`}
+              </p>
+              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={order(setups)} firstColLabel="Setup" currency={base} sort={sort} direction={direction} sortHref={sortHref} />
+              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={order(sessions)} firstColLabel="Session" currency={base} sort={sort} direction={direction} sortHref={sortHref} />
+              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={order(conditions)} firstColLabel="Condition" currency={base} sort={sort} direction={direction} sortHref={sortHref} />
               <BucketTable
                 title="By timeframe"
                 subtitle="Which charts you actually make money on. A trade counts in every timeframe it used, so these add up to more than your trade count."
-                rows={timeframes}
+                rows={order(timeframes)}
                 firstColLabel="Timeframe"
                 currency={base}
+                sort={sort}
+                direction={direction}
+                sortHref={sortHref}
               />
               <BucketTable
                 title="By setup grade"
                 subtitle="Your own read on the opportunity, scored against what it paid. If your A+ setups don't out-earn your Bs, the grading isn't measuring what you think it is — and if they do, taking fewer Bs is the cheapest edge you have."
-                rows={setupGrades}
+                rows={order(setupGrades)}
                 firstColLabel="Setup grade"
                 currency={base}
+                sort={sort}
+                direction={direction}
+                sortHref={sortHref}
               />
               <BucketTable
                 title="By mechanism"
                 subtitle="What the entry was built out of — FVG, order block, sweep. The one table that tells you which part of the model is carrying you."
-                rows={mechanisms}
+                rows={order(mechanisms)}
                 firstColLabel="Mechanism"
                 currency={base}
                 hrefFor={(row) => `/mechanisms/${row.key}`}
+                sort={sort}
+                direction={direction}
+                sortHref={sortHref}
               />
               {checklist.length ? (
                 <BucketTable
                   title="Model followed, or not"
                   subtitle="Closed trades on a setup with a checklist, split by whether every step was actually there. If these two rows look the same, the checklist isn't earning its place yet."
-                  rows={checklist}
+                  rows={order(checklist)}
                   firstColLabel="Checklist"
                   currency={base}
+                  sort={sort}
+                  direction={direction}
+                  sortHref={sortHref}
                 />
               ) : null}
             </div>
@@ -380,6 +510,93 @@ export default async function AnalyticsPage() {
       )}
     </main>
   );
+}
+
+/** A closed enum as filter choices, read the way the app reads it everywhere. */
+function choices(values: readonly string[]): FilterChoice[] {
+  return values.map((value) => ({ value, label: humanize(value) }));
+}
+
+/** An extendable vocabulary as filter choices — built-ins plus the trader's own
+ *  labels, so a grade or mechanism they invented is filterable the day they
+ *  invent it. */
+function optionChoices(values: { value: string; label: string }[]): FilterChoice[] {
+  return values.map((choice) => ({ value: choice.value, label: choice.label }));
+}
+
+/**
+ * The active filters, read back as English. Each chip names the dimension and
+ * the LABEL, never the stored value — "Setup grade: A+", not "setupGrade=A_PLUS" —
+ * because a chip the trader can't read is a filter they can't undo.
+ */
+function activeChips(
+  params: Record<string, string | undefined>,
+  selects: FilterSelect[],
+  mistakeChoices: FilterChoice[],
+): { param: string; label: string }[] {
+  const chips: { param: string; label: string }[] = [];
+  for (const select of selects) {
+    const value = params[select.name];
+    if (!value) continue;
+    const choice = select.choices.find((entry) => entry.value === value);
+    chips.push({ param: select.name, label: `${select.label}: ${choice?.label ?? humanize(value)}` });
+  }
+  if (params.q?.trim()) chips.push({ param: "q", label: `Matching: ${params.q.trim()}` });
+  if (params.instrument) chips.push({ param: "instrument", label: `Symbol: ${params.instrument.toUpperCase()}` });
+  if (params.from) chips.push({ param: "from", label: `From ${params.from}` });
+  if (params.to) chips.push({ param: "to", label: `To ${params.to}` });
+  if (params.outcome) chips.push({ param: "outcome", label: params.outcome === "wins" ? "Winners only" : "Losers only" });
+  if (params.journaled) {
+    chips.push({ param: "journaled", label: params.journaled === "archive" ? "Archive trades only" : "Journaled trades only" });
+  }
+  if (params.mistakeTagId) {
+    const value = params.mistakeTagId;
+    const label =
+      value === MISTAKE_ANY ? "Any mistake tagged"
+      : value === MISTAKE_NONE ? "No mistakes tagged"
+      : `Mistake: ${mistakeChoices.find((choice) => choice.value === value)?.label ?? "unknown tag"}`;
+    chips.push({ param: "mistakeTagId", label });
+  }
+  if (params.period || params.date) {
+    chips.push({ param: "period", label: `Calendar range: ${params.date ?? params.period}` });
+  }
+  return chips;
+}
+
+/**
+ * Quick ranges, as links rather than a preset param. Resolving a preset to real
+ * from/to dates at click time means the URL says exactly which days it covers —
+ * so a saved "last 30 days" view stays the 30 days it was saved for instead of
+ * quietly sliding, and the date boxes show what is actually being measured.
+ */
+function buildDatePresets(params: Record<string, string | undefined>) {
+  const today = new Date();
+  const iso = (date: Date) => format(date, "yyyy-MM-dd");
+  const ranges: { label: string; from: string | null; to: string | null }[] = [
+    { label: "Last 30 days", from: iso(subDays(today, 29)), to: iso(today) },
+    { label: "Last 90 days", from: iso(subDays(today, 89)), to: iso(today) },
+    { label: "This month", from: iso(startOfMonth(today)), to: iso(today) },
+    { label: "This year", from: iso(startOfYear(today)), to: iso(today) },
+    { label: "All time", from: null, to: null },
+  ];
+  return ranges.map((range) => ({
+    label: range.label,
+    href: analyticsHref(params, { from: range.from, to: range.to }),
+    active: (params.from ?? null) === range.from && (params.to ?? null) === range.to,
+  }));
+}
+
+function sortLabel(sort: BucketSort) {
+  const labels: Record<BucketSort, string> = {
+    natural: "each table's own order",
+    label: "name",
+    count: "number of trades",
+    winRate: "win rate",
+    expectancyR: "expectancy",
+    netPnl: "net P&L",
+    avgProcessScore: "process score",
+  };
+  return labels[sort];
 }
 
 function LeakCard({ leak }: { leak: LeakInsight }) {
@@ -417,6 +634,17 @@ function TiltCard({ title, stats, currency, highlight = false }: { title: string
   );
 }
 
+// Which column each header sorts by. `label` is the first column, whatever that
+// table calls it — one map, so a renamed header can never sort by the wrong
+// field.
+const SORTABLE_COLUMNS: { header: string; sort: BucketSort }[] = [
+  { header: "Trades", sort: "count" },
+  { header: "Win rate", sort: "winRate" },
+  { header: "Expectancy (R)", sort: "expectancyR" },
+  { header: "Net P&L", sort: "netPnl" },
+  { header: "Process", sort: "avgProcessScore" },
+];
+
 function BucketTable({
   title,
   subtitle,
@@ -424,6 +652,9 @@ function BucketTable({
   firstColLabel,
   currency,
   hrefFor,
+  sort,
+  direction,
+  sortHref,
 }: {
   title: string;
   subtitle: string;
@@ -433,6 +664,13 @@ function BucketTable({
   currency: Currency;
   /** Optional: makes the first column a link (mechanisms have their own page). */
   hrefFor?: (row: BucketStats) => string;
+  /** The active sort, shared by every table on the page — see sortHref below. */
+  sort: BucketSort;
+  direction: SortDirection;
+  /** Clicking a header re-sorts EVERY table, because a sort here is a way of
+   *  reading the page ("show me my worst buckets"), not a property of one
+   *  table. One control, one URL, one answer to "how is this ordered". */
+  sortHref: (sort: BucketSort) => string;
 }) {
   const thin = rows.filter((row) => isThinSample(row.count)).length;
   return (
@@ -447,9 +685,22 @@ function BucketTable({
             <table className="min-w-full text-sm">
               <thead className="bg-forge-panel">
                 <tr>
-                  {[firstColLabel, "Trades", "Win rate", "Expectancy (R)", "Net P&L", "Process"].map((header) => (
-                    <th key={header} className="px-3 py-2 text-left font-medium">{header}</th>
-                  ))}
+                  {[{ header: firstColLabel, sort: "label" as BucketSort }, ...SORTABLE_COLUMNS].map((column) => {
+                    const active = sort === column.sort;
+                    return (
+                      <th key={column.header} className="px-3 py-2 text-left font-medium">
+                        <Link
+                          href={sortHref(column.sort)}
+                          className={`inline-flex items-center gap-1 transition hover:text-forge-blue ${active ? "text-forge-blue" : ""}`}
+                          title={`Sort every table by ${column.header.toLowerCase()}`}
+                        >
+                          {column.header}
+                          {active ? <span aria-hidden="true">{direction === "asc" ? "↑" : "↓"}</span> : null}
+                          {active ? <span className="sr-only">sorted {direction === "asc" ? "ascending" : "descending"}</span> : null}
+                        </Link>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
