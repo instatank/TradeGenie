@@ -5,7 +5,14 @@
 // grade order rather than in order of how often each grade was taken.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isBucketSort, setupGradePerformance, sortBuckets, type BucketStats, type MetricTrade } from "@/lib/metrics";
+import {
+  calculateProfitFactor,
+  isBucketSort,
+  setupGradePerformance,
+  sortBuckets,
+  type BucketStats,
+  type MetricTrade,
+} from "@/lib/metrics";
 import { optionGroups } from "@/lib/options";
 
 const order = optionGroups.setupGrade.builtin.map((choice) => choice.value);
@@ -114,5 +121,24 @@ describe("sortBuckets", () => {
     assert.equal(isBucketSort("netPnl"), true);
     assert.equal(isBucketSort("nonsense"), false);
     assert.equal(isBucketSort(undefined), false);
+  });
+});
+
+describe("calculateProfitFactor", () => {
+  const t = (netPnl: number): MetricTrade =>
+    ({ tradeDateTime: new Date(), status: "CLOSED", netPnl }) as MetricTrade;
+
+  it("divides gross wins by gross losses", () => {
+    assert.equal(calculateProfitFactor([t(300), t(100), t(-200)]), 2);
+  });
+
+  it("returns null when there are no losses, rather than the gains total", () => {
+    // The bug this pins: it used to return `gains`, so a clean week rendered
+    // "Profit factor 918" — a rupee amount in a ratio's slot.
+    assert.equal(calculateProfitFactor([t(300), t(618)]), null);
+  });
+
+  it("returns null with nothing to measure", () => {
+    assert.equal(calculateProfitFactor([]), null);
   });
 });

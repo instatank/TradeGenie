@@ -1248,11 +1248,29 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     cannot overlap by construction. "All trades" is still offered — sometimes that genuinely is
     the question — but when the two sides share trades the panel says so, with the count, rather
     than leaving it to be discovered. Same family of rule as `MIN_SAMPLE` greying a thin row.
-  - **Six numbers, not the page twice.** Both sides go through `bucketStatsFor`, the same
+  - **Nine numbers, not the page twice.** Both sides go through `bucketStatsFor`, the same
     function the tables use, so a number in the comparison can never disagree with the same
-    number below it. The panel labels which measures are per-trade: net P&L is a total, so the
-    side with more trades tends to win it whatever the quality — that is the most common way a
-    comparison lies. A side with no trades reads "—", never a win rate of zero.
+    number below it. A side with no trades reads "—", never a win rate of zero.
+    - **Win rate alone says nothing about whether the wins are worth having**, so **average
+      win** and **average loss** sit next to it — "I win 40% and my winners are 3x my losers"
+      is a complete description of a strategy; either half on its own is not. Average loss is
+      shown as a positive magnitude with `higherIsBetter: false`, so smaller reads as better.
+    - **Profit factor** (gross wins / gross losses) is the best single "is this worth doing"
+      number and, being a ratio, is the one that compares two differently-sized slices fairly.
+    - **Only Net P&L is badged**, as a *total*: it scales with trade count, so the bigger side
+      tends to win it whatever the quality — the most common way a comparison lies. Every other
+      row is per-trade or a ratio and needs no warning, so marking the one exception beats
+      badging the seven that don't.
+    - The panel explains **expectancy** in place (average R — what a trade returned as a
+      multiple of what it risked, and that it only counts trades with entry + stop + exit),
+      because the owner asked what it meant and a stat nobody can define is a stat nobody uses.
+      The row formerly called "Average trade" is now **"P&L per trade"**: it always was mean
+      net P&L per closed trade, but the old label read as position size.
+  - **`calculateProfitFactor` returned the gains total when there were no losses** — a rupee
+    amount rendered in a ratio's slot, so a clean week on `/weekly-review` showed
+    "Profit factor 918". It returns null now: with no losses the ratio is undefined, not
+    infinite and certainly not ₹918. Pinned by a test. Weekly reviews already saved keep the
+    old stored number; nothing rewrites history.
   - **Sorting is two layers.** The page-wide control ("sort every table by…") is the default;
     clicking one table's heading gives that table its own sort and leaves the rest alone, with
     the cycle best-first → reversed → back to inheriting, so a table can never be trapped in an

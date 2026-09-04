@@ -88,11 +88,21 @@ export function calculateWinRate(trades: MetricTrade[]) {
   return wins / closed.length;
 }
 
+/**
+ * Gross wins ÷ gross losses. 1.0 is breakeven; above it you keep more than you
+ * give back, whatever your win rate is.
+ *
+ * With no losing trades the ratio is undefined (division by zero), so this
+ * returns null rather than a number. It used to return the GAINS — a money
+ * amount rendered in the "Profit factor" slot, so a clean week showed
+ * "Profit factor 918" meaning ₹918. A currency total wearing a ratio's label is
+ * worse than no number at all.
+ */
 export function calculateProfitFactor(trades: MetricTrade[]) {
   const pnlValues = trades.map(getTradePnl).filter((value): value is number => value != null);
   const gains = pnlValues.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
   const losses = Math.abs(pnlValues.filter((value) => value < 0).reduce((sum, value) => sum + value, 0));
-  if (!losses) return gains > 0 ? gains : null;
+  if (!losses) return null;
   return gains / losses;
 }
 

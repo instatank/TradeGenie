@@ -123,6 +123,9 @@ const CONTENT_CHECKS: [string, string, string][] = [
   // Comparison and per-table sorts — all conditional on a URL param.
   ["/analytics?direction=LONG&vs=rest", "Everything else", "the comparison panel against the complement"],
   ["/analytics?direction=LONG&vs=rest", "Stop comparing", "the way back out of a comparison"],
+  ["/analytics?direction=LONG&vs=rest", "Profit factor", "the profit-factor row"],
+  ["/analytics?direction=LONG&vs=rest", "P&amp;L per trade", "the renamed per-trade P&L row"],
+  ["/analytics?direction=LONG&vs=rest", "Average loss", "the average win/loss split"],
   // The honesty layer: comparing a slice against a set that contains it must
   // say so. This is the whole reason "everything else" is the default.
   ["/analytics?direction=LONG&vs=all", "These two sets overlap", "the overlap warning when the baseline contains the filtered set"],

@@ -71,6 +71,45 @@ describe("buildComparison", () => {
     assert.equal(byLabel["Win rate"].a, 4 / 5);
   });
 
+  it("says P&L per trade, and means P&L — not position size", () => {
+    // The label this replaced ("Average trade") read as size to the owner, and
+    // nothing on this panel has ever shown size.
+    const result = buildComparison(a, b, { a: "A", b: "B" });
+    const byLabel = Object.fromEntries(result.metrics.map((metric) => [metric.label, metric]));
+    assert.ok(byLabel["P&L per trade"], "the row must be named for what it holds");
+    assert.equal(byLabel["P&L per trade"].a, 600 / 5, "total net P&L divided by closed trades");
+    assert.equal(byLabel["Average trade"], undefined, "the ambiguous label must be gone");
+  });
+
+  it("splits the average win from the average loss, and wants the loss smaller", () => {
+    const result = buildComparison(a, b, { a: "A", b: "B" });
+    const byLabel = Object.fromEntries(result.metrics.map((metric) => [metric.label, metric]));
+    // A: wins 300/200/100/100 -> 175 avg; the one loss is -100 -> 100 magnitude.
+    assert.equal(byLabel["Average win"].a, 175);
+    assert.equal(byLabel["Average loss"].a, 100);
+    assert.equal(byLabel["Average win"].higherIsBetter, true);
+    assert.equal(byLabel["Average loss"].higherIsBetter, false, "a bigger average loss is worse, not better");
+  });
+
+  it("reports profit factor as a ratio over closed trades", () => {
+    const result = buildComparison(a, b, { a: "A", b: "B" });
+    const byLabel = Object.fromEntries(result.metrics.map((metric) => [metric.label, metric]));
+    // A: gains 700, losses 100 -> 7. B: gains 110, losses 50 -> 2.2.
+    assert.equal(byLabel["Profit factor"].a, 7);
+    assert.ok(Math.abs((byLabel["Profit factor"].b ?? 0) - 2.2) < 1e-9);
+    assert.equal(byLabel["Profit factor"].format, "ratio");
+  });
+
+  it("leaves profit factor empty when nothing has been lost yet", () => {
+    // Undefined, not infinite, and above all not the gains total wearing a
+    // ratio's label — which is what the old helper returned.
+    const winnersOnly = [trade("w1", 100), trade("w2", 200)];
+    const result = buildComparison(winnersOnly, b, { a: "A", b: "B" });
+    const byLabel = Object.fromEntries(result.metrics.map((metric) => [metric.label, metric]));
+    assert.equal(byLabel["Profit factor"].a, null);
+    assert.equal(byLabel["Average loss"].a, null, "no losses means no average loss, not an average of zero");
+  });
+
   it("marks trade count as having no better direction", () => {
     // More trades is neither good nor bad; colouring it green would say it was.
     const result = buildComparison(a, b, { a: "A", b: "B" });
