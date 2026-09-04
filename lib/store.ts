@@ -255,6 +255,50 @@ export async function upsertBy<K extends CollectionName>(
   return createRecord(collection, createInput);
 }
 
+/** Bulk write for restoring a backup, and the only writer in this file that
+ *  does not go one record at a time.
+ *
+ *  createRecord() per record would be one Firestore round trip each: a journal
+ *  of a few thousand records — which the exchange fills alone will reach —
+ *  would take minutes and time the function out well before it finished, so a
+ *  restore that "worked in dev" would fail in production at exactly the size
+ *  where a restore matters. Firestore caps a batch at 500 operations, so the
+ *  input is chunked below that.
+ *
+ *  set() without merge on purpose: restoring a record means the file's version
+ *  of it, whole, not the file's fields layered over whatever is there now.
+ *  Whether a record should be written at all is decided one level up in
+ *  lib/backup.ts — this function is told what to write, not what to keep. */
+const RESTORE_BATCH_SIZE = 400;
+
+export async function restoreRecords<K extends CollectionName>(
+  collection: K,
+  records: ({ id: string } & Record<string, unknown>)[],
+) {
+  if (records.length === 0) return;
+
+  if (usesFirebase()) {
+    for (let start = 0; start < records.length; start += RESTORE_BATCH_SIZE) {
+      const chunk = records.slice(start, start + RESTORE_BATCH_SIZE);
+      const batch = firestore().batch();
+      for (const record of chunk) {
+        batch.set(firestore().collection(collection).doc(record.id), dehydrate(record) as Record<string, unknown>);
+      }
+      await batch.commit();
+    }
+    invalidateRead(collection);
+    return;
+  }
+
+  const store = await readLocalStore();
+  const list = store[collection] as ({ id: string } & Record<string, unknown>)[];
+  const byId = new Map(list.map((record) => [record.id, record]));
+  for (const record of records) byId.set(record.id, record);
+  store[collection] = Array.from(byId.values()) as StoreShape[K];
+  await writeLocalStore(store);
+  invalidateRead(collection);
+}
+
 async function readLocalStore(): Promise<StoreShape> {
   try {
     const raw = await readFile(localStorePath, "utf8");

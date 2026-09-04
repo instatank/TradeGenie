@@ -1,35 +1,21 @@
 import { NextResponse } from "next/server";
-import { format } from "date-fns";
-import { db } from "@/lib/data";
-import { getSettings } from "@/lib/settings-store";
-import { collectionNames, storageStatus } from "@/lib/store";
+import { buildSnapshot, snapshotFileName } from "@/lib/backup";
 
-// Every collection in the store shape, always. A hardcoded list here had already
-// gone stale — assets and asset notes were missing from every backup, and the
-// list would have had to grow again for customOptions and freeNotes.
-const COLLECTIONS = collectionNames;
+// The manual download. Everything about WHAT a backup contains now lives in
+// lib/backup.ts, shared with the "Back up now" button and the nightly cron —
+// this route only decides that the answer arrives as a file.
+//
+// It used to build the payload itself, which is how assets and asset notes went
+// missing from every backup for a while. One definition, three callers.
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const data: Record<string, unknown[]> = {};
-  for (const collection of COLLECTIONS) {
-    data[collection] = (await db.list(collection)) as unknown[];
-  }
-  const settings = await getSettings();
-  const status = storageStatus();
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    storageMode: status.mode,
-    durable: status.durable,
-    settings,
-    data,
-  };
-  const fileName = `tradegenie-backup-${format(new Date(), "yyyy-MM-dd-HHmm")}.json`;
-  return new NextResponse(JSON.stringify(payload, null, 2), {
+  const snapshot = await buildSnapshot();
+  return new NextResponse(JSON.stringify(snapshot, null, 2), {
     headers: {
       "Content-Type": "application/json",
-      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Disposition": `attachment; filename="${snapshotFileName()}"`,
       "Cache-Control": "no-store",
     },
   });
