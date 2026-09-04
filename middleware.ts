@@ -14,7 +14,11 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 // downloadable file. That's a different thing from "browse the app" — a
 // read-only link is for looking at entries, not for bulk-exporting them — so
 // they stay owner-only even though they're safe methods.
-const OWNER_ONLY_PREFIXES = ["/api/export", "/api/tax-export"];
+// /api/cron/* is a third kind: a GET, but one that DOES something — it runs a
+// scheduled job on demand. A read-only viewer could otherwise force exchange
+// syncs and backups at will. The bearer-token exemption above is checked first
+// and is unaffected, so this only ever narrows what a browser cookie can do.
+const OWNER_ONLY_PREFIXES = ["/api/export", "/api/tax-export", "/api/cron"];
 
 function readOnlyResponse() {
   return new NextResponse(
