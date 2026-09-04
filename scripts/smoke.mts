@@ -135,6 +135,16 @@ const CONTENT_CHECKS: [string, string, string][] = [
   // Proves the box filters on the SERVER, not just in the browser: a query
   // nothing can match must empty the list, not render it unchanged.
   ["/trades?q=zzznotatrade", "Nothing matches", "the free-text filter actually narrowing the list"],
+  // Backup and restore. The status panel renders inside its own <Suspense>, so
+  // a crash in it would leave the rest of /settings at a perfectly good 200 —
+  // a status check alone could not tell "backups are off" from "the panel that
+  // reports on backups is broken". The smoke env has no BACKUP_GITHUB_*, which
+  // is the "off until configured" state this asserts.
+  ["/settings", "Automatic offsite backup: off", "the offsite backup status panel"],
+  ["/settings", "Restore from a backup", "the restore control"],
+  ["/settings", "Put back what", "the non-destructive restore mode, which must be the default"],
+  // Attribute order is React's, not ours — asserted against the real render.
+  ["/settings", 'checked="" value="fill-gaps"', "fill-gaps selected by default rather than the destructive rollback"],
 ];
 
 async function fetchBody(route: string): Promise<string> {

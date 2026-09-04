@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { revalidateEverything } from "@/lib/revalidate";
 import { endOfDay, format, isSameDay, startOfDay } from "date-fns";
 import { checkAiConnection } from "@/lib/ai-status";
+import { BackupFormatError, parseSnapshot, restoreSnapshot, type RestoreMode } from "@/lib/backup";
+import { checkDestination } from "@/lib/backup-github";
+import { runBackup } from "@/lib/backup-run";
 import { credentialsFromEnv } from "@/lib/coindcx";
 import { exchangeView, positionKey, syncExchange } from "@/lib/coindcx-sync";
 import { acceptPatch, archiveTradeRecord, changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
@@ -2154,4 +2157,68 @@ export async function setDisplayCurrencyAction(formData: FormData) {
   await saveSettings({ ...settings, displayCurrency: value });
   revalidateEverything();
   await redirectBackWithFeedback(`Totals now shown in ${value}.`, "/settings");
+}
+
+// --- Backup and restore -----------------------------------------------------
+//
+// The backup half of these is deliberately thin: everything that decides
+// whether a backup should happen, and what it contains, lives in lib/backup*.ts
+// where it is tested. These only carry the answer back to the page.
+
+export async function checkBackupConnectionAction() {
+  const check = await checkDestination();
+  const target = new URL("/settings", "http://tradeforge.local");
+  target.searchParams.set("backupCheck", check.status);
+  target.searchParams.set("backupCheckDetail", check.detail);
+  revalidateEverything();
+  redirect(`${target.pathname}${target.search}#backup`);
+}
+
+export async function runBackupNowAction(formData: FormData) {
+  // `force` skips the shrink guard, and is only ever reachable from the button
+  // shown AFTER an automatic run has explained why it refused. It never applies
+  // to the scheduled job — an unattended run must not be able to talk itself
+  // past a guard.
+  const force = toText(formData.get("force")) === "yes";
+  const { outcome } = await runBackup({ force });
+  const target = new URL("/settings", "http://tradeforge.local");
+  target.searchParams.set("backupRun", outcome.status);
+  target.searchParams.set("backupRunDetail", outcome.detail);
+  if (outcome.status === "ok") target.searchParams.set("backupRunCommit", outcome.commitUrl);
+  revalidateEverything();
+  redirect(`${target.pathname}${target.search}#backup`);
+}
+
+export async function restoreBackupAction(formData: FormData) {
+  const file = formData.get("backupFile");
+  if (!(file instanceof File) || file.size === 0) {
+    await redirectBackWithFeedback("Choose a backup file first.", "/settings");
+    return;
+  }
+
+  const mode: RestoreMode = toText(formData.get("restoreMode")) === "overwrite" ? "overwrite" : "fill-gaps";
+  const restoreSettings = toText(formData.get("restoreSettings")) === "yes";
+
+  let parsed;
+  try {
+    parsed = parseSnapshot(JSON.parse(await file.text()));
+  } catch (error) {
+    // A bad file must say what is wrong with it. "Restore failed" on the one
+    // day you need a restore is the worst message this app could show.
+    const detail =
+      error instanceof BackupFormatError
+        ? error.message
+        : "That file isn't readable as JSON. Make sure it's the tradegenie-backup.json file, not a zip or a screenshot of it.";
+    await redirectBackWithFeedback(detail, "/settings");
+    return;
+  }
+
+  const report = await restoreSnapshot(parsed.snapshot, { mode, restoreSettings, issues: parsed.issues });
+  revalidateEverything();
+
+  const parts = [`Restored ${report.totalWritten} record${report.totalWritten === 1 ? "" : "s"}.`];
+  if (report.totalSkipped > 0) parts.push(`${report.totalSkipped} already present and left as they are.`);
+  if (report.settingsRestored) parts.push("Settings restored.");
+  for (const issue of report.issues) parts.push(issue.detail);
+  await redirectBackWithFeedback(parts.join(" "), "/settings");
 }

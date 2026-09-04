@@ -1,12 +1,15 @@
 import { Suspense } from "react";
 import { format } from "date-fns";
-import { Download, Eye, EyeOff, Lock, Pencil, ShieldCheck, Stethoscope, Tags, X } from "lucide-react";
+import { CloudUpload, Download, Eye, EyeOff, Lock, Pencil, ShieldCheck, Stethoscope, Tags, X } from "lucide-react";
 import {
   hideTagAction,
   removeCustomMistakeTagAction,
   removeCustomOptionAction,
   renameCustomMistakeTagAction,
   renameCustomOptionAction,
+  restoreBackupAction,
+  runBackupNowAction,
+  checkBackupConnectionAction,
   saveSettingsAction,
   setDisplayCurrencyAction,
   showTagAction,
@@ -14,6 +17,7 @@ import {
 } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { activeModel } from "@/lib/ai-status";
+import { checkDestination } from "@/lib/backup-github";
 import { defaultMistakeTagNames, marketTypes } from "@/lib/constants";
 import { db, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
@@ -38,6 +42,11 @@ export default async function SettingsPage({
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
   const storage = storageStatus();
   const aiCheck = single(params.aiCheck);
+  const backupCheck = single(params.backupCheck);
+  const backupCheckDetail = single(params.backupCheckDetail);
+  const backupRun = single(params.backupRun);
+  const backupRunDetail = single(params.backupRunDetail);
+  const backupRunCommit = single(params.backupRunCommit);
   const aiCheckDetail = single(params.aiCheckDetail);
   const aiCheckModel = single(params.aiCheckModel);
   const siteLocked = siteAuthConfigured();
@@ -106,19 +115,71 @@ export default async function SettingsPage({
         </div>
       </section>
 
-      <section className="panel mb-5 space-y-3">
+      <section className="panel mb-5 space-y-3" id="backup">
         <h2 className="font-semibold">Data &amp; backup</h2>
         <StorageBanner storage={storage} />
+
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-forge-panel p-3">
           <div className="text-sm">
-            <div className="font-medium">Export everything</div>
-            <div className="text-forge-muted">One JSON file with all trades, transcripts, journals, lessons, settings. Your manual safety net.</div>
+            <div className="font-medium">Download a copy now</div>
+            <div className="text-forge-muted">One JSON file with every trade, note, journal, lesson and setting. Keep it anywhere you like.</div>
           </div>
           <a className="button-secondary" href="/api/export" download>
             <Download className="h-4 w-4" aria-hidden="true" />
             Export backup
           </a>
         </div>
+
+        <Suspense fallback={<div className="rounded-lg bg-forge-panel p-3 text-sm text-forge-muted">Checking offsite backup…</div>}>
+          <OffsiteBackupPanel />
+        </Suspense>
+        {backupCheck ? <BackupNotice tone={backupCheck === "ready" ? "good" : backupCheck === "off" ? "neutral" : "bad"} title={backupCheck === "ready" ? "Connected" : backupCheck === "off" ? "Not set up yet" : "Not working"} detail={backupCheckDetail} /> : null}
+        {backupRun ? (
+          <BackupNotice
+            tone={backupRun === "ok" ? "good" : backupRun === "failed" ? "bad" : "neutral"}
+            title={
+              backupRun === "ok" ? "Backed up" :
+              backupRun === "unchanged" ? "Nothing to back up" :
+              backupRun === "blocked" ? "Backup refused" :
+              backupRun === "off" ? "Offsite backup is off" : "Backup failed"
+            }
+            detail={backupRunDetail}
+            link={backupRunCommit ? { href: backupRunCommit, label: "See it on GitHub" } : undefined}
+          />
+        ) : null}
+
+        <details className="rounded-lg bg-forge-panel p-3 text-sm">
+          <summary className="cursor-pointer font-medium">Restore from a backup</summary>
+          <form action={restoreBackupAction} className="mt-3 space-y-3" encType="multipart/form-data">
+            <p className="text-forge-muted">
+              Pick a <code>tradegenie-backup.json</code> file — one you downloaded above, or one from the backup
+              repository. Nothing is ever deleted by a restore: records the file doesn&rsquo;t mention are left
+              exactly as they are.
+            </p>
+            <input className="input w-full" type="file" name="backupFile" accept="application/json,.json" required />
+            <fieldset className="space-y-2">
+              <label className="flex items-start gap-2">
+                <input type="radio" name="restoreMode" value="fill-gaps" defaultChecked className="mt-1" />
+                <span>
+                  <span className="font-medium">Put back what&rsquo;s missing</span>
+                  <span className="block text-forge-muted">Only adds records that aren&rsquo;t there. Can&rsquo;t overwrite anything you&rsquo;ve written since.</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="radio" name="restoreMode" value="overwrite" className="mt-1" />
+                <span>
+                  <span className="font-medium">Roll everything back to this file</span>
+                  <span className="block text-forge-muted">Also replaces records that exist now — so edits made after this backup was taken are lost.</span>
+                </span>
+              </label>
+            </fieldset>
+            <label className="flex items-center gap-2 text-forge-muted">
+              <input type="checkbox" name="restoreSettings" value="yes" />
+              Restore settings too (currency, hidden tags, prompt edits)
+            </label>
+            <button className="button-secondary" type="submit">Restore</button>
+          </form>
+        </details>
       </section>
 
       <section className="panel mb-5 space-y-3">
@@ -203,6 +264,128 @@ export default async function SettingsPage({
 
 function single(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+// The offsite backup's own status, read live from the backup repository rather
+// than from anything this app stores. That matters: a status this app kept for
+// itself would keep saying "backed up" long after the backups had stopped, and
+// a backup you wrongly believe you have is worse than none. Wrapped in its own
+// <Suspense> so a slow or unreachable GitHub can never hold up the rest of the
+// settings page — same treatment as the deployment panel.
+async function OffsiteBackupPanel() {
+  const check = await checkDestination();
+
+  if (check.status === "off") {
+    return (
+      <div className="rounded-lg border-l-4 border-forge-muted bg-forge-panel p-3 text-sm">
+        <div className="font-medium">Automatic offsite backup: off</div>
+        <div className="mt-1 text-forge-muted">
+          Nothing is being copied anywhere. Turn it on by adding <code>BACKUP_GITHUB_REPO</code> and{" "}
+          <code>BACKUP_GITHUB_TOKEN</code> in Vercel &rarr; Settings &rarr; Environment Variables. Until then no
+          journal data leaves this app.
+        </div>
+      </div>
+    );
+  }
+
+  if (check.status === "problem") {
+    return (
+      <div className="rounded-lg border-l-4 border-forge-red bg-forge-panel p-3 text-sm">
+        <div className="font-medium text-forge-red">Automatic offsite backup is not working</div>
+        <div className="mt-1 text-forge-muted">{check.detail}</div>
+        <BackupButtons />
+      </div>
+    );
+  }
+
+  // A backup that silently stopped looks exactly like one that is working,
+  // so staleness is called out rather than left to be noticed.
+  const stale = check.lastBackupAt ? Date.now() - new Date(check.lastBackupAt).getTime() > STALE_AFTER_MS : true;
+  return (
+    <div className={`rounded-lg border-l-4 bg-forge-panel p-3 text-sm ${stale ? "border-forge-red" : "border-forge-green"}`}>
+      <div className={`font-medium ${stale ? "text-forge-red" : "text-forge-green"}`}>
+        {check.lastBackupAt
+          ? stale
+            ? "Offsite backup is out of date"
+            : "Offsite backup is on"
+          : "Offsite backup is on — nothing backed up yet"}
+      </div>
+      <div className="mt-1 text-forge-muted">
+        {check.lastBackupAt ? (
+          <>
+            Last copy {format(new Date(check.lastBackupAt), "d MMM yyyy, HH:mm")}
+            {check.lastBackupRecords == null ? "" : ` — ${check.lastBackupRecords} records`}. Runs every Sunday.
+          </>
+        ) : (
+          <>Runs every Sunday. Press &ldquo;Back up now&rdquo; if you don&rsquo;t want to wait.</>
+        )}
+        {" "}
+        <a className="underline" href={check.repoUrl} target="_blank" rel="noreferrer">
+          Open the backup repository
+        </a>
+        .
+      </div>
+      <BackupButtons />
+    </div>
+  );
+}
+
+/** A week and a half: long enough that a missed Sunday isn't an alarm, short
+ *  enough that two missed ones are. */
+const STALE_AFTER_MS = 10 * 24 * 60 * 60 * 1000;
+
+function BackupButtons() {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      <form action={runBackupNowAction}>
+        <button className="button-secondary" type="submit">
+          <CloudUpload className="h-4 w-4" aria-hidden="true" />
+          Back up now
+        </button>
+      </form>
+      <form action={checkBackupConnectionAction}>
+        <button className="button-secondary" type="submit">
+          <Stethoscope className="h-4 w-4" aria-hidden="true" />
+          Check connection
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function BackupNotice({
+  tone,
+  title,
+  detail,
+  link,
+}: {
+  tone: "good" | "bad" | "neutral";
+  title: string;
+  detail: string;
+  link?: { href: string; label: string };
+}) {
+  const border = tone === "good" ? "border-forge-green" : tone === "bad" ? "border-forge-red" : "border-forge-muted";
+  const text = tone === "good" ? "text-forge-green" : tone === "bad" ? "text-forge-red" : "";
+  return (
+    <div className={`rounded-lg border-l-4 bg-forge-panel p-3 text-sm ${border}`}>
+      <div className={`font-medium ${text}`}>{title}</div>
+      <div className="mt-1 text-forge-muted">{detail}</div>
+      {link ? (
+        <a className="mt-1 inline-block underline" href={link.href} target="_blank" rel="noreferrer">
+          {link.label}
+        </a>
+      ) : null}
+      {/* A refused backup is recoverable by the owner, so say how. */}
+      {title === "Backup refused" ? (
+        <form action={runBackupNowAction} className="mt-2">
+          <input type="hidden" name="force" value="yes" />
+          <button className="button-secondary" type="submit">
+            Back up anyway
+          </button>
+        </form>
+      ) : null}
+    </div>
+  );
 }
 
 function AiCheckResult({ ok, detail, model }: { ok: boolean; detail: string; model: string }) {
