@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SlidersHorizontal, X } from "lucide-react";
 import { TRADE_FILTER_PARAMS, MISTAKE_ANY, MISTAKE_NONE, type FilterParams } from "@/lib/trade-filters";
+import { tableSortParams } from "@/lib/table-sort";
 
 // The drill-down controls for /analytics.
 //
@@ -31,6 +32,8 @@ export type FilterSelect = {
 /** Params the panel does not own and must carry through a submit untouched
  *  (the table sort, and the toast the redirect leaves behind). */
 const CARRIED_PARAMS = ["sort", "dir"];
+
+
 
 function queryWithout(params: FilterParams, drop: string[]): string {
   const next = new URLSearchParams();
@@ -97,11 +100,15 @@ export function AnalyticsFilters({
   params,
   selects,
   mistakeChoices,
+  compareChoices,
   datePresets,
   open,
 }: {
   params: FilterParams;
   selects: FilterSelect[];
+  /** What the filtered set can be judged against: its own complement, the whole
+   *  journal, or any saved view. All three are filter specs — see lib/compare.ts. */
+  compareChoices: FilterChoice[];
   /** Mistake tags get their own prop rather than joining `selects`: the control
    *  carries two meta-answers (any / none) that are not tags at all. */
   mistakeChoices: FilterChoice[];
@@ -124,6 +131,9 @@ export function AnalyticsFilters({
         {CARRIED_PARAMS.map((key) =>
           params[key] ? <input key={key} type="hidden" name={key} value={params[key]} /> : null,
         )}
+        {tableSortParams(params).map(([key, value]) => (
+          <input key={key} type="hidden" name={key} value={value} />
+        ))}
 
         <label className="field">
           <span className="label">Anything written on the trade</span>
@@ -221,6 +231,23 @@ export function AnalyticsFilters({
             </select>
           </label>
         </div>
+
+        <label className="field">
+          <span className="label">Compare against</span>
+          <select name="vs" defaultValue={params.vs ?? ""} className="input sm:max-w-xs">
+            <option value="">Don&apos;t compare</option>
+            {compareChoices.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-forge-muted">
+            <span className="font-medium text-forge-ink">Everything else</span> is the honest default — comparing a slice
+            against your whole journal compares it against a set that already contains it. Save a view to compare two
+            strategies directly.
+          </span>
+        </label>
 
         <div className="flex flex-wrap items-center gap-2">
           <button className="button" type="submit">Apply filters</button>

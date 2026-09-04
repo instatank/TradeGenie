@@ -119,7 +119,15 @@ const CONTENT_CHECKS: [string, string, string][] = [
   // Proves the filter runs on the SERVER: a filter nothing matches must empty
   // the page, not render the unfiltered numbers under a filtered heading.
   ["/analytics?instrument=ZZZNOSYMBOL", "No closed trades match these filters", "the analytics filter actually narrowing the page"],
-  ["/analytics?sort=netPnl&dir=desc", "sorted by net P&amp;L, highest first", "the table sort applying across the page"],
+  ["/analytics?sort=netPnl&dir=desc", '<option value="netPnl" selected', "the page-wide sort read back from the URL"],
+  // Comparison and per-table sorts — all conditional on a URL param.
+  ["/analytics?direction=LONG&vs=rest", "Everything else", "the comparison panel against the complement"],
+  ["/analytics?direction=LONG&vs=rest", "Stop comparing", "the way back out of a comparison"],
+  // The honesty layer: comparing a slice against a set that contains it must
+  // say so. This is the whole reason "everything else" is the default.
+  ["/analytics?direction=LONG&vs=all", "These two sets overlap", "the overlap warning when the baseline contains the filtered set"],
+  ["/analytics?s_setup=netPnl&d_setup=desc", "Reset them", "the escape hatch from per-table sorts"],
+  ["/analytics", "Sort every table by", "the page-wide sort control"],
   ["/trades", "Setup, mood, mechanism", "the free-text filter box"],
   // Proves the box filters on the SERVER, not just in the browser: a query
   // nothing can match must empty the list, not render it unchanged.

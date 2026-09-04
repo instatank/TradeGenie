@@ -1232,6 +1232,44 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     filter state — the URL is the filter, which is what keeps saved views working when this
     file grows a dimension they have never heard of.
 
+- **Compare two slices, and sort each table your own way** (`lib/compare.ts`, `lib/table-sort.ts`,
+  `components/ComparisonPanel.tsx`). The filtering above answers "how did THESE trades do"; the
+  obvious next question is "compared to what", and the obvious next annoyance is one sort order
+  imposed on seven tables that ask different questions.
+  - **The comparison target is a filter spec, not a new kind of object.** `?vs=` holds a query
+    string, and a saved view is just the convenient way to pick one — because a saved view was
+    already only a URL. So "compare against a saved view" and "compare against an arbitrary
+    filter" are the same feature, with no second storage shape, no migration, and hand-editable
+    comparisons for free. Two built-in targets are offered because they answer questions a
+    saved view cannot: `rest` and `all`.
+  - **"Everything else" is the default, and that is the whole statistical point.** Comparing a
+    slice against the WHOLE journal compares it against a set that already contains it, so a
+    strong slice drags its own baseline up and the gap reads smaller than it is. The complement
+    cannot overlap by construction. "All trades" is still offered — sometimes that genuinely is
+    the question — but when the two sides share trades the panel says so, with the count, rather
+    than leaving it to be discovered. Same family of rule as `MIN_SAMPLE` greying a thin row.
+  - **Six numbers, not the page twice.** Both sides go through `bucketStatsFor`, the same
+    function the tables use, so a number in the comparison can never disagree with the same
+    number below it. The panel labels which measures are per-trade: net P&L is a total, so the
+    side with more trades tends to win it whatever the quality — that is the most common way a
+    comparison lies. A side with no trades reads "—", never a win rate of zero.
+  - **Sorting is two layers.** The page-wide control ("sort every table by…") is the default;
+    clicking one table's heading gives that table its own sort and leaves the rest alone, with
+    the cycle best-first → reversed → back to inheriting, so a table can never be trapped in an
+    order. Per-table state lives in the URL as `s_<id>`/`d_<id>` — prefixed so a table id can
+    never collide with a filter dimension — which means a page poked into exactly the shape you
+    want is a bookmark and a saved view, not session state. A filter submit carries the table
+    sorts through: narrowing a date range must not silently reset every table.
+  - Both were extracted to pure modules (`lib/table-sort.ts`) rather than left as closures in
+    the page, after three attempts to verify the behaviour by scraping the rendered HTML gave
+    misleading answers — twice because of a bad regex, once because `grep -c` counts matching
+    LINES and the payload is one line. Pure functions with real tests are the cheaper and more
+    honest verification; the HTML checks that remain are smoke assertions on strings that only
+    exist when a feature actually rendered.
+  - Deliberately NOT done: comparing every bucket table side by side (double the reading for a
+    question six rows answer), comparing more than two sets at once, and any stored comparison
+    state — `?vs=` is the comparison, which is what lets a saved view be one.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1252,7 +1290,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters + table sorting
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)

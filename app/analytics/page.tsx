@@ -13,10 +13,28 @@ import {
 } from "@/lib/constants";
 import { formatMoney as sharedFormatMoney, type Currency } from "@/lib/currency";
 import { AnalyticsFilters, ActiveFilterChips, analyticsHref, type FilterChoice, type FilterSelect } from "@/components/AnalyticsFilters";
+import { ComparisonPanel } from "@/components/ComparisonPanel";
 import { SavedViews } from "@/components/SavedViews";
 import { db, getBaseCurrency, getSetupNameMap, getTradesWithMistakes } from "@/lib/data";
 import { applyTradeFilters, hasActiveFilters, parseTradeFilters, MISTAKE_ANY, MISTAKE_NONE } from "@/lib/trade-filters";
-import { getOptionCatalog } from "@/lib/options";
+import {
+  clearTableSorts,
+  countCustomTableSorts,
+  nextTableSort,
+  resolveTableSort,
+  TABLE_DIR_PREFIX,
+  TABLE_SORT_PREFIX,
+} from "@/lib/table-sort";
+import {
+  analyticsViewQuery,
+  buildComparison,
+  comparisonQuery,
+  parseComparison,
+  COMPARE_ALL,
+  COMPARE_REST,
+  type ComparisonTarget,
+} from "@/lib/compare";
+import { getOptionCatalog, type OptionCatalog } from "@/lib/options";
 import { setupSteps, stepResolver } from "@/lib/setups";
 import {
   analyticsLeaks,
@@ -29,6 +47,7 @@ import {
   expectancyBreakdown,
   fundingSummary,
   getTradePnl,
+  bucketSorts,
   isBucketSort,
   isThinSample,
   mechanismPerformance,
@@ -80,19 +99,29 @@ export default async function AnalyticsPage({
   const filters = parseTradeFilters(params);
   const filtered = hasActiveFilters(filters);
   const trades = applyTradeFilters(allTrades, filters, options, params);
-  const sort: BucketSort = isBucketSort(params.sort) ? params.sort : "natural";
-  const direction: SortDirection = params.dir === "asc" ? "asc" : "desc";
-  const order = (rows: BucketStats[]) => sortBuckets(rows, sort, direction);
-  // Clicking the active column flips direction; clicking it a third time drops
-  // back to each table's natural order, so there is always a way back to the
-  // page as designed without hunting for a reset.
-  const sortHref = (column: BucketSort) => {
-    // Names read A→Z first; every number reads best-first. Both are what you
-    // expect from a first click on that particular column.
-    if (sort !== column) return analyticsHref(params, { sort: column, dir: column === "label" ? "asc" : "desc" });
-    if (direction === "desc") return analyticsHref(params, { sort: column, dir: "asc" });
-    return analyticsHref(params, { sort: null, dir: null });
+  // Comparison: the filtered set against something to judge it by. B is just
+  // another filter spec run through the same predicate, so a saved view and a
+  // hand-written query are the same thing here.
+  const analyticsViews = savedViews.filter((view) => view.path.startsWith("/analytics"));
+  const target = parseComparison(params.vs, analyticsViews);
+  const comparison = target ? buildComparison(
+    trades,
+    comparisonTrades(target, allTrades, trades, options),
+    { a: filtered ? "Filtered" : "All trades", b: targetLabel(target) },
+  ) : null;
+  // Sorting comes in two layers, and the split is the point: the page-wide
+  // control answers "show me my worst buckets everywhere", while a click on one
+  // table's heading answers "order THIS question my way" and leaves the rest of
+  // the page alone. A table with no sort of its own inherits the page-wide one,
+  // so one control still moves everything by default.
+  const pageSort: BucketSort = isBucketSort(params.sort) ? params.sort : "natural";
+  const pageDirection: SortDirection = params.dir === "asc" ? "asc" : "desc";
+  const tableSort = (id: string) => resolveTableSort(params, id, { sort: pageSort, direction: pageDirection });
+  const tableSortHref = (id: string) => (column: BucketSort) => {
+    const next = nextTableSort(tableSort(id), column);
+    return analyticsHref(params, { [`${TABLE_SORT_PREFIX}${id}`]: next.sort, [`${TABLE_DIR_PREFIX}${id}`]: next.direction });
   };
+  const customSortedTables = countCustomTableSorts(params);
   const scopeLabel = filtered ? "filtered" : "all time";
 
   const closed = trades.filter((trade) => trade.status === "CLOSED");
@@ -168,8 +197,16 @@ export default async function AnalyticsPage({
     .sort((a, b) => a.label.localeCompare(b.label))
     .map((tag) => ({ value: tag.id, label: tag.label }));
   const chips = activeChips(params, selects, mistakeChoices);
+  // Every comparison target is a filter spec: the complement, the whole
+  // journal, or a saved view's own query string.
+  const compareChoices: FilterChoice[] = [
+    { value: COMPARE_REST, label: "Everything else (recommended)" },
+    { value: COMPARE_ALL, label: "All trades" },
+    ...analyticsViews
+      .map((view) => ({ value: analyticsViewQuery(view) ?? "", label: `Saved view: ${view.name}` }))
+      .filter((choice) => choice.value),
+  ];
   const datePresets = buildDatePresets(params);
-  const analyticsViews = savedViews.filter((view) => view.path.startsWith("/analytics"));
   const currentPath = analyticsHref(params, {});
   // A sort is furniture, not a filter: a view worth saving has narrowed something.
   const savable = chips.length > 0;
@@ -189,9 +226,14 @@ export default async function AnalyticsPage({
         params={params}
         selects={selects}
         mistakeChoices={mistakeChoices}
+        compareChoices={compareChoices}
         datePresets={datePresets}
-        open={chips.length > 0}
+        open={chips.length > 0 || Boolean(params.vs)}
       />
+
+      {comparison ? (
+        <ComparisonPanel comparison={comparison} currency={base} clearHref={analyticsHref(params, { vs: null })} />
+      ) : null}
 
       {filtered ? (
         <p className="mb-4 rounded-lg border border-forge-blue/30 bg-sky-50 px-3 py-2 text-sm">
@@ -453,55 +495,86 @@ export default async function AnalyticsPage({
                 </section>
               ) : null}
 
-              <p className="text-xs text-forge-muted">
-                {sort === "natural"
-                  ? "Tap any column heading to re-order every table below. Tap it again to reverse, once more to go back to this order."
-                  : `Every table is sorted by ${sortLabel(sort)}, ${direction === "asc" ? "lowest" : "highest"} first. Tap that heading again to ${direction === "asc" ? "go back to each table's own order" : "reverse it"}.`}
-              </p>
-              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." rows={order(setups)} firstColLabel="Setup" currency={base} sort={sort} direction={direction} sortHref={sortHref} />
-              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." rows={order(sessions)} firstColLabel="Session" currency={base} sort={sort} direction={direction} sortHref={sortHref} />
-              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." rows={order(conditions)} firstColLabel="Condition" currency={base} sort={sort} direction={direction} sortHref={sortHref} />
+              {/* The page-wide default, and the escape hatch from per-table
+                  sorts. Its own tiny GET form: it must not be able to lose, or
+                  be lost to, the filter form above it. */}
+              <form method="get" action="/analytics" className="flex flex-wrap items-end gap-2 rounded-lg border border-forge-line bg-forge-panel/40 p-3">
+                {Object.entries(params)
+                  .filter(([key, value]) => value && key !== "sort" && key !== "dir" && !key.startsWith(TABLE_SORT_PREFIX) && !key.startsWith(TABLE_DIR_PREFIX) && key !== "feedback" && key !== "feedbackType")
+                  .map(([key, value]) => <input key={key} type="hidden" name={key} value={value} />)}
+                <label className="field">
+                  <span className="label">Sort every table by</span>
+                  <select name="sort" defaultValue={pageSort} className="input">
+                    {bucketSorts.map((option) => (
+                      <option key={option} value={option}>{sortLabel(option)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="label">Order</span>
+                  <select name="dir" defaultValue={pageDirection} className="input">
+                    <option value="desc">Highest first</option>
+                    <option value="asc">Lowest first</option>
+                  </select>
+                </label>
+                <button className="button" type="submit">Sort</button>
+                <p className="basis-full text-xs text-forge-muted">
+                  Or tap any column heading to sort just that table — heading again to reverse, once more to hand it back
+                  to this setting.
+                  {customSortedTables > 0 ? (
+                    <>
+                      {" "}
+                      <span className="font-medium text-forge-ink">
+                        {customSortedTables} table{customSortedTables === 1 ? " has" : "s have"} their own sort.
+                      </span>{" "}
+                      <Link href={analyticsHref(clearTableSorts(params), {})} className="text-forge-blue hover:underline">
+                        Reset them
+                      </Link>
+                      .
+                    </>
+                  ) : null}
+                </p>
+              </form>
+              <BucketTable title="By setup" subtitle="Which playbook setups actually have an edge." id="setup" rows={setups} firstColLabel="Setup" currency={base} resolveSort={tableSort} sortHref={tableSortHref} />
+              <BucketTable title="By session (UTC)" subtitle="When in the 24/7 cycle your edge lives." id="session" rows={sessions} firstColLabel="Session" currency={base} resolveSort={tableSort} sortHref={tableSortHref} />
+              <BucketTable title="By market condition" subtitle="Trend vs chop vs news — the context that makes or breaks you." id="condition" rows={conditions} firstColLabel="Condition" currency={base} resolveSort={tableSort} sortHref={tableSortHref} />
               <BucketTable
                 title="By timeframe"
                 subtitle="Which charts you actually make money on. A trade counts in every timeframe it used, so these add up to more than your trade count."
-                rows={order(timeframes)}
+                id="timeframe" rows={timeframes}
                 firstColLabel="Timeframe"
                 currency={base}
-                sort={sort}
-                direction={direction}
-                sortHref={sortHref}
+                resolveSort={tableSort}
+                sortHref={tableSortHref}
               />
               <BucketTable
                 title="By setup grade"
                 subtitle="Your own read on the opportunity, scored against what it paid. If your A+ setups don't out-earn your Bs, the grading isn't measuring what you think it is — and if they do, taking fewer Bs is the cheapest edge you have."
-                rows={order(setupGrades)}
+                id="setupGrade" rows={setupGrades}
                 firstColLabel="Setup grade"
                 currency={base}
-                sort={sort}
-                direction={direction}
-                sortHref={sortHref}
+                resolveSort={tableSort}
+                sortHref={tableSortHref}
               />
               <BucketTable
                 title="By mechanism"
                 subtitle="What the entry was built out of — FVG, order block, sweep. The one table that tells you which part of the model is carrying you."
-                rows={order(mechanisms)}
+                id="mechanism" rows={mechanisms}
                 firstColLabel="Mechanism"
                 currency={base}
                 hrefFor={(row) => `/mechanisms/${row.key}`}
-                sort={sort}
-                direction={direction}
-                sortHref={sortHref}
+                resolveSort={tableSort}
+                sortHref={tableSortHref}
               />
               {checklist.length ? (
                 <BucketTable
                   title="Model followed, or not"
                   subtitle="Closed trades on a setup with a checklist, split by whether every step was actually there. If these two rows look the same, the checklist isn't earning its place yet."
-                  rows={order(checklist)}
+                  id="checklist" rows={checklist}
                   firstColLabel="Checklist"
                   currency={base}
-                  sort={sort}
-                  direction={direction}
-                  sortHref={sortHref}
+                  resolveSort={tableSort}
+                  sortHref={tableSortHref}
                 />
               ) : null}
             </div>
@@ -586,6 +659,37 @@ function buildDatePresets(params: Record<string, string | undefined>) {
   }));
 }
 
+/**
+ * The trades the filtered set is being judged against.
+ *
+ * "rest" is subtraction, not a filter — everything the current filter left out.
+ * That is what makes it the honest default: a filter and its complement cannot
+ * share a trade, so neither side contaminates the other.
+ */
+function comparisonTrades(
+  target: ComparisonTarget,
+  allTrades: TradeRow[],
+  filteredTrades: TradeRow[],
+  options: OptionCatalog,
+): TradeRow[] {
+  if (target.kind === "all") return allTrades;
+  if (target.kind === "rest") {
+    const inFilter = new Set(filteredTrades.map((trade) => trade.id));
+    return allTrades.filter((trade) => !inFilter.has(trade.id));
+  }
+  const query = comparisonQuery(target) ?? "";
+  const targetParams = Object.fromEntries(new URLSearchParams(query));
+  return applyTradeFilters(allTrades, parseTradeFilters(targetParams), options, targetParams);
+}
+
+function targetLabel(target: ComparisonTarget) {
+  if (target.kind === "rest") return "Everything else";
+  if (target.kind === "all") return "All trades";
+  return target.label;
+}
+
+type TradeRow = Awaited<ReturnType<typeof getTradesWithMistakes>>[number];
+
 function sortLabel(sort: BucketSort) {
   const labels: Record<BucketSort, string> = {
     natural: "each table's own order",
@@ -646,36 +750,47 @@ const SORTABLE_COLUMNS: { header: string; sort: BucketSort }[] = [
 ];
 
 function BucketTable({
+  id,
   title,
   subtitle,
   rows,
   firstColLabel,
   currency,
   hrefFor,
-  sort,
-  direction,
+  resolveSort,
   sortHref,
 }: {
+  /** Identifies this table in the URL (`s_setup`, `d_setup`), so its own sort
+   *  survives a reload, a bookmark and a saved view. */
+  id: string;
   title: string;
   subtitle: string;
+  /** In the table's NATURAL order. Sorting happens here, so a caller can never
+   *  hand one table rows ordered by another table's sort. */
   rows: BucketStats[];
   firstColLabel: string;
   /** What the Net P&L column is in. Every row is already converted to it. */
   currency: Currency;
   /** Optional: makes the first column a link (mechanisms have their own page). */
   hrefFor?: (row: BucketStats) => string;
-  /** The active sort, shared by every table on the page — see sortHref below. */
-  sort: BucketSort;
-  direction: SortDirection;
-  /** Clicking a header re-sorts EVERY table, because a sort here is a way of
-   *  reading the page ("show me my worst buckets"), not a property of one
-   *  table. One control, one URL, one answer to "how is this ordered". */
-  sortHref: (sort: BucketSort) => string;
+  /** This table's own sort if it has one, otherwise the page-wide sort. */
+  resolveSort: (id: string) => { sort: BucketSort; direction: SortDirection; own: boolean };
+  sortHref: (id: string) => (sort: BucketSort) => string;
 }) {
+  const { sort, direction, own } = resolveSort(id);
+  const ordered = sortBuckets(rows, sort, direction);
+  const href = sortHref(id);
   const thin = rows.filter((row) => isThinSample(row.count)).length;
   return (
     <section>
-      <h3 className="font-semibold">{title}</h3>
+      <h3 className="font-semibold">
+        {title}
+        {own ? (
+          <span className="ml-2 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-normal text-forge-blue">
+            sorted by {sortLabel(sort)}, {direction === "asc" ? "lowest" : "highest"} first
+          </span>
+        ) : null}
+      </h3>
       <p className="mb-3 text-sm text-forge-muted">{subtitle}</p>
       {!rows.length ? (
         <p className="muted">Not enough tagged closed trades yet.</p>
@@ -690,7 +805,7 @@ function BucketTable({
                     return (
                       <th key={column.header} className="px-3 py-2 text-left font-medium">
                         <Link
-                          href={sortHref(column.sort)}
+                          href={href(column.sort)}
                           className={`inline-flex items-center gap-1 transition hover:text-forge-blue ${active ? "text-forge-blue" : ""}`}
                           title={`Sort every table by ${column.header.toLowerCase()}`}
                         >
@@ -704,7 +819,7 @@ function BucketTable({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {ordered.map((row) => {
                   // A thin row keeps its numbers but loses the colour and the
                   // weight: green/red is what makes a number read as a verdict,
                   // and three trades don't earn a verdict.
