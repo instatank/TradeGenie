@@ -88,6 +88,9 @@ field). Old stored values still render via `humanize()`; we just stop offering r
 - `/settings` shows a colored storage banner; `/api/export` dumps everything as one JSON backup —
   it iterates `collectionNames` (derived from `StoreShape`), so a new collection can never be
   left out of a backup again. The old hardcoded list had already dropped assets + asset notes.
+  That payload is now built by `buildSnapshot()` in `lib/backup.ts` — the one definition shared
+  with the weekly offsite copy and the "Back up now" button — and `restoreSnapshot()` is the
+  half that reads one back in. See the backup entry in the decisions log below.
 - Required env: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
   (+ `FIREBASE_STORAGE_BUCKET`). Production is confirmed durable (Firestore service account).
 
@@ -1288,6 +1291,73 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     question six rows answer), comparing more than two sets at once, and any stored comparison
     state — `?vs=` is the comparison, which is what lets a saved view be one.
 
+- **Backups you can actually restore, and a copy that isn't here** (`lib/backup.ts`,
+  `lib/backup-github.ts`, `lib/backup-run.ts`, `/api/cron/backup`, the `/settings` panel).
+  The journal had an export and no import: `/api/export` dumped every collection as JSON
+  and nothing in the app could read one back in, so "we have backups" was true and "we can
+  recover" was not. And the only copy of the data lived in one Firestore database behind
+  one Google account, backed up by a button someone had to remember to press.
+  - **Measure first, and it decided the design.** ~1KB per trade, ~264B per exchange fill —
+    the whole database is single-digit megabytes and stays that way for years. That killed
+    incremental backups, compression and retention pruning before any of them were written,
+    and made a plain JSON file committed to a git repo obviously right: free, offsite,
+    every past version kept with no policy to maintain, and recoverable from a browser,
+    which is the owner's only interface.
+  - **`lib/backup.ts` is THE definition of what a backup contains**, shared by the download,
+    the manual button and the weekly job. `/api/export` used to build its own payload, which
+    is how assets and asset notes went missing from every backup for a while; the same drift
+    with three writers was a matter of time. Same rule as one tag tokenizer, one search index.
+  - **A restore never deletes.** The moment you reach for a backup is the moment you can
+    least afford a second mistake, so records the file does not mention are left alone and
+    cleanup stays a deliberate per-record act. The default mode only writes ids that are
+    MISSING, so it cannot overwrite anything written since; "overwrite" is the genuine
+    rollback, says it discards later edits, and is never the default.
+  - **It still reads backups written before the format existed.** Every file the owner has
+    already downloaded has no `formatVersion` and no counts. Refusing those would have meant
+    shipping a restore that cannot read the only backups that currently exist.
+  - **`restoreRecords()` in `lib/store.ts` is the one bulk writer.** `createRecord` per
+    record is a Firestore round trip each — a few thousand records, which the exchange fills
+    alone will reach, would time the function out at exactly the size where a restore
+    matters. Batched at 400 (Firestore caps at 500).
+  - **Three guards, because a backup system's own failure mode is quietly destroying what it
+    protects.** A PUBLIC destination repo is refused outright and re-checked every run (a
+    repo can be flipped public later, and a journal in one is worse than no backup at all).
+    A non-durable storage mode is refused (a misconfigured deploy reads an empty local store,
+    and a faithful backup of that overwrites a good copy with nothing). A journal that has
+    lost more than half its records is refused with the last good copy untouched — "Back up
+    now" can force a deliberate deletion through, and the unattended job never can.
+  - **One commit per run through the git data API**, so the journal, a small status sidecar
+    and the recovery notes land together or not at all, and nothing is ever downloaded.
+    Nothing is committed when the journal has not changed — keyed on a hash of the DATA, not
+    the record counts, because editing a note changes no count and must still be captured.
+  - **`HOW-TO-RESTORE.md` is written into the backup repo itself.** Whoever holds the backup
+    when the app is gone is the least equipped to work out what to do with it, so the
+    instructions live beside the data rather than in a codebase that may not exist.
+  - **The settings panel reads its status live from the backup repo**, never from anything
+    this app stores: a self-reported status keeps saying "backed up" long after backups have
+    stopped, and a backup you wrongly believe you have is worse than none. Red after ten days.
+  - **"Check connection" sends no journal data** and exists because the last mile cannot be
+    verified from a dev container — only against the owner's own repo and token. Same answer
+    as "Test AI connection": when a claim needs real credentials, ship the check.
+  - **`/api/cron/*` became owner-only** on the way. It is a GET that DOES something, so a
+    read-only viewer could force syncs and backups at will; the bearer-token exemption is
+    checked first and is unaffected. `check:cron` now reads its route list out of
+    `vercel.json` rather than naming one path — a second scheduled job had already been
+    added, and a hardcoded list would have gone stale exactly the way the thing it guards did.
+  - **Verified by round trip, not inspection**: a backup downloaded from the live
+    `/api/export` over real seeded data, the database wiped to zero, restored — 48/48 records
+    back byte-identical including settings, every page still rendering. The unit test's
+    assertion was confirmed able to fail (dropping one collection from the restore, and one
+    field from the snapshot, each turn it red). The GitHub client is tested against a
+    stand-in implementing the git data API, which covers every bug in our code and cannot
+    cover a wrong belief about GitHub's contract — hence the button.
+  - Deliberately NOT done: a second backup destination (one that works beats two that are
+    half-configured), encrypting the file (it would make the "open it in a browser and read
+    it" recovery path impossible, and the repo is private), pruning history (git already
+    stores this at a size that will never matter), restoring individual records or
+    collections, and auto-restoring on an empty database — a blank journal is not always
+    a disaster, and an app that refills itself unasked is a worse problem than one that waits.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1312,7 +1382,8 @@ npm run test       # unit tests — calculator, tags, search, options, store, ch
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)
-npm run check:cron # can Vercel's scheduled sync get past the site password?
+npm run check:cron # can EVERY cron in vercel.json get past the site password,
+                   #   and is each refused to a wrong token and to a viewer?
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
 npm run check:capture  # offline: do the prompt's examples survive parse + normalize?
 ```

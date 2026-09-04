@@ -49,7 +49,17 @@ Development happens entirely in Claude Code cloud containers. There is no local 
     someone else to browse. Requires `SITE_PASSWORD` to be set too. A viewer can GET
     every page but every write (every server action, `/api/import`, plus the full-dump
     `/api/export` and `/api/tax-export` routes) is blocked in `middleware.ts` — see the
-    decisions log in `CLAUDE.md` for how.
+    decisions log in `CLAUDE.md` for how. `/api/cron/*` is owner-only too — it is a
+    GET that runs a job, so a viewer must not be able to trigger syncs or backups.
+- Optional offsite backup (`lib/backup-github.ts`), off until BOTH are set:
+  - `BACKUP_GITHUB_REPO` — `owner/repo` of a SEPARATE, PRIVATE repository. Never the
+    code repo: a commit there would trigger a production deploy on every backup.
+    A public repo is refused on every run, not just at setup.
+  - `BACKUP_GITHUB_TOKEN` — fine-grained PAT, Contents: Read and write, scoped to
+    that one repository and nothing else.
+  - `BACKUP_GITHUB_BRANCH` — optional; defaults to the repo's default branch.
+  - `CRON_SECRET` is also required for the weekly run to get past `middleware.ts`
+    (it already is, for the exchange sync).
 - Do not commit secrets, service account JSON, `.env`, `.env.local`, or local data exports.
 - Screenshot uploads use Firebase Storage when Firebase is configured; local disk under `public/uploads` is only a development fallback.
 
