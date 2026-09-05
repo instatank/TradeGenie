@@ -141,6 +141,10 @@ const CONTENT_CHECKS: [string, string, string][] = [
   // reports on backups is broken". The smoke env has no BACKUP_GITHUB_*, which
   // is the "off until configured" state this asserts.
   ["/settings", "Automatic offsite backup: off", "the offsite backup status panel"],
+  // The setup diagnosis: naming each variable, and the buttons that must be
+  // present in the OFF state too — that is the one moment someone needs them.
+  ["/settings", "BACKUP_GITHUB_REPO", "the per-variable setup diagnosis"],
+  ["/settings", "Check connection", "the connection test, reachable while backup is still off"],
   ["/settings", "Restore from a backup", "the restore control"],
   ["/settings", "Put back what", "the non-destructive restore mode, which must be the default"],
   // Attribute order is React's, not ours — asserted against the real render.

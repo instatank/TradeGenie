@@ -92,6 +92,37 @@ export function backupConfigured() {
   return backupDestinationFromEnv() !== null;
 }
 
+export type DestinationEnv = {
+  repoSet: boolean;
+  tokenSet: boolean;
+  /** Safe to show: a repository path is not a secret, and seeing it spelled
+   *  back is how a typo gets noticed. The TOKEN is never returned from here in
+   *  any form — only whether one is present. */
+  repo: string | null;
+  /** Set, but not `owner/repo`. This is the trap worth naming: entering just
+   *  "tradegenie-backups" without the owner makes backupDestinationFromEnv()
+   *  return null, which is indistinguishable from "never configured" — so the
+   *  panel would say "off" while the variable is sitting right there, and the
+   *  one mistake most likely to be made is the one with no error message. */
+  repoMalformed: boolean;
+};
+
+/** What the app can actually SEE of its backup configuration, for the settings
+ *  panel to report during setup. Reports presence and shape only — the point is
+ *  to answer "did my environment variables land?" without a redeploy-and-guess
+ *  loop, and without ever echoing a credential. */
+export function destinationEnv(): DestinationEnv {
+  const repo = process.env.BACKUP_GITHUB_REPO?.trim() ?? "";
+  const token = process.env.BACKUP_GITHUB_TOKEN?.trim() ?? "";
+  const parts = repo.split("/");
+  return {
+    repoSet: repo.length > 0,
+    tokenSet: token.length > 0,
+    repo: repo || null,
+    repoMalformed: repo.length > 0 && (parts.length !== 2 || !parts[0] || !parts[1]),
+  };
+}
+
 export function journalHash(snapshot: BackupSnapshot) {
   return createHash("sha256")
     .update(JSON.stringify({ data: snapshot.data, settings: snapshot.settings }))

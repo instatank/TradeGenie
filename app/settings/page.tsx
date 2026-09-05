@@ -17,7 +17,7 @@ import {
 } from "@/app/actions";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { activeModel } from "@/lib/ai-status";
-import { checkDestination } from "@/lib/backup-github";
+import { checkDestination, destinationEnv } from "@/lib/backup-github";
 import { defaultMistakeTagNames, marketTypes } from "@/lib/constants";
 import { db, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
@@ -276,14 +276,50 @@ async function OffsiteBackupPanel() {
   const check = await checkDestination();
 
   if (check.status === "off") {
+    // Setting this up is the ONE moment the panel is read closely, so it says
+    // exactly what the app can and cannot see rather than a generic "off".
+    // Without this, a variable that is present but misspelled or malformed
+    // looks identical to one that was never added — and the two have completely
+    // different fixes.
+    const env = destinationEnv();
     return (
       <div className="rounded-lg border-l-4 border-forge-muted bg-forge-panel p-3 text-sm">
         <div className="font-medium">Automatic offsite backup: off</div>
         <div className="mt-1 text-forge-muted">
-          Nothing is being copied anywhere. Turn it on by adding <code>BACKUP_GITHUB_REPO</code> and{" "}
-          <code>BACKUP_GITHUB_TOKEN</code> in Vercel &rarr; Settings &rarr; Environment Variables. Until then no
-          journal data leaves this app.
+          Nothing is being copied anywhere, and no journal data leaves this app.
         </div>
+        <ul className="mt-2 space-y-1">
+          <li>
+            <code>BACKUP_GITHUB_REPO</code>:{" "}
+            {env.repoMalformed ? (
+              <span className="text-forge-red">
+                set to &ldquo;{env.repo}&rdquo; — that isn&rsquo;t <code>owner/repo</code>. It needs the owner in
+                front, e.g. <code>instatank/tradegenie-backups</code>.
+              </span>
+            ) : env.repoSet ? (
+              <span className="text-forge-green">{env.repo}</span>
+            ) : (
+              <span className="text-forge-red">not set</span>
+            )}
+          </li>
+          <li>
+            <code>BACKUP_GITHUB_TOKEN</code>:{" "}
+            {env.tokenSet ? (
+              <span className="text-forge-green">set</span>
+            ) : (
+              <span className="text-forge-red">not set</span>
+            )}
+          </li>
+        </ul>
+        {/* "Off" means at least one of the two above is missing or malformed —
+            both present and well-formed is by definition not this state — so the
+            fix is always the same one, and there is no second case to branch on. */}
+        <div className="mt-2 text-forge-muted">
+          Fix the red line in Vercel &rarr; your project &rarr; Settings &rarr; Environment Variables
+          (Production), then <strong>redeploy</strong>. Environment variables only reach a NEW build, so
+          this page cannot see them until you do.
+        </div>
+        <BackupButtons />
       </div>
     );
   }
