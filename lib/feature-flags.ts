@@ -44,6 +44,48 @@ export type ExitCost =
    *  new cron. This is never an experiment — it is an architecture change. */
   | "STRUCTURAL";
 
+/**
+ * One entry in the catalog. `key`, `label` and `desc` are what DayOS's
+ * FEATURE_TOGGLES carries; `stage` and `exitCost` are the two things
+ * LIFECYCLE.md §R1/§R2 add, and they are here rather than only in the ledger
+ * because they are the fields a session needs in front of it at the moment it
+ * is deciding whether to touch a toggled feature.
+ *
+ * The falsifiable kill criterion (§R1's `earns-its-place-if`) and the review
+ * date deliberately stay in docs/lifecycle.md and not here: they are read once
+ * a month by a census, they are prose, and duplicating them in two places is
+ * how they would come to disagree.
+ */
+export type FeatureToggle = {
+  /** Stable id. The SAME string keys the flag, the usage counter and the
+   *  ledger row — that is what lets a census join the three without a mapping
+   *  table. Never rename one; retire it and add a new one. */
+  key: string;
+  /** What it is called on the Optional features screen, in plain language. */
+  label: string;
+  /** One sentence: what turning it on actually does. */
+  desc: string;
+  stage: FeatureStage;
+  exitCost: ExitCost;
+};
+
+/**
+ * THE catalog. Empty on purpose — the mechanism ships before anything is put
+ * behind it, so that the first thing gated is a deliberate decision with a
+ * written kill criterion rather than whatever happened to be convenient while
+ * the plumbing was being built.
+ *
+ * Cap: 4 (§R5). Every entry is a permanent second code path — two render
+ * branches, two states to reason about, two things to test — and the rent is
+ * paid by whoever next touches that screen. A fifth means retiring one in the
+ * same commit or writing down why not.
+ *
+ * Adding one: write its ledger row in docs/lifecycle.md FIRST (§R1 — no birth
+ * certificate, no build), then add it here at stage S1 with the flag defaulting
+ * off, then instrument its point of deliberate use (§R3).
+ */
+export const FEATURE_TOGGLES: FeatureToggle[] = [];
+
 /** A flag's stored value is a plain boolean, keyed by the toggle's stable id. */
 export type FeatureFlags = Record<string, boolean>;
 
