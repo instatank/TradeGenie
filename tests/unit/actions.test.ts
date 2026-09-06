@@ -40,7 +40,10 @@ function routeHandlers(): { file: string; body: string }[] {
   return found;
 }
 
-const WRITES = /db\.(create|update|deleteWhere|upsertBy)|saveSettings\(|registerCustom|removeCustom|renameCustom/;
+// saveSettingsPatch joined this when the feature flags landed: it writes to the
+// same document saveSettings does, so an action that flips a flag and forgets
+// to revalidate would leave the change invisible until something else saved.
+const WRITES = /db\.(create|update|deleteWhere|upsertBy)|saveSettings(Patch)?\(|registerCustom|removeCustom|renameCustom/;
 
 describe("revalidation stays in one place", () => {
   it("no action calls revalidatePath directly", () => {

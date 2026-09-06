@@ -16,6 +16,7 @@ import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
 // after the write it counts and before the redirect — a redirect() throws, so
 // anything past it never runs — and can never throw itself, so a failed count
 // never costs a save. Acts only: nothing here is called from a render.
+import { FEATURE_TOGGLES, featureEnabled } from "@/lib/feature-flags";
 import { noteUse } from "@/lib/feature-usage";
 import { defaultMistakeTagNames } from "@/lib/constants";
 import {
@@ -34,7 +35,7 @@ import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { captureMarketContext } from "@/lib/market-context";
 import { setupSteps } from "@/lib/setups";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
-import { getSettings, saveSettings, type AppSettings } from "@/lib/settings-store";
+import { getSettings, saveSettings, saveSettingsPatch, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
 import { deriveTags, mergeTags, normalizeTag } from "@/lib/tags";
 import {
@@ -1921,6 +1922,32 @@ function enumFromText<T extends Record<string, string>>(enumObject: T, value: un
 
 function formatMaybe(value: number | null | undefined) {
   return value == null ? "not available" : value.toFixed(2);
+}
+
+// --- Feature lifecycle ------------------------------------------------------
+// Turning an optional feature on or off. This is a POST, so middleware.ts's
+// method gate already refuses it for a read-only viewer — there is no separate
+// permission check here, and adding one would be the two-tokenizer mistake in
+// new clothes (see the viewer-access entry in CLAUDE.md).
+//
+// Only a key in FEATURE_TOGGLES is accepted. Without that check a hand-crafted
+// POST could write arbitrary keys into the flags map, which would never enable
+// anything (featureEnabled only ever answers for keys the code asks about) but
+// would leave junk in the settings document for the census to read.
+export async function toggleFeatureAction(formData: FormData) {
+  const key = String(formData.get("key") ?? "");
+  if (!FEATURE_TOGGLES.some((toggle) => toggle.key === key)) {
+    await redirectBackWithFeedback("That isn't an optional feature.", "/settings", "error");
+    return;
+  }
+  const settings = await getSettings();
+  const on = !featureEnabled(key, settings);
+  // The whole map, composed here — see saveSettingsPatch's header for why a
+  // partial nested object behaves differently on the two backends.
+  await saveSettingsPatch({ featureFlags: { ...(settings.featureFlags ?? {}), [key]: on } });
+  const label = FEATURE_TOGGLES.find((toggle) => toggle.key === key)?.label ?? key;
+  revalidateEverything();
+  await redirectBackWithFeedback(`${label} is ${on ? "on" : "off"}.`, "/settings#optional-features");
 }
 
 // --- Tag housekeeping -------------------------------------------------------

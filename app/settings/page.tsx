@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import { format } from "date-fns";
-import { CloudUpload, Download, Eye, EyeOff, Lock, Pencil, ShieldCheck, Stethoscope, Tags, X } from "lucide-react";
+import { CloudUpload, Download, Eye, EyeOff, Lock, Pencil, ShieldCheck, SlidersHorizontal, Stethoscope, Tags, X } from "lucide-react";
 import {
+  toggleFeatureAction,
   hideTagAction,
   removeCustomMistakeTagAction,
   removeCustomOptionAction,
@@ -19,11 +20,13 @@ import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/F
 import { activeModel } from "@/lib/ai-status";
 import { checkDestination, destinationEnv } from "@/lib/backup-github";
 import { defaultMistakeTagNames, marketTypes } from "@/lib/constants";
+import { FEATURE_TOGGLES, featureEnabled } from "@/lib/feature-flags";
+import { USAGE_GROUPS } from "@/lib/feature-usage";
 import { db, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog, optionGroupKeys, optionGroups } from "@/lib/options";
 import { promptLabels, type PromptTemplateKey } from "@/lib/prompts";
 import { getRole } from "@/lib/role";
-import { getSettings } from "@/lib/settings-store";
+import { getSettings, type AppSettings } from "@/lib/settings-store";
 import { siteAuthConfigured, viewerAuthConfigured } from "@/lib/site-auth";
 import { storageStatus } from "@/lib/store";
 import { colocation, deploymentInfo } from "@/lib/deployment-info";
@@ -220,6 +223,11 @@ export default async function SettingsPage({
       </section>
 
       <CustomLabelsPanel />
+
+      {/* Owner-only. The toggles are POSTs, so middleware.ts already refuses
+          them for a read-only viewer — this hides a screen a viewer could not
+          act on anyway, rather than being the thing that stops them. */}
+      {role === "owner" ? <OptionalFeaturesPanel settings={settings} /> : null}
 
       <Suspense fallback={<section className="panel mb-5"><p className="text-sm text-forge-muted">Reading your tags…</p></section>}>
         <TagVocabularyPanel />
@@ -502,6 +510,130 @@ function StorageBanner({ storage }: { storage: ReturnType<typeof storageStatus> 
       </div>
     </div>
   );
+}
+
+// The lifecycle screen (playbook/LIFECYCLE.md in instatank/time-tracker).
+//
+// Two halves that answer two different questions. The toggles answer "what is
+// switched on"; the usage list answers "what do I actually use" — which is the
+// question the monthly census runs on, and the one this app could not answer at
+// all before it existed.
+//
+// The usage half is READ-ONLY. It renders numbers and writes nothing: a screen
+// that reported on use and changed it in the same breath would make its own
+// numbers untrustworthy. It is also deliberately not hidden behind a fold — it
+// is the "you were reminded this exists" half of §R4's fair-trial rule, and a
+// reminder nobody unfolds is not a reminder.
+function OptionalFeaturesPanel({ settings }: { settings: AppSettings }) {
+  const usage = settings.featureUsage ?? {};
+  // An id that is counted but not catalogued lists under "Other" rather than
+  // disappearing — instrumenting something and forgetting to label it should
+  // cost a tidy name, not a silently invisible number.
+  const cataloged = new Set(USAGE_GROUPS.flatMap((group) => group.ids.map((entry) => entry.id)));
+  const strays = Object.keys(usage).filter((id) => !cataloged.has(id)).sort();
+  const groups = [
+    ...USAGE_GROUPS,
+    ...(strays.length ? [{ label: "Other", note: undefined, ids: strays.map((id) => ({ id, label: id })) }] : []),
+  ];
+  const totalUses = Object.values(usage).reduce((sum, entry) => sum + (entry?.n ?? 0), 0);
+
+  return (
+    <section className="panel mb-5 space-y-4" id="optional-features">
+      <div>
+        <h2 className="flex items-center gap-2 font-semibold">
+          <SlidersHorizontal className="h-4 w-4 text-forge-blue" aria-hidden="true" />
+          Optional features
+        </h2>
+        <p className="mt-1 text-sm text-forge-muted">
+          Features on trial. Each one is off until you switch it on, and each has a written note in{" "}
+          <code>docs/lifecycle.md</code> saying what would make it earn its place — decided before it was built, so it
+          can&apos;t be talked into staying afterwards.
+        </p>
+      </div>
+
+      {FEATURE_TOGGLES.length === 0 ? (
+        <p className="rounded-lg bg-forge-panel px-3 py-2 text-sm text-forge-muted">
+          Nothing is on trial right now. That is the normal state — a switch here means a feature is being tried out
+          and might not stay, so an empty list means everything in the app is just part of the app.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {FEATURE_TOGGLES.map((toggle) => {
+            const on = featureEnabled(toggle.key, settings);
+            const used = usage[toggle.key];
+            return (
+              <li key={toggle.key} className="flex flex-wrap items-start justify-between gap-3 rounded-lg bg-forge-panel p-3 text-sm">
+                <div className="min-w-0">
+                  <div className="font-medium">{toggle.label}</div>
+                  <div className="text-forge-muted">{toggle.desc}</div>
+                  <div className="mt-1 text-xs text-forge-muted">
+                    {used ? `Used ${used.n === 1 ? "once" : `${used.n}×`} · last ${format(new Date(used.last), "d MMM yyyy")}` : "Never used"}
+                    {" · "}
+                    {stageLabel(toggle.stage)} · {exitCostLabel(toggle.exitCost)}
+                  </div>
+                </div>
+                <form action={toggleFeatureAction}>
+                  <input type="hidden" name="key" value={toggle.key} />
+                  <button className={on ? "button" : "button-secondary"} type="submit">
+                    {on ? "On" : "Off"}
+                  </button>
+                </form>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <details className="rounded-lg bg-forge-panel p-3 text-sm">
+        <summary className="cursor-pointer font-medium">
+          Usage — what you actually use ({totalUses === 0 ? "nothing counted yet" : `${totalUses} recorded`})
+        </summary>
+        <p className="mt-2 text-forge-muted">
+          Counted when you <span className="font-medium text-forge-ink">do</span> something, not when you visit a page —
+          opening a screen and backing out of it is not use. Nothing here leaves this journal. Read-only: this list
+          changes nothing.
+        </p>
+        <div className="mt-3 space-y-4">
+          {groups.map((group) => (
+            <div key={group.label}>
+              <div className="font-medium">{group.label}</div>
+              {group.note ? <div className="text-xs text-forge-muted">{group.note}</div> : null}
+              <table className="mt-1 min-w-full text-sm">
+                <tbody>
+                  {group.ids.map((entry) => {
+                    const used = usage[entry.id];
+                    return (
+                      <tr key={entry.id} className={`border-t border-forge-line ${used ? "" : "text-forge-muted"}`}>
+                        <td className="py-1 pr-3">{entry.label}</td>
+                        <td className="w-20 py-1 text-right tabular-nums">{used ? used.n : "—"}</td>
+                        <td className="w-32 py-1 text-right text-xs text-forge-muted">
+                          {used ? format(new Date(used.last), "d MMM yyyy") : "never"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      </details>
+    </section>
+  );
+}
+
+// Plain English, because the codes mean nothing to the person reading the screen.
+function stageLabel(stage: string) {
+  if (stage === "S0") return "sketched, not built";
+  if (stage === "S1") return "on trial";
+  if (stage === "S2") return "on by default";
+  return "part of the app";
+}
+
+function exitCostLabel(cost: string) {
+  if (cost === "REVERSIBLE") return "removing it is a clean delete";
+  if (cost === "STICKY") return "removing it leaves a field behind on old records";
+  return "removing it is an architecture change";
 }
 
 // Everything the trader has added to a preset-pill list, in one place to review

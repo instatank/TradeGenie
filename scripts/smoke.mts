@@ -149,6 +149,12 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/settings", "Put back what", "the non-destructive restore mode, which must be the default"],
   // Attribute order is React's, not ours — asserted against the real render.
   ["/settings", 'checked="" value="fill-gaps"', "fill-gaps selected by default rather than the destructive rollback"],
+  // The lifecycle screen. Both halves are conditional renders `next build`
+  // cannot reach: the empty-catalog copy only appears while nothing is on
+  // trial, and the usage list only exists at all for the owner role.
+  ["/settings", "Optional features", "the feature lifecycle panel"],
+  ["/settings", "Nothing is on trial right now", "the empty-catalog state, which is the correct state today"],
+  ["/settings", "what you actually use", "the read-only usage list"],
 ];
 
 async function fetchBody(route: string): Promise<string> {
