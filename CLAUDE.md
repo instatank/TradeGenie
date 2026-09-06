@@ -1363,6 +1363,46 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     collections, and auto-restoring on an empty database — a blank journal is not always
     a disaster, and an app that refills itself unasked is a worse problem than one that waits.
 
+- **A feature lifecycle: flags, usage evidence, a ledger** (`lib/feature-flags.ts`,
+  `lib/feature-usage.ts`, `docs/lifecycle.md`, `/settings` → Optional features). The
+  discipline from `playbook/LIFECYCLE.md` ported; DayOS's implementation deliberately not.
+  - **Server-side flags, not localStorage.** `featureEnabled(key, settings)` is the one gate,
+    reading a `featureFlags` map off `appSettings/singleton` through the request-cached
+    `getSettings()` every render already awaits. DayOS keeps its flags in the browser because
+    DayOS *is* one client-side page; here there is no client state a server render could read
+    a flag from, and one trader on one journal has no "per device" concept worth having.
+    Default off, and an unknown key is off — a typo must never ship a trial feature.
+  - **`toggleFeatureAction` needs no permission check.** It is a POST, so `middleware.ts`'s
+    method gate already refuses it for a read-only viewer. A second check inside the action
+    would be the two-tokenizer mistake in new clothes — the same line already drawn for viewer
+    access. The panel is hidden from a viewer as a courtesy, not as the thing that stops them.
+  - **A toggle is not a fold and not the "More" nav.** A fold hides complexity *within* a
+    feature that is staying; "More" hides a *destination* that is staying; a toggle governs
+    whether a feature exists at all and costs a permanent second code path. Never use a
+    toggle where a fold would do. Cap of 4, enforced by a test.
+  - **Counters count acts, not renders** (`noteUse`, on the same settings document). Twenty
+    call sites, all inside server actions, after the write and before the redirect. A page
+    render is a navigation — a back button, a prefetch, a wrong turn; a server action is a
+    decision. Never load-bearing: every failure is swallowed and the action proceeds, proven
+    by putting a directory where the settings file goes and asserting `noteUse` still resolves.
+  - **The blind spot is written down, not discovered later**: every read-only surface
+    (`/analytics`, `/mechanisms`, `/calendar`, `/search`, the Today snapshot, the calculator)
+    is uncountable under that rule, because looking at something leaves no act behind. A zero
+    there means "nothing was clicked", never "nothing was read", and is not grounds for a cut.
+  - **A real bug, caught at runtime not in review:** patching `{ featureUsage: { [id]: … } }`
+    and letting the backend merge it works on Firestore (`set` with `merge` deep-merges a map)
+    and **silently deletes every other counter** on the local JSON store, which shallow-spreads.
+    Exactly the shape of the `undefined` asymmetry `dehydrate()` exists to fix. The map is now
+    composed in memory; pinned by a test.
+  - **The mechanism ships empty**, and a test asserts it stays a no-op: nothing but the switch
+    itself may call `featureEnabled`, so no page's output can depend on a flag. Source-level on
+    purpose — a byte diff proves the flags changed nothing today; "no render path consults the
+    gate" proves they cannot.
+  - Deliberately NOT done: putting anything existing behind a flag (that is a decision with a
+    written kill criterion, not a side effect of building the plumbing), counting page visits,
+    any third-party analytics, and syncing or exporting the counters — they stay in the one
+    settings document and leave the journal never.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1383,7 +1423,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons, feature lifecycle
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)

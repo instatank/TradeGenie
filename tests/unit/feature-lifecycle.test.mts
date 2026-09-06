@@ -8,6 +8,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { readdirSync, readFileSync as readSource, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "tradegenie-lifecycle-"));
@@ -147,5 +149,98 @@ describe("the usage catalog", () => {
     for (const toggle of FEATURE_TOGGLES) {
       assert.ok(counted.has(toggle.key), `${toggle.key} is toggleable but not counted`);
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The mechanism must be a NO-OP until something is deliberately gated.
+//
+// This is a source-level guard rather than a render comparison, and that is the
+// stronger claim, not the weaker one: a byte-for-byte diff of every page proves
+// the flags changed nothing on the day it ran, whereas asserting that NOTHING
+// READS THE GATE proves they cannot change anything at all. `featureEnabled`
+// is a pure function of a key and the settings object, so a page that never
+// calls it cannot depend on a flag by any route.
+//
+// Two call sites are legitimate and neither gates a feature: toggleFeatureAction
+// reads the current value to flip it, and the Optional features panel reads it
+// to draw On/Off on its own switch. Anything else means a real feature is now
+// behind a flag — at which point this test SHOULD fail, and the fix is to add
+// the file to the list below in the same commit as the ledger row that explains
+// what was gated and what would kill it.
+// ---------------------------------------------------------------------------
+
+const ALLOWED_GATE_SITES = new Set([
+  "app/actions.ts", // toggleFeatureAction — flips the flag; gates nothing
+  "app/settings/page.tsx", // OptionalFeaturesPanel — draws the switch's own state
+]);
+
+// A counter belongs in a server action. In a page or a component it would be
+// counting a render, which is the one thing lib/feature-usage.ts forbids.
+const ALLOWED_COUNTER_SITES = new Set(["app/actions.ts"]);
+
+// Comments are stripped before scanning. Without this the guard fires on prose:
+// lib/settings-store.ts's field comment says "read ONLY through featureEnabled()",
+// which is documentation pointing AT the rule, not a gate site breaking it.
+function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+function sourceFiles(): { path: string; body: string }[] {
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const found: { path: string; body: string }[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules" || entry === ".next" || entry === ".git") continue;
+      const full = path.join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.(ts|tsx|mts)$/.test(entry)) found.push({ path: path.relative(root, full), body: withoutComments(readSource(full, "utf8")) });
+    }
+  };
+  for (const dir of ["app", "components", "lib"]) walk(path.join(root, dir));
+  return found;
+}
+
+describe("with every flag off, no page changes", () => {
+  it("nothing but the switch itself reads the gate", () => {
+    const offenders = sourceFiles()
+      .filter(({ path: file, body }) => body.includes("featureEnabled(") && !ALLOWED_GATE_SITES.has(file))
+      .map(({ path: file }) => file)
+      .filter((file) => file !== "lib/feature-flags.ts");
+    assert.deepEqual(
+      offenders,
+      [],
+      `these files gate something on a feature flag: ${offenders.join(", ")}. ` +
+        "That is fine — but it means the mechanism is no longer a no-op, so add the file here " +
+        "in the same commit as the docs/lifecycle.md row saying what was gated and what would kill it.",
+    );
+  });
+
+  it("the catalog is empty, so there is nothing to gate", () => {
+    // The pairing with the test above is what makes "no-op" true rather than
+    // merely tidy: no toggles exist AND no render path consults one.
+    assert.deepEqual(FEATURE_TOGGLES, [], "a toggle was added — see docs/lifecycle.md before shipping it");
+  });
+
+  it("counters are only bumped from server actions, never from a render", () => {
+    const offenders = sourceFiles()
+      .filter(({ path: file, body }) => /\bnoteUse\(/.test(body) && !ALLOWED_COUNTER_SITES.has(file))
+      .map(({ path: file }) => file)
+      .filter((file) => file !== "lib/feature-usage.ts");
+    assert.deepEqual(
+      offenders,
+      [],
+      `these files call noteUse outside a server action: ${offenders.join(", ")}. ` +
+        "A page render is a navigation, not a decision — counting one makes the census read noise.",
+    );
+  });
+
+  it("finds the files it is guarding", () => {
+    // Guards against the walk silently matching nothing and all three passing
+    // vacuously — the failure mode of every source-level test.
+    const files = sourceFiles();
+    assert.ok(files.length > 40, `only walked ${files.length} source files`);
+    assert.ok(files.some(({ path: file }) => file === "app/actions.ts"));
   });
 });
