@@ -11,9 +11,14 @@ Update it when architecture, lean defaults, the working contract, or open items 
    **working principles** sections are hard rules for collaboration; the UX/trimming sections
    are strong defaults; the AI section is directional, not prescriptive. Don't port DayOS code
    or architecture — this is about taste and scar tissue, not implementation.
-3. **`AGENTS.md`** — stack, file map, product areas, commands, deployment workflow.
-4. **`PENDING_TASKS.md`** — backlog.
-5. This file — the working contract + a log of decisions made during active development.
+3. **`playbook/LIFECYCLE.md`** (in `instatank/time-tracker`) — the cross-app expand → prove → cut
+   framework: feature stages, pre-registered kill criteria, exit-cost ranking, the monthly census.
+   **Read before adding OR removing any feature.** Part 4 says why TradeGenie adapts the mechanism
+   rather than copying DayOS's — server-side flags on `appSettings/singleton`, and why toggles must
+   not collide with the existing fold / "More" nav patterns.
+4. **`AGENTS.md`** — stack, file map, product areas, commands, deployment workflow.
+5. **`PENDING_TASKS.md`** — backlog.
+6. This file — the working contract + a log of decisions made during active development.
 
 Don't duplicate the stack/file/route lists here; they live in `AGENTS.md`.
 
