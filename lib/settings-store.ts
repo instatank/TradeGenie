@@ -113,13 +113,22 @@ export async function saveSettings(settings: AppSettings) {
 }
 
 /**
- * Write a few fields without sending the whole document back.
+ * Write a few TOP-LEVEL fields without sending the whole document back.
  *
  * saveSettings() reads nothing — it writes whatever object it is handed — so a
  * usage counter built on it would have to send the entire settings document,
  * prompt templates included, and would overwrite anything saved between its
- * read and its write. Firestore merges a nested map by path, so patching
- * { featureUsage: { [id]: … } } touches that one counter and nothing else.
+ * read and its write. This writes the named fields and leaves the rest alone.
+ *
+ * ONE FIELD IS THE UNIT, and a caller must compose the whole value of any field
+ * it patches. Do NOT pass a partial nested object hoping it will be merged into
+ * the stored one: Firestore's set({merge:true}) deep-merges a map and this
+ * file's local JSON fallback cannot, so `{ featureUsage: { oneKey: … } }` keeps
+ * every other counter on Firestore and silently DELETES them on the local
+ * store. Caught at runtime, by counting two different things and finding only
+ * the second — the same shape of backend asymmetry as `undefined` being
+ * rejected by Firestore and dropped by JSON.stringify (see dehydrate() in
+ * lib/store.ts). Composing the field in memory behaves identically on both.
  *
  * Still one writer file, so cache invalidation stays in one place.
  */

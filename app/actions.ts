@@ -12,6 +12,11 @@ import { credentialsFromEnv } from "@/lib/coindcx";
 import { exchangeView, positionKey, syncExchange } from "@/lib/coindcx-sync";
 import { acceptPatch, archiveTradeRecord, changedFields, diffTrade, matchPositions } from "@/lib/reconcile";
 import { db, getClosedTradesInRange, getTodayJournal } from "@/lib/data";
+// Usage counters (playbook/LIFECYCLE.md §R3). Each noteUse() call below sits
+// after the write it counts and before the redirect — a redirect() throws, so
+// anything past it never runs — and can never throw itself, so a failed count
+// never costs a save. Acts only: nothing here is called from a render.
+import { noteUse } from "@/lib/feature-usage";
 import { defaultMistakeTagNames } from "@/lib/constants";
 import {
   getOptionCatalog,
@@ -181,6 +186,7 @@ export async function saveTranscriptAction(formData: FormData) {
     await db.update("transcripts", created.id, await structuredPatch(rawText));
   }
 
+  await noteUse("capture.save");
   revalidateEverything();
   redirect(withFeedback("/inbox", "Saved. Review the entries below, then confirm."));
 }
@@ -190,6 +196,7 @@ export async function structureTranscriptAction(formData: FormData) {
   const transcript = await db.get("transcripts", id);
   if (!transcript) return;
   await db.update("transcripts", id, await structuredPatch(transcript.rawText));
+  await noteUse("capture.restructure");
   revalidateEverything();
   await redirectBackWithFeedback("Voice note re-read. Review the entries before confirming.", "/inbox");
 }
@@ -224,6 +231,7 @@ export async function dropTranscriptEntryAction(formData: FormData) {
     cleanedSummary: buildTranscriptSummary(remaining),
     updatedAt: new Date(),
   });
+  await noteUse("capture.drop-entry");
   revalidateEverything();
   await redirectBackWithFeedback(`Removed the ${entryKindWord(dropped)} entry. Nothing was saved to your journal.`, "/inbox");
 }
@@ -360,6 +368,7 @@ export async function confirmTranscriptAction(formData: FormData) {
     updatedAt: new Date(),
   });
 
+  await noteUse("capture.confirm");
   revalidateEverything();
   // Stay on the inbox — the trader keeps working through the queue instead of
   // being thrown onto whichever page the last entry happened to touch.
@@ -444,6 +453,7 @@ export async function extractLessonsAction(formData: FormData) {
       transcript.tags,
     );
   }
+  await noteUse("capture.extract-lessons");
   revalidateEverything();
   await redirectBackWithFeedback(
     lessons.length ? `Saved ${lessons.length} lesson${lessons.length === 1 ? "" : "s"} from this note.` : "No lessons in this note.",
@@ -488,6 +498,7 @@ export async function saveDailyJournalAction(formData: FormData) {
   } else {
     await db.create("dailyJournals", { id: newId(), createdAt: new Date(), ...payload, tags });
   }
+  await noteUse("review.daily-journal");
   revalidateEverything();
   redirect(withFeedback(`/daily?date=${format(date, "yyyy-MM-dd")}`, "Daily journal saved."));
 }
@@ -523,6 +534,7 @@ export async function saveQuickNoteAction(formData: FormData) {
     category: await options.resolve("noteCategory", formData, "category"),
     tags: deriveTags([text], toText(formData.get("tags"))),
   });
+  await noteUse("note.quick");
   revalidateEverything();
   redirect(withFeedback(`${redirectTo}#note-${note.id}`, "Note saved to today's review."));
 }
@@ -664,6 +676,7 @@ export async function createTradeAction(formData: FormData) {
     ...numeric,
   });
   await saveScreenshot(formData.get("screenshot"), trade.id);
+  await noteUse("trade.create");
   revalidateEverything();
   redirect(withFeedback(`/trades/${trade.id}`, "Trade note saved."));
 }
@@ -729,6 +742,7 @@ export async function quickLogTradeAction(formData: FormData) {
     netPnl: calculateNetPnl(realizedPnl, null, null),
     rMultiple: calculateRMultiple({ entryPrice, stopPrice, exitPrice, direction }),
   });
+  await noteUse("trade.quick-log");
   revalidateEverything();
   const label = `${instrument}${direction === "UNKNOWN" ? "" : ` ${direction.toLowerCase()}`}`;
   if (status === TradeStatus.CLOSED) {
@@ -820,6 +834,7 @@ export async function startTradeFromSetupAction(formData: FormData) {
     rMultiple: null,
   });
 
+  await noteUse("setup.run");
   revalidateEverything();
   const score = steps.length ? ` — ${ticked.length} of ${steps.length} steps` : "";
   const gap = missing.length ? ` Missing: ${missing.slice(0, 3).map((step) => step.label).join(", ")}.` : "";
@@ -976,6 +991,7 @@ export async function saveTradeAction(formData: FormData) {
     }
   }
 
+  await noteUse("trade.save");
   revalidateEverything();
   const reviewed = status === TradeStatus.CLOSED && (formData.get("followedPlan") ?? "NA") !== "NA";
   redirect(withFeedback(
@@ -1029,6 +1045,7 @@ export async function saveMorningCheckinAction(formData: FormData) {
       tags: morningTags,
     });
   }
+  await noteUse("review.morning");
   revalidateEverything();
   redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Checked in. Have a disciplined day."));
 }
@@ -1076,6 +1093,7 @@ export async function saveEveningReviewAction(formData: FormData) {
       tags: eveningTags,
     });
   }
+  await noteUse("review.evening");
   revalidateEverything();
   redirect(withFeedback(toText(formData.get("redirectTo")) ?? `/daily?date=${format(date, "yyyy-MM-dd")}`, "Day reviewed. That's the habit that compounds."));
 }
@@ -1134,6 +1152,7 @@ export async function addManualLessonAction(formData: FormData) {
     linkedTradeId: null,
     linkedTranscriptId: null,
   }, toText(formData.get("tags")));
+  await noteUse("lesson.manual");
   revalidateEverything();
   await redirectBackWithFeedback("Lesson added.", "/lessons");
 }
@@ -1348,6 +1367,7 @@ export async function generateWeeklyReviewAction(formData: FormData) {
     bestLesson: weekLessons[0]?.lessonText ?? null,
     actionItem: stats.mostCommonMistake ? `Reduce ${stats.mostCommonMistake.toLowerCase()} next week.` : "Write one clear invalidation before every trade.",
   });
+  await noteUse("review.weekly");
   revalidateEverything();
   redirect(withFeedback("/weekly-review", "Weekly review generated and saved."));
 }
@@ -1429,6 +1449,7 @@ export async function createAssetAction(formData: FormData) {
     gamePlan: null,
     isArchived: false,
   });
+  await noteUse("asset.create");
   revalidateEverything();
   redirect(withFeedback(`/assets/${asset.id}`, `Now tracking ${symbol}.`));
 }
@@ -1503,6 +1524,9 @@ export async function saveAssetWorkspaceAction(formData: FormData) {
     result.notesEdited ? `${result.notesEdited} note${result.notesEdited === 1 ? "" : "s"} updated` : null,
     result.viewSaved ? "current view saved" : null,
   ].filter(Boolean);
+  // Only when something changed. Pressing Save on an untouched page is a
+  // navigation, not a use of the asset workspace.
+  if (parts.length) await noteUse("asset.save");
   redirect(withFeedback(`/assets/${result.assetId}`, parts.length ? `Saved — ${parts.join(" · ")}.` : "Nothing to save yet."));
 }
 
@@ -1517,7 +1541,9 @@ export async function deleteAssetAction(formData: FormData) {
 // Called from the asset-note composer (client) to tidy a raw thought-dump.
 // Returns the structured text for in-place review; nothing is saved here.
 export async function structureAssetNoteDraftAction(rawText: string) {
-  return structureAssetNote(typeof rawText === "string" ? rawText : "");
+  const structured = await structureAssetNote(typeof rawText === "string" ? rawText : "");
+  await noteUse("asset.structure-note");
+  return structured;
 }
 
 // Deleting one note still saves everything else on the page first, so a delete
@@ -1935,6 +1961,7 @@ export async function syncExchangeAction() {
     return;
   }
   const report = await syncExchange(credentials);
+  await noteUse("exchange.sync");
   revalidateEverything();
   await redirectBackWithFeedback(report.detail, "/import", report.ok ? "success" : "error");
 }
@@ -1957,6 +1984,7 @@ export async function acceptExchangeMatchAction(formData: FormData) {
   }
 
   await db.update("trades", tradeId, { ...acceptPatch(match, key), updatedAt: new Date() });
+  await noteUse("exchange.accept");
   revalidateEverything();
   await redirectBackWithFeedback(`${match.position.instrument} updated from the exchange.`, "/import");
 }
@@ -2064,6 +2092,10 @@ async function archiveExchangePositions(keys: Set<string> | null) {
     await db.create("trades", archiveTradeRecord(position, key, { marketType, now }));
     logged += 1;
   }
+  // Counted here rather than in each of the three buttons above it: one act is
+  // one count whether it archived one position or eighty, and a count in the
+  // shared helper cannot drift from a count in a caller.
+  if (logged) await noteUse("exchange.archive");
   return logged;
 }
 
