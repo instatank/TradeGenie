@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { cache } from "react";
+import type { FeatureFlags, FeatureUsage } from "@/lib/feature-flags";
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { getFirestoreDb, usesFirebase } from "@/lib/store";
 
@@ -19,6 +20,15 @@ export type AppSettings = {
   /** Which currency combined totals are shown in. Per-trade numbers always
    *  stay in the account they were traded in; only sums are converted. */
   displayCurrency: "INR" | "USDT";
+  /** Feature lifecycle flags, keyed by a toggle's stable id. Read ONLY through
+   *  featureEnabled() in lib/feature-flags.ts — never indexed directly, so
+   *  there is one place that decides what "on" means. Absent = off. */
+  featureFlags: FeatureFlags;
+  /** How often each instrumented act has actually been done, so the monthly
+   *  census reads numbers instead of the owner's recall. Local to this journal:
+   *  it never leaves this Firestore document, and no third-party analytics are
+   *  ever added — that is settled, not reopened here. */
+  featureUsage: FeatureUsage;
   defaultMarketType: string;
   defaultSourceTool: string;
   promptTemplatesVersion: number;
@@ -44,6 +54,8 @@ export const defaultSettings: AppSettings = {
   hiddenTags: [],
   dismissedExchangeKeys: [],
   displayCurrency: "INR",
+  featureFlags: {},
+  featureUsage: {},
   defaultMarketType: "CRYPTO_PERP",
   defaultSourceTool: "Voice memo",
   promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,
@@ -100,6 +112,33 @@ export async function saveSettings(settings: AppSettings) {
   }
 }
 
+/**
+ * Write a few fields without sending the whole document back.
+ *
+ * saveSettings() reads nothing — it writes whatever object it is handed — so a
+ * usage counter built on it would have to send the entire settings document,
+ * prompt templates included, and would overwrite anything saved between its
+ * read and its write. Firestore merges a nested map by path, so patching
+ * { featureUsage: { [id]: … } } touches that one counter and nothing else.
+ *
+ * Still one writer file, so cache invalidation stays in one place.
+ */
+export async function saveSettingsPatch(patch: Partial<AppSettings>) {
+  try {
+    if (usesFirebase()) {
+      await getFirestoreDb().collection(SETTINGS_COLLECTION).doc(SETTINGS_DOC_ID).set(patch, { merge: true });
+      return;
+    }
+    // The local JSON file has no merge semantics of its own, so do the same
+    // thing by hand: read what is there, lay the patch over it, write it back.
+    const current = await readSettings();
+    await mkdir(path.dirname(localSettingsPath), { recursive: true });
+    await writeFile(localSettingsPath, JSON.stringify({ ...current, ...patch }, null, 2));
+  } finally {
+    settingsCache().delete(SETTINGS_DOC_ID);
+  }
+}
+
 function mergeSettings(parsed: Partial<AppSettings> | null | undefined): AppSettings {
   // If the saved templates predate the current version, ignore them and use the
   // improved defaults — otherwise old thin prompts would shadow the new ones.
@@ -108,6 +147,11 @@ function mergeSettings(parsed: Partial<AppSettings> | null | undefined): AppSett
   return {
     ...defaultSettings,
     ...(parsed ?? {}),
+    // A settings document written before these existed has neither key, and
+    // spreading `parsed` would put `undefined` over the default {} — which is
+    // not the same thing as an empty object to every caller that indexes it.
+    featureFlags: parsed?.featureFlags ?? {},
+    featureUsage: parsed?.featureUsage ?? {},
     promptTemplatesVersion: PROMPT_TEMPLATES_VERSION,
     promptTemplates: templatesAreCurrent
       ? { ...defaultPromptTemplates, ...(parsed?.promptTemplates ?? {}) }
