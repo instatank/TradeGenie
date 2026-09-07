@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { Sparkles, Undo2 } from "lucide-react";
 import { structureAssetNoteDraftAction } from "@/app/actions";
+import { ScreenshotField } from "@/components/ScreenshotField";
 import { TagPicker } from "@/components/TagPicker";
 import type { OptionChoice } from "@/lib/options";
 
@@ -120,6 +121,12 @@ export function AssetNoteComposer({
           {pending ? "Tidying…" : "Tidy this note with AI"}
         </button>
       </div>
+      <ScreenshotField
+        key={`shot-${resetKey}`}
+        name="noteScreenshot"
+        label="Charts for this note (optional)"
+        hint="Paste a TradingView screenshot straight in (Ctrl/Cmd+V), drop an image here, or browse. Saved with the note."
+      />
       <TagPicker
         key={resetKey}
         name="noteTags"

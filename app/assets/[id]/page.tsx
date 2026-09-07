@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
-import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
-import { deleteAssetAction, deleteAssetNoteAction, saveAssetWorkspaceAction } from "@/app/actions";
+import { ArrowLeft, Trash2 } from "lucide-react";
+import { deleteAssetAction, saveAssetWorkspaceAction } from "@/app/actions";
 import { AssetNoteComposer } from "@/components/AssetNoteComposer";
+import { AssetStats } from "@/components/AssetStats";
+import { AssetTimeline } from "@/components/AssetTimeline";
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
-import { OptionSelectField } from "@/components/OptionField";
 import { SaveBar } from "@/components/SaveBar";
 import { TagPicker } from "@/components/TagPicker";
-import { TagPills } from "@/components/TagPills";
+import { splitTimeline, TIMELINE_RECENT_DAYS } from "@/lib/asset-history";
 import { humanize, marketTypes } from "@/lib/constants";
 import { getAssetWorkspace, getTagVocabulary } from "@/lib/data";
 import { getOptionCatalog, optionGroups } from "@/lib/options";
@@ -22,6 +23,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   if (!asset) notFound();
   const tagNames = tagVocabulary.map((entry) => entry.tag);
   const timeframeChoices = options.choices("assetTimeframe");
+  const timeframeLabel = (value: string) => options.label("assetTimeframe", value);
+  // Recent by default, older folded — same shape as the calendar. A quiet month
+  // still shows its last few entries rather than an empty column above a
+  // disclosure.
+  const { recent, earlier } = splitTimeline(asset.timeline);
+
+  const timelineProps = {
+    baseCurrency: asset.baseCurrency,
+    timeframeChoices,
+    timeframePlaceholder: optionGroups.assetTimeframe.placeholder,
+    timeframeLabel,
+    tagVocabulary: tagNames,
+    screenshotsByNote: asset.screenshotsByNote,
+  };
 
   return (
     <main className="page-shell pb-28">
@@ -53,7 +68,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           <div className="space-y-4 self-start">
             <div className="panel space-y-4">
               <h2 className="font-semibold">Current view</h2>
-              <p className="-mt-2 text-xs text-forge-muted">Your live snapshot. Edit it as the picture changes — history lives in the thread.</p>
+              <p className="-mt-2 text-xs text-forge-muted">
+                Your live snapshot. Edit it as the picture changes — every change is filed into the timeline, so the read you
+                replace is never lost.
+              </p>
               <TextField label="HTF bias" name="htfBias" defaultValue={asset.htfBias} placeholder="e.g. Accumulation, higher lows intact" />
               <TextField label="LTF bias" name="ltfBias" defaultValue={asset.ltfBias} placeholder="e.g. Pullback to support, watching reaction" />
               <TextAreaField
@@ -74,26 +92,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <TagPicker selected={asset.tags ?? []} vocabulary={tagNames} label="Tags for this asset" />
             </div>
 
-            {asset.relatedTrades.length ? (
-              <div className="panel space-y-2">
-                <h2 className="font-semibold">Trades on {asset.symbol}</h2>
-                {asset.relatedTrades.slice(0, 6).map((trade) => (
-                  <Link
-                    key={trade.id}
-                    href={`/trades/${trade.id}`}
-                    className="flex items-center justify-between gap-2 rounded-md border border-forge-line px-3 py-2 text-sm transition hover:border-forge-blue"
-                  >
-                    <span className="truncate">
-                      {humanize(trade.direction)} · {humanize(trade.status)}
-                    </span>
-                    <span className="shrink-0 text-xs text-forge-muted">{format(trade.tradeDateTime, "dd MMM")}</span>
-                  </Link>
-                ))}
-              </div>
-            ) : null}
+            {/* Below the current view, not above it. This page is the daily
+                glance — its first message should be "here is your plan", not
+                "here is your P&L". Same reason the journaling streak rewards
+                showing up and never rewards a green day. */}
+            <AssetStats
+              stats={asset.stats}
+              baseCurrency={asset.baseCurrency}
+              noteCount={asset.notes.length}
+              openTradeCount={asset.openTradeCount}
+              symbol={asset.symbol}
+            />
           </div>
 
-          {/* The thread — append-only running thought log, newest first. */}
+          {/* The story of this symbol, in one column and in order. */}
           <div className="space-y-4">
             <AssetNoteComposer
               resetKey={`${asset.notes.length}-${asset.notes[0]?.id ?? "none"}`}
@@ -102,64 +114,32 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               timeframePlaceholder={optionGroups.assetTimeframe.placeholder}
             />
 
-            <div className="space-y-3">
-              {asset.notes.map((note) => (
-                <article key={note.id} id={`note-${note.id}`} className="panel scroll-mt-24">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm text-forge-muted">
-                      <span>{format(note.createdAt, "EEE dd MMM yyyy · HH:mm")}</span>
-                      {note.timeframe ? (
-                        <span className="rounded-md bg-forge-panel px-2 py-0.5 text-xs font-medium text-forge-ink">
-                          {options.label("assetTimeframe", note.timeframe)}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-base">{note.text}</p>
-                  <TagPills tags={note.tags} className="mt-2" />
-                  <details className="mt-3 rounded-lg border border-forge-line p-3">
-                    <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold">
-                      <Pencil className="h-4 w-4 text-forge-blue" aria-hidden="true" />
-                      Edit note
+            {asset.timeline.length ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-semibold">The story so far</h2>
+                  <p className="text-xs text-forge-muted">
+                    Your notes, the moments your read changed, the trades you took
+                    {asset.symbolTag ? <> and any quick note tagged #{asset.symbolTag}</> : null} — newest first.
+                  </p>
+                </div>
+                <AssetTimeline items={recent} {...timelineProps} />
+                {earlier.length ? (
+                  <details className="rounded-xl border border-forge-line bg-white/60 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-forge-muted hover:text-forge-ink">
+                      Show {earlier.length} earlier {earlier.length === 1 ? "entry" : "entries"} (older than {TIMELINE_RECENT_DAYS} days)
                     </summary>
-                    <div className="mt-3 space-y-3">
-                      <TextAreaField label="Note" name={`noteText-${note.id}`} defaultValue={note.text} rows={5} />
-                      <div className="flex flex-wrap items-end justify-between gap-3">
-                        <OptionSelectField
-                          label="Timeframe"
-                          name={`noteTimeframe-${note.id}`}
-                          choices={timeframeChoices}
-                          includeBlank
-                          defaultValue={note.timeframe}
-                          placeholder={optionGroups.assetTimeframe.placeholder}
-                        />
-                        {/* Deletes this note, but still saves everything else
-                            typed on the page first. */}
-                        <button
-                          className="button-danger min-h-8 px-2 text-sm"
-                          type="submit"
-                          formAction={deleteAssetNoteAction.bind(null, note.id)}
-                        >
-                          Delete note
-                        </button>
-                      </div>
-                      <TagPicker
-                        name={`noteTags-${note.id}`}
-                        selected={note.tags ?? []}
-                        vocabulary={tagNames}
-                        label="Tags"
-                      />
-                      <p className="text-xs text-forge-muted">Edits here are saved by the Save button — no separate save needed.</p>
+                    <div className="mt-3">
+                      <AssetTimeline items={earlier} {...timelineProps} />
                     </div>
                   </details>
-                </article>
-              ))}
-              {!asset.notes.length ? (
-                <div className="panel muted">
-                  No thoughts logged yet. Add your first note above — tomorrow you&apos;ll be glad you wrote down what you were watching.
-                </div>
-              ) : null}
-            </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="panel muted">
+                Nothing logged yet. Add your first note above — tomorrow you&apos;ll be glad you wrote down what you were watching.
+              </div>
+            )}
           </div>
         </section>
       </form>

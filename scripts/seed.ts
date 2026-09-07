@@ -540,6 +540,25 @@ async function main() {
       tags: ["btc"],
     });
 
+    // ARB is tracked too, and it is the one that makes the per-asset P&L a real
+    // check rather than a coincidence: its only trade is the USDT-margined
+    // archive position below, so the figure on the card is only right if the
+    // read path converted it. Summed raw it reads ~$4 where the answer is ~₹399
+    // — the same ~100x skew two margin accounts caused everywhere before
+    // getTradesWithMistakes became the one conversion boundary.
+    await db.create("assets", {
+      createdAt: subDays(now, 42),
+      updatedAt: subDays(now, 42),
+      symbol: "ARB",
+      marketType: MarketType.CRYPTO_PERP,
+      htfBias: "Basing after the drawdown",
+      ltfBias: null,
+      levels: null,
+      gamePlan: null,
+      isArchived: false,
+      tags: ["arb"],
+    });
+
     // Tagged #sol but written from the quick-note bar, so it lives in freeNotes
     // and only reaches the asset page through the symbol tag.
     await db.create("freeNotes", {

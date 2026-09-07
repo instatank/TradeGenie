@@ -1523,7 +1523,7 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
   // 3. A new note in the composer — appended, never silently dropped.
   const newNote = toText(formData.get("noteText"));
   if (newNote) {
-    await db.create("assetNotes", {
+    const created = await db.create("assetNotes", {
       createdAt: now,
       updatedAt: now,
       assetId,
@@ -1531,6 +1531,16 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
       text: newNote,
       tags: deriveTags([newNote], toText(formData.get("noteTags"))),
     });
+    // After the note exists, so the chart has something to hang off.
+    await saveScreenshots(formData, "noteScreenshot", { kind: "assetNote", id: created.id });
+  }
+
+  // 4. Charts pasted into an existing note's edit fold. Separate from the text
+  // edit above on purpose: attaching a chart to a note you did not retype must
+  // still work, and the text-unchanged early-continue there would skip it.
+  for (const note of notes) {
+    if (note.id === skipNoteId) continue;
+    await saveScreenshots(formData, `noteScreenshot-${note.id}`, { kind: "assetNote", id: note.id });
   }
 
   // Touch the asset so it bubbles to the top of the index on any activity.

@@ -8,6 +8,7 @@ import {
   upsertBy,
   type StoreShape,
 } from "@/lib/store";
+import { buildAssetTimeline } from "@/lib/asset-history";
 import { currencyFromPositionKey } from "@/lib/coindcx-sync";
 import { toBaseCurrency, type Currency, type InBaseCurrency } from "@/lib/currency";
 import { getSettings } from "@/lib/settings-store";
@@ -259,12 +260,13 @@ export async function getAssetsIndex() {
  * an INR trade to a USDT trade and be ~100x wrong. Same reason /daily was fixed.
  */
 export async function getAssetWorkspace(id: string) {
-  const [asset, notes, biasChanges, trades, freeNotes, settings] = await Promise.all([
+  const [asset, notes, biasChanges, trades, freeNotes, screenshots, settings] = await Promise.all([
     getRecord("assets", id),
     listRecords("assetNotes"),
     listRecords("assetBiasChanges"),
     getTradesWithMistakes(),
     listRecords("freeNotes"),
+    listRecords("screenshots"),
     getSettings(),
   ]);
   if (!asset) return null;
@@ -281,12 +283,30 @@ export async function getAssetWorkspace(id: string) {
     .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime());
   const closed = assetTrades.filter((trade) => trade.status === "CLOSED");
 
+  const assetNotes = notes.filter((note) => note.assetId === id).sort(descCreated);
+  const assetBiasChanges = biasChanges.filter((change) => change.assetId === id).sort(descCreated);
+
   return {
     ...asset,
-    notes: notes.filter((note) => note.assetId === id).sort(descCreated),
-    biasChanges: biasChanges.filter((change) => change.assetId === id).sort(descCreated),
+    notes: assetNotes,
+    biasChanges: assetBiasChanges,
     taggedNotes: taggedNotes.sort(descCreated),
     symbolTag,
+    // One column, newest first: what you wrote, when your read changed, the
+    // trades you took, and any loose note tagged with the symbol.
+    timeline: buildAssetTimeline({
+      notes: assetNotes,
+      biasChanges: assetBiasChanges,
+      trades: assetTrades,
+      freeNotes: taggedNotes,
+    }),
+    // Charts grouped by the note they hang off, so the timeline row can render
+    // them without a scan per note.
+    screenshotsByNote: assetNotes.reduce((map, note) => {
+      const shots = screenshots.filter((screenshot) => screenshot.linkedAssetNoteId === note.id);
+      if (shots.length) map.set(note.id, shots);
+      return map;
+    }, new Map<string, Screenshot[]>()),
     relatedTrades: assetTrades,
     // Does this symbol actually pay you? Scored with bucketStatsFor — the same
     // maths every analytics table uses, so a number here can never disagree

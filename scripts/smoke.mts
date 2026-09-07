@@ -63,7 +63,7 @@ async function main() {
     // and an empty store draws their empty states instead, so a crash in one
     // would sail through a status check. The seed creates the data that makes
     // them render; these assert they actually did.
-    for (const [route, needle, what] of CONTENT_CHECKS) {
+    for (const [route, needle, what] of [...CONTENT_CHECKS, ...(await dynamicContentChecks(storePath))]) {
       const body = await fetchBody(route);
       const ok = body.includes(needle);
       console.log(`  ${ok ? "ok  " : "FAIL"}  ${route.padEnd(28)} renders ${what}`);
@@ -164,6 +164,51 @@ async function fetchBody(route: string): Promise<string> {
   } catch (error) {
     return `<!-- fetch failed: ${error instanceof Error ? error.message : String(error)} -->`;
   }
+}
+
+/**
+ * Content checks against a route whose id comes from the seed.
+ *
+ * The asset workspace is the most conditional page in the app — a timeline of
+ * four different row kinds, a stats panel with a thin-sample branch, a fold for
+ * older entries — and it is a dynamic segment, so `next build` only proves it
+ * compiles. Until the seed grew an asset, a 200 was the only thing ever
+ * asserted about it, and even that resolved to no route at all.
+ */
+async function dynamicContentChecks(storePath: string): Promise<[string, string, string][]> {
+  const { readFile } = await import("node:fs/promises");
+  const store = JSON.parse(await readFile(storePath, "utf8")) as Record<string, { id: string; symbol?: string }[]>;
+  // SOL is the seeded asset with a full thread; BTC is the sparse one.
+  const sol = store.assets?.find((asset) => asset.symbol === "SOL")?.id;
+  const arb = store.assets?.find((asset) => asset.symbol === "ARB")?.id;
+  if (!sol) return [];
+  const route = `/assets/${sol}`;
+  const checks: [string, string, string][] = [
+    [route, "The story so far", "the merged timeline"],
+    [route, "Quick note", "a free note reaching the asset page through its #sol tag"],
+    [route, "bias changed", "a bias-change marker row in the timeline"],
+    [route, "Open the day this was written", "the free note's link back to its own day"],
+    // A needle must not span an interpolated value: React emits `What
+    // <!-- -->SOL<!-- --> has done for you`, so any assertion crossing a {}
+    // boundary fails against a page that rendered perfectly. This has bitten
+    // this repo before.
+    [route, "has done for you", "the per-asset performance panel"],
+    [route, "Net P&amp;L on ", "the net P&L figure, which needs converted trades to be right"],
+    [route, "Notes written", "attention and return side by side in the same panel"],
+    [route, " before these read as", "the thin-sample caveat rather than a confident verdict"],
+    // The paste control degrades to a real file input; both halves must render.
+    [route, "paste", "the paste-to-attach hint on the note composer"],
+    [route, 'type="file"', "the plain file input the paste control is built on"],
+  ];
+
+  // ARB's only trade is the USDT-margined archive position, so its panel is
+  // right ONLY if the read path converted it: summed raw it reads 4, and the
+  // answer is 399. That is the ~100x skew two margin accounts caused before
+  // getTradesWithMistakes became the one conversion boundary, and this is the
+  // check that fails if a later edit swaps it back for listRecords("trades").
+  if (arb) checks.push([`/assets/${arb}`, "+₹399", "a per-asset P&L that is only correct because the trades were converted"]);
+
+  return checks;
 }
 
 async function dynamicRoutes(storePath: string): Promise<string[]> {

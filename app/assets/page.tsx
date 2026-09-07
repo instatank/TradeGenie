@@ -4,6 +4,8 @@ import { LineChart } from "lucide-react";
 import { createAssetAction } from "@/app/actions";
 import { PageTitle, SelectField } from "@/components/Fields";
 import { marketTypes, humanize } from "@/lib/constants";
+import { formatMoney } from "@/lib/currency";
+import { isThinSample } from "@/lib/metrics";
 import { getAssetsIndex } from "@/lib/data";
 
 export default async function AssetsPage() {
@@ -66,8 +68,35 @@ export default async function AssetsPage() {
                   <span className="font-medium text-forge-ink">Latest:</span> {asset.lastNote.text}
                 </p>
               ) : null}
-              <p className="mt-2 text-xs text-forge-muted">
-                {asset.noteCount} note{asset.noteCount === 1 ? "" : "s"} in the thread
+              {/* Attention and return on the same card. Which symbols you think
+                  about most and which ones actually pay you are different lists,
+                  and that gap is unreadable while they live on separate pages. */}
+              <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-forge-muted">
+                <span>
+                  {asset.noteCount} note{asset.noteCount === 1 ? "" : "s"} in the thread
+                </span>
+                {asset.stats.count ? (
+                  <>
+                    <span>
+                      {asset.stats.count} closed trade{asset.stats.count === 1 ? "" : "s"}
+                    </span>
+                    <span
+                      className={`font-semibold ${
+                        // No colour on a thin sample — same rule as every table
+                        // in the app. Three trades is not a verdict.
+                        isThinSample(asset.stats.count)
+                          ? "text-forge-muted"
+                          : asset.stats.netPnl >= 0
+                            ? "text-forge-green"
+                            : "text-forge-red"
+                      }`}
+                    >
+                      {formatMoney(asset.stats.netPnl, asset.baseCurrency, { signed: true })}
+                    </span>
+                  </>
+                ) : (
+                  <span>no trades logged</span>
+                )}
               </p>
             </Link>
           ))}

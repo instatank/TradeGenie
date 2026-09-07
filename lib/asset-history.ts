@@ -30,10 +30,20 @@ export const longBiasFields: ReadonlySet<BiasField> = new Set<BiasField>(["level
 
 type BiasValues = Pick<Asset, BiasField>;
 
-/** "  " and null are both "nothing written" — a save that only changes
- *  whitespace is not a change of mind and must not mint a history row. */
+/**
+ * "  " and null are both "nothing written" — a save that only changes
+ * whitespace is not a change of mind and must not mint a history row.
+ *
+ * Line endings are normalized for the same reason, and it is not theoretical:
+ * a browser posts textarea newlines as CRLF, while text written by the seed,
+ * the capture pipeline or a restore carries bare LF. So the FIRST save on any
+ * asset with a multi-line field would file a "Levels changed" row whose before
+ * and after render identically — every save, forever, burying the real changes
+ * of mind under noise. Caught in a real browser; no unit test that builds its
+ * own strings would ever have produced a CRLF.
+ */
 function normalize(value: string | null | undefined): string | null {
-  const trimmed = (value ?? "").trim();
+  const trimmed = (value ?? "").replace(/\r\n?/g, "\n").trim();
   return trimmed.length ? trimmed : null;
 }
 
