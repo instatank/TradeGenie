@@ -516,6 +516,17 @@ async function main() {
         tags,
       });
     }
+    // A bias change already on the record, so the timeline's marker rows and
+    // the previous-value fold are exercised by the smoke run rather than only
+    // appearing the first time the owner edits a real asset.
+    await db.create("assetBiasChanges", {
+      createdAt: subDays(now, 9),
+      assetId: sol.id,
+      field: "htfBias",
+      from: "Reclaim holding, higher lows intact",
+      to: "Range high rejected, expecting a rotation down",
+    });
+
     await db.create("assets", {
       createdAt: subDays(now, 4),
       updatedAt: subDays(now, 4),

@@ -32,6 +32,7 @@ import {
 import { calculateNetPnl, calculateOrderFields, calculateRMultiple, summarizeWeeklyStats, toNumber, toText, weekBounds } from "@/lib/metrics";
 import { PROMPT_TEMPLATES_VERSION, defaultPromptTemplates } from "@/lib/prompts";
 import { structureAssetNote } from "@/lib/asset-note-structurer";
+import { biasFields, diffBias } from "@/lib/asset-history";
 import { captureMarketContext } from "@/lib/market-context";
 import { setupSteps } from "@/lib/setups";
 import { saveScreenshotFile } from "@/lib/screenshot-storage";
@@ -1468,13 +1469,20 @@ async function applyAssetWorkspace(formData: FormData, skipNoteId?: string) {
   let notesEdited = 0;
 
   // 1. Current view — only when its panel was actually on screen.
-  if (["htfBias", "ltfBias", "levels", "gamePlan"].some((key) => formData.has(key))) {
+  if (biasFields.some((key) => formData.has(key))) {
     const texts = {
       htfBias: toText(formData.get("htfBias")),
       ltfBias: toText(formData.get("ltfBias")),
       levels: toText(formData.get("levels")),
       gamePlan: toText(formData.get("gamePlan")),
     };
+    // Before overwriting it, keep what it said. The current view is edited in
+    // place by design, so without this the previous read is simply gone — and
+    // "what did I think three weeks ago" is the question a tracked asset exists
+    // to answer. Costs the trader nothing: they already performed the edit.
+    for (const change of diffBias(asset, texts)) {
+      await db.create("assetBiasChanges", { createdAt: now, assetId, ...change });
+    }
     await db.update("assets", assetId, {
       ...texts,
       tags: deriveTags(Object.values(texts), toText(formData.get("tags"))),
@@ -1534,6 +1542,7 @@ export async function saveAssetWorkspaceAction(formData: FormData) {
 export async function deleteAssetAction(formData: FormData) {
   const id = String(formData.get("id"));
   await db.deleteWhere("assetNotes", (note) => note.assetId === id);
+  await db.deleteWhere("assetBiasChanges", (change) => change.assetId === id);
   await db.deleteWhere("assets", (asset) => asset.id === id);
   revalidateEverything();
   redirect(withFeedback("/assets", "Asset removed."));

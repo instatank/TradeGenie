@@ -9,6 +9,7 @@ import type {
   ExchangeFill,
   ExchangeLedgerEntry,
   Asset,
+  AssetBiasChange,
   AssetNote,
   CustomOption,
   DailyJournal,
@@ -42,6 +43,7 @@ export type StoreShape = {
   weeklyReviews: WeeklyReview[];
   assets: Asset[];
   assetNotes: AssetNote[];
+  assetBiasChanges: AssetBiasChange[];
   customOptions: CustomOption[];
   freeNotes: FreeNote[];
   savedViews: SavedView[];
@@ -63,6 +65,7 @@ const emptyStore: StoreShape = {
   weeklyReviews: [],
   assets: [],
   assetNotes: [],
+  assetBiasChanges: [],
   customOptions: [],
   freeNotes: [],
   savedViews: [],

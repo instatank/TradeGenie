@@ -315,6 +315,28 @@ export type SavedView = {
   path: string;
 };
 
+// An immutable record of the "Current view" changing on a tracked asset.
+//
+// Its own collection rather than a generated AssetNote, deliberately: the notes
+// thread is the trader's words, editable and tag-derived, and dropping
+// machine-written rows into it would make "delete this note" and "retag this
+// note" mean something we do not want them to mean. These are audit rows —
+// written once, never edited, rendered into the timeline beside the notes.
+//
+// `from` is null the first time a field is filled in ("bias set"); `to` is null
+// when it is cleared. Both are stored in full: the text is a few hundred bytes
+// and having the previous game plan verbatim is the entire value of keeping it.
+export type AssetBiasChange = {
+  id: string;
+  createdAt: Date;
+  assetId: string;
+  /** One of `biasFields` in lib/asset-history.ts. Stored as a plain string so
+   *  a field renamed later reads back rather than throwing on a stored value. */
+  field: string;
+  from: string | null;
+  to: string | null;
+};
+
 // One dated entry in an asset's running thread — a free-form thought dump.
 export type AssetNote = {
   id: string;
