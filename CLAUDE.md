@@ -1403,6 +1403,99 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     any third-party analytics, and syncing or exporting the counters — they stay in the one
     settings document and leave the journal never.
 
+- **The asset page is one story, not three lists** (`lib/asset-history.ts`,
+  `components/AssetTimeline.tsx`, `components/AssetStats.tsx`,
+  `assetBiasChanges`). The page had the current view on the left, the note
+  thread on the right, and a "Trades on SOL" box showing direction, status and a
+  date. Three lists that never met — so the sequence that actually teaches a
+  discretionary trader anything ("here is what I wrote, here is my read
+  flipping, here is the trade I took two days later") could not be read
+  anywhere, and a thought typed into the quick-note bar about a coin never
+  reached that coin's page at all.
+  - **The read you overwrite is kept.** "Current view" is edited in place by
+    design and `db.update("assets", …)` destroyed every previous version, so the
+    panel's own promise — "history lives in the thread" — was kept by nothing.
+    `diffBias()` compares the four fields before the write and files what moved.
+    Zero friction by construction: the trader already performed the edit.
+    **Its own collection, not a generated `AssetNote`** — the thread is the
+    trader's words, editable and tag-derived, and machine-written rows in it
+    would make "edit this note" and "retag this note" mean something we do not
+    want, and would push generated text through `deriveTags`. These are audit
+    rows: written once, never edited. Filling a field in for the first time
+    counts ("bias set"); whitespace-only edits do not.
+  - **A browser posts textarea newlines as CRLF.** The seed, the capture
+    pipeline and a restore all write bare LF, so before this was handled the
+    *first* save on any asset with multi-line fields filed a phantom "Levels
+    changed" row whose before and after rendered identically — on every save,
+    forever, burying the real changes of mind. `normalize()` in
+    `lib/asset-history.ts` folds line endings for that reason. **Only a real
+    browser could have found it**: no unit test that builds its own strings
+    produces a CRLF, and the two tests pinning it now were written from the
+    finding, not the other way round.
+  - **One merged timeline**, newest first, carrying thread notes (with their edit
+    fold and charts), bias markers, the trades on the symbol with P&L and R, and
+    any quick note tagged with the symbol. **The tag is the join**, through
+    `normalizeTag` — tapping the SOL shortcut chip, typing `#sol` and landing on
+    the SOL page can never disagree about the name. A parallel `symbols[]` field
+    would have been the DayOS two-tokenizer mistake in new clothes.
+  - **A trade is placed at `tradeDateTime`, not `createdAt`.** An archived March
+    position is written to the journal today; filing it under today puts it at
+    the top of the story of a symbol it left months ago.
+  - **Recent 30 days shown, older folded** (the calendar's shape), with a floor
+    of 8 items so a symbol untouched since March still shows its last few
+    entries rather than a disclosure with an empty column above it. Both rules
+    are one pure function (`splitTimeline`) with its own tests.
+  - **Quick notes are read-only on the asset page.** Their home is the day they
+    were written; an edit fold in two places is how you lose one of the edits.
+  - **Charts attach by paste** (`components/ScreenshotField.tsx`) — the fourth
+    client-JS control, after `TagPicker`, the calculator and the quick-note bar,
+    and for the same kind of reason: a clipboard read cannot be expressed as a
+    plain form. The plain `<input type="file" multiple>` is still the real field,
+    so with JS off this is exactly the picker the trades page had; a paste or
+    drop writes into its `files` via a `DataTransfer`. Live on asset notes
+    (composer *and* each note's fold) and on the trade page. `getAll`, not `get`
+    — pasting three charts and silently keeping one is the worst failure an
+    upload can have, because it looks like it worked. The storage folder is
+    **derived from the owner kind**, never passed in, so a second owner can't
+    write into the first one's prefix; and deleting a note or an asset now
+    cascades to its images, which a trade delete already did.
+  - **Per-asset performance** (`AssetStats`, and net P&L on each `/assets` card):
+    the gap between how much you think about a symbol and what it gives back was
+    unreadable while the note count and the P&L lived on different pages. Scored
+    with `bucketStatsFor` — the same maths the analytics tables use, so a number
+    here cannot disagree with the same number on `/analytics` — and thin samples
+    lose their colour at `MIN_SAMPLE` like every other table.
+    **Trades come through `getTradesWithMistakes()`, never `listRecords`**: that
+    is the one conversion boundary, so a per-asset total from raw rows adds an
+    INR trade to a USDT one. The seed now tracks ARB, whose only trade is
+    USDT-margined and sums to **4 raw against 399 converted**, and `npm run
+    smoke` asserts the 399 — so swapping the read back turns the gate red
+    (verified by doing it).
+  - **The stats sit BELOW the current view.** This page is the daily glance; its
+    first message must be "here is your plan", not "here is your P&L" — the same
+    reason the journaling streak rewards showing up and never rewards a green
+    day. The first cut had it on top, and reading the rendered page is what
+    caught it.
+  - **The seed had no assets at all**, so `npm run smoke` asked it for the first
+    asset id, got nothing, and `/assets/<id>` — a dynamic segment `next build`
+    only proves compiles — sat outside every gate in the repo. It now seeds SOL
+    (full thread), BTC (header only) and ARB (the currency case), and
+    `dynamicContentChecks()` in `scripts/smoke.mts` asserts ten strings against
+    a route whose id comes from the seed.
+  - Verified in a real headless Chromium against the built app, not just in
+    tests: one bias row per real change and none for an unchanged save, a pasted
+    PNG landing in the actual file input, saved, linked to the note rather than a
+    trade, rendered on its row, served as bytes by `/api/screenshots`, and
+    deleted with the note. 19 checks.
+  - Deliberately NOT done: indexing bias changes in `lib/search.ts` (the text is
+    the asset's own fields, which search already covers, so it would
+    double-count), structuring the free-text `levels` field into typed price rows
+    (a friction trap — free text is why that field gets used), an idea/outcome
+    lifecycle on notes (worth doing, but it is the first thing here that would
+    add a decision while writing a note, and the timeline may already scratch the
+    itch), and backfilling bias history for edits made before this existed —
+    there is nothing to backfill it from.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1423,7 +1516,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons, feature lifecycle
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons, feature lifecycle, asset bias history + timeline, screenshot cascade guards
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)
