@@ -6,6 +6,7 @@ import { createLessonFromTradeAction, deleteTradeAction, linkRawExecutionAction,
 import { PageTitle, SelectField, TextAreaField, TextField } from "@/components/Fields";
 import { OptionChipCheckbox, OptionSelectField } from "@/components/OptionField";
 import { SaveBar } from "@/components/SaveBar";
+import { ScreenshotField } from "@/components/ScreenshotField";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
@@ -267,7 +268,11 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
 
         <details className="panel space-y-4" open={trade.screenshots.length > 0}>
           <summary className="cursor-pointer font-semibold">Screenshots</summary>
-          <input className="input w-full" type="file" name="screenshot" accept="image/*" />
+          <ScreenshotField
+            name="screenshot"
+            label="Add charts"
+            hint="Paste a TradingView screenshot straight in (Ctrl/Cmd+V), drop an image, or browse. Saved by the page's Save button."
+          />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {trade.screenshots.map((screenshot) => (
               <div key={screenshot.id} className="overflow-hidden rounded-lg border border-forge-line">

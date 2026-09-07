@@ -35,7 +35,7 @@ import { structureAssetNote } from "@/lib/asset-note-structurer";
 import { biasFields, diffBias } from "@/lib/asset-history";
 import { captureMarketContext } from "@/lib/market-context";
 import { setupSteps } from "@/lib/setups";
-import { saveScreenshotFile } from "@/lib/screenshot-storage";
+import { saveScreenshotFile, type ScreenshotOwner } from "@/lib/screenshot-storage";
 import { getSettings, saveSettings, saveSettingsPatch, type AppSettings } from "@/lib/settings-store";
 import { newId } from "@/lib/store";
 import { deriveTags, mergeTags, normalizeTag } from "@/lib/tags";
@@ -148,17 +148,30 @@ function deriveTranscriptType(entries: ExtractedEntry[]): TranscriptType {
   return TranscriptType.UNKNOWN;
 }
 
-async function saveScreenshot(file: FormDataEntryValue | null, tradeId?: string) {
-  if (!(file instanceof File) || file.size === 0 || !tradeId) return;
-  const filePath = await saveScreenshotFile(file, tradeId);
-  await db.create("screenshots", {
-    createdAt: new Date(),
-    filePath,
-    caption: "Trade context",
-    linkedTradeId: tradeId,
-    linkedDailyJournalId: null,
-    linkedTranscriptId: null,
-  });
+/**
+ * Attach every image posted under `field` to one record.
+ *
+ * `getAll`, not `get`: pasting is the point of this control now, and pasting
+ * three charts into one note is normal — reading only the first would silently
+ * drop the other two, which is the worst possible failure for an upload.
+ * Empty entries are skipped, so a form with nothing attached costs no writes.
+ */
+async function saveScreenshots(formData: FormData, field: string, owner: ScreenshotOwner) {
+  const files = formData.getAll(field).filter((entry): entry is File => entry instanceof File && entry.size > 0);
+  if (!files.length) return 0;
+  for (const file of files) {
+    const filePath = await saveScreenshotFile(file, owner);
+    await db.create("screenshots", {
+      createdAt: new Date(),
+      filePath,
+      caption: owner.kind === "trade" ? "Trade context" : "Chart on this note",
+      linkedTradeId: owner.kind === "trade" ? owner.id : null,
+      linkedAssetNoteId: owner.kind === "assetNote" ? owner.id : null,
+      linkedDailyJournalId: null,
+      linkedTranscriptId: null,
+    });
+  }
+  return files.length;
 }
 
 export async function saveTranscriptAction(formData: FormData) {
@@ -677,7 +690,7 @@ export async function createTradeAction(formData: FormData) {
     notes: null,
     ...numeric,
   });
-  await saveScreenshot(formData.get("screenshot"), trade.id);
+  await saveScreenshots(formData, "screenshot", { kind: "trade", id: trade.id });
   await noteUse("trade.create");
   revalidateEverything();
   redirect(withFeedback(`/trades/${trade.id}`, "Trade note saved."));
@@ -975,7 +988,7 @@ export async function saveTradeAction(formData: FormData) {
     }
   }
 
-  await saveScreenshot(formData.get("screenshot"), id);
+  await saveScreenshots(formData, "screenshot", { kind: "trade", id });
 
   // Turn the reflection into a reusable lesson with zero extra clicks.
   const lessonText = texts.lesson;
@@ -1541,6 +1554,10 @@ export async function saveAssetWorkspaceAction(formData: FormData) {
 
 export async function deleteAssetAction(formData: FormData) {
   const id = String(formData.get("id"));
+  const noteIds = new Set((await db.list("assetNotes")).filter((note) => note.assetId === id).map((note) => note.id));
+  await db.deleteWhere("screenshots", (screenshot) =>
+    Boolean(screenshot.linkedAssetNoteId) && noteIds.has(screenshot.linkedAssetNoteId!),
+  );
   await db.deleteWhere("assetNotes", (note) => note.assetId === id);
   await db.deleteWhere("assetBiasChanges", (change) => change.assetId === id);
   await db.deleteWhere("assets", (asset) => asset.id === id);
@@ -1560,6 +1577,10 @@ export async function structureAssetNoteDraftAction(rawText: string) {
 // never costs you the edits sitting next to it.
 export async function deleteAssetNoteAction(noteId: string, formData: FormData) {
   const result = await applyAssetWorkspace(formData, noteId);
+  // The note's charts go with it. Same cascade a deleted trade already does —
+  // an orphaned screenshot is invisible in the UI and still costs storage and
+  // a slot in every backup from then on.
+  await db.deleteWhere("screenshots", (screenshot) => screenshot.linkedAssetNoteId === noteId);
   await db.deleteWhere("assetNotes", (note) => note.id === noteId);
   revalidateEverything();
   redirect(withFeedback(`/assets/${result.assetId}`, "Note deleted — your other changes were saved."));

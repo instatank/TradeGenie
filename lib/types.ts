@@ -386,6 +386,10 @@ export type Screenshot = {
   linkedTradeId: string | null;
   linkedDailyJournalId: string | null;
   linkedTranscriptId: string | null;
+  /** A chart pinned to one entry in an asset's thread. Written as null rather
+   *  than left undefined — Firestore rejects undefined on write — so every
+   *  screenshot stored before asset notes could carry one reads back fine. */
+  linkedAssetNoteId?: string | null;
 };
 
 export type WeeklyReview = {

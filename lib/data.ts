@@ -12,6 +12,7 @@ import { currencyFromPositionKey } from "@/lib/coindcx-sync";
 import { toBaseCurrency, type Currency, type InBaseCurrency } from "@/lib/currency";
 import { getSettings } from "@/lib/settings-store";
 import { setupSteps } from "@/lib/setups";
+import { bucketStatsFor } from "@/lib/metrics";
 import { normalizeTag } from "@/lib/tags";
 import type {
   DailyJournal,
@@ -210,10 +211,21 @@ export async function getResurfacedLessons(limit = 3) {
 
 // Index view: every tracked asset with its note count and freshest activity first.
 export async function getAssetsIndex() {
-  const [assets, notes] = await Promise.all([listRecords("assets"), listRecords("assetNotes")]);
+  const [assets, notes, trades, settings] = await Promise.all([
+    listRecords("assets"),
+    listRecords("assetNotes"),
+    // Converted trades, not raw ones: the index shows each asset's net P&L, and
+    // two margin accounts mean raw rows are not on the same number line.
+    getTradesWithMistakes(),
+    getSettings(),
+  ]);
   return assets
     .map((asset) => {
       const assetNotes = notes.filter((note) => note.assetId === asset.id);
+      const symbol = asset.symbol.toUpperCase();
+      const closed = trades.filter(
+        (trade) => trade.status === "CLOSED" && trade.instrument.toUpperCase().includes(symbol),
+      );
       const lastNoteAt = assetNotes.reduce<Date | null>(
         (latest, note) => (!latest || note.createdAt > latest ? note.createdAt : latest),
         null,
@@ -222,27 +234,66 @@ export async function getAssetsIndex() {
       // Newest thought comes along for the ride so the index can be skimmed
       // without opening every asset.
       const lastNote = assetNotes.sort(descCreated)[0] ?? null;
-      return { ...asset, noteCount: assetNotes.length, lastActivity, lastNote };
+      return {
+        ...asset,
+        noteCount: assetNotes.length,
+        lastActivity,
+        lastNote,
+        // The gap between how much you think about a symbol and what it returns
+        // is the most useful thing this list can show, and it needs both halves
+        // on the same card to be visible at all.
+        stats: bucketStatsFor(asset.id, asset.symbol, closed),
+        baseCurrency: settings.displayCurrency,
+      };
     })
     .sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime());
 }
 
-// Full tracker workspace: the asset header, its append-only thread (newest first),
-// and any trades logged on the same symbol so the page ties back to real trades.
+/**
+ * Everything dated that belongs to one tracked asset, on one number line and
+ * in one chronological list.
+ *
+ * Trades come through getTradesWithMistakes() rather than listRecords("trades")
+ * — that is the one boundary where wallet currencies are converted to the
+ * trader's base currency, so a per-asset net P&L built from raw rows would add
+ * an INR trade to a USDT trade and be ~100x wrong. Same reason /daily was fixed.
+ */
 export async function getAssetWorkspace(id: string) {
-  const [asset, notes, trades] = await Promise.all([
+  const [asset, notes, biasChanges, trades, freeNotes, settings] = await Promise.all([
     getRecord("assets", id),
     listRecords("assetNotes"),
-    listRecords("trades"),
+    listRecords("assetBiasChanges"),
+    getTradesWithMistakes(),
+    listRecords("freeNotes"),
+    getSettings(),
   ]);
   if (!asset) return null;
   const symbol = asset.symbol.toUpperCase();
+
+  // A quick note tagged #sol belongs on the SOL page. Matched through
+  // normalizeTag — lib/tags.ts is THE tokenizer, so tapping the SOL shortcut
+  // chip, typing #sol and landing here can never disagree about the name.
+  const symbolTag = normalizeTag(asset.symbol);
+  const taggedNotes = symbolTag ? freeNotes.filter((note) => (note.tags ?? []).includes(symbolTag)) : [];
+
+  const assetTrades = trades
+    .filter((trade) => trade.instrument.toUpperCase().includes(symbol))
+    .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime());
+  const closed = assetTrades.filter((trade) => trade.status === "CLOSED");
+
   return {
     ...asset,
     notes: notes.filter((note) => note.assetId === id).sort(descCreated),
-    relatedTrades: trades
-      .filter((trade) => trade.instrument.toUpperCase().includes(symbol))
-      .sort((a, b) => b.tradeDateTime.getTime() - a.tradeDateTime.getTime()),
+    biasChanges: biasChanges.filter((change) => change.assetId === id).sort(descCreated),
+    taggedNotes: taggedNotes.sort(descCreated),
+    symbolTag,
+    relatedTrades: assetTrades,
+    // Does this symbol actually pay you? Scored with bucketStatsFor — the same
+    // maths every analytics table uses, so a number here can never disagree
+    // with the same number on /analytics.
+    stats: bucketStatsFor(asset.id, asset.symbol, closed),
+    openTradeCount: assetTrades.filter((trade) => trade.status === "OPEN").length,
+    baseCurrency: settings.displayCurrency,
   };
 }
 
