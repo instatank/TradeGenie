@@ -479,6 +479,68 @@ async function main() {
     ),
   );
 
+  // A tracked asset with a real thread, plus a free note tagged #sol. Without
+  // these, `npm run smoke` never reached /assets/<id> at all — it asks the seed
+  // for the first asset id and there wasn't one — so the whole asset workspace,
+  // the page with the most conditional rendering in the app, was outside every
+  // gate. The BTC/SOL symbols match seeded trades on purpose: that is what makes
+  // the merged timeline and the per-asset stats render something to look at.
+  if (!(await db.list("assets")).length) {
+    const now = new Date();
+    const solTracked = subDays(now, 21);
+    const sol = await db.create("assets", {
+      createdAt: solTracked,
+      updatedAt: subDays(now, 1),
+      symbol: "SOL",
+      marketType: MarketType.CRYPTO_PERP,
+      htfBias: "Range high rejected, expecting a rotation down",
+      ltfBias: "Pullback into discount, watching the reaction",
+      levels: "Support 178.4 — tracking for a hold\nIf breaks -> next target 168.0\nSFP off 194.2",
+      gamePlan: "Wait for a sweep of 178.4 and a shift on the 5m before longing. No chasing.",
+      isArchived: false,
+      tags: ["sol", "majors"],
+    });
+    const solNotes: Array<[number, string, string | null, string[]]> = [
+      [18, "Reclaimed the range mid and held it on the retest. Bias flips up if 190 goes.", "H4", ["sol"]],
+      [9, "Failed at 194 with a clean SFP. Back to watching 178.4 — that's the level that matters.", "M15", ["sol", "sfp"]],
+      [2, "Still ranging. Nothing to do here until one side breaks. #patience", "H1", ["sol", "patience"]],
+    ];
+    for (const [daysAgo, text, timeframe, tags] of solNotes) {
+      const at = subDays(now, daysAgo);
+      await db.create("assetNotes", {
+        createdAt: at,
+        updatedAt: at,
+        assetId: sol.id,
+        timeframe,
+        text,
+        tags,
+      });
+    }
+    await db.create("assets", {
+      createdAt: subDays(now, 4),
+      updatedAt: subDays(now, 4),
+      symbol: "BTC",
+      marketType: MarketType.CRYPTO_PERP,
+      htfBias: "Uptrend intact",
+      ltfBias: null,
+      levels: null,
+      gamePlan: null,
+      isArchived: false,
+      tags: ["btc"],
+    });
+
+    // Tagged #sol but written from the quick-note bar, so it lives in freeNotes
+    // and only reaches the asset page through the symbol tag.
+    await db.create("freeNotes", {
+      createdAt: subDays(now, 5),
+      updatedAt: subDays(now, 5),
+      text: "Funding on #sol has been positive all week — longs are paying to hold. Worth a look before I add.",
+      linkedTranscriptId: null,
+      category: null,
+      tags: ["sol", "funding"],
+    });
+  }
+
   console.log("Seed complete.");
 }
 
