@@ -1578,6 +1578,74 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     of candles**, and overwriting the hand-entered `maePrice`/`mfePrice` — trader input is
     never silently replaced by a derived number.
 
+- **Slippage, measured instead of assumed** (`lib/slippage.ts`, `lib/slippage-view.ts`,
+  `Trade.plannedEntryPrice`, "What your fills cost you" on `/trades/[id]`, the per-symbol table
+  on `/analytics`). The word "slippage" existed in exactly one place — `lib/calculator.ts`, as a
+  forward-looking **assumption you type in** (`slippagePct`, off by default). Nothing measured
+  what actually happened, so the one question the exchange import was best placed to answer —
+  what does this book really cost me — could not be asked.
+  - **The exchange never says what you asked for**, only where you were filled. So slippage is
+    not derivable from the sync alone: it needs a reference price, and the only reference prices
+    in this app are the ones the trader wrote down. `stopPrice` and `targetPrice` were already
+    safe (absent from `diffTrade()`, so no sync can touch them) and already sitting next to the
+    real exit VWAP. **The subtraction was the only missing part**, which is why this shipped
+    retroactively over the whole back catalogue with no new capture.
+  - **`entryPrice` was the exception, and it was being destroyed.** It IS in `diffTrade()`, so
+    accepting a match replaced whatever was typed at entry with the real fill VWAP — silently
+    deleting exactly the half needed to measure entry slippage. `plannedEntryPrice` is its own
+    field for that reason, never in the diff, never inferred, and a test asserts an accept patch
+    cannot contain it. Surfaced as **"Wanted"** on the quick log and **"Entry you wanted"** on
+    the trade page, both saying in place why there are two boxes.
+  - **The ledger's `stage` decides what is measurable, not geometry.** `tpsl_exit` has been
+    stored on every row since the importer was written and was read by nothing —
+    `exitWasAutomatic()` was called only from a test. A **manual close is refused outright**: you
+    closed where you chose to, so scoring that against your stop would report your own discretion
+    as the exchange's slippage. Geometry only splits stop from target (losing side vs winning
+    side), which a fixed stop settles by construction. Joined on `orderId`, never on `fill_id` —
+    that trap is pinned by its own test.
+  - **Five named refusals, all shown to the trader.** `NOT_CLOSED` / `NOT_LINKED` /
+    `NO_LEDGER` / `MANUAL_EXIT` / `NO_REFERENCE`. "No reading" is almost always "this exit cannot
+    be measured", and an empty box would read as a broken feature rather than as the honest
+    answer. `NO_LEDGER` is deliberately distinct from `MANUAL_EXIT`: "you closed it" and "the
+    ledger does not reach this far back" are different facts.
+  - **Share of planned risk is the headline, not basis points.** 5bps against a 15bps stop is a
+    third of the risk budget; the same 5bps against a wide stop is a rounding error. Same framing
+    the calculator already uses. On the seeded case: a LINK short targeting 20.50 covered at
+    20.60 — 48.8 bps, and **20% of what the trade was risking**.
+  - **Median, never mean, and the worst reported separately.** One gap-through on a thin book is
+    ten times a normal fill and would decide a mean on its own. **Per symbol**, because slippage
+    belongs to a *book*, not to a trader — one number spanning SOL and BTC averages two different
+    questions. Thin rows grey out at `MIN_SAMPLE` like every other table.
+  - **A reading larger than the whole planned risk is flagged `suspect`, shown, and excluded from
+    every average** — that is a moved stop, a partial take-profit folded into one VWAP, or a
+    misclassification, not a fill.
+  - **A negative reading is kept.** A resting limit take-profit can fill better than asked;
+    clamping at zero would turn a symmetric measurement into a one-sided complaint.
+  - The sign formula is `(reference - filled) * dir` on the exit and **inverted** on the entry —
+    both mean "positive is worse for you", and they differ because you are on opposite sides of
+    the trade. Commented in place, because it reads as a bug.
+  - Fixed on the way: `{sign}{value} bps` makes React emit `+<!-- -->48.8<!-- --> bps`, splitting
+    a figure across three nodes — which breaks a gate assertion (and a reader's Ctrl+F) against a
+    page that rendered perfectly. Both components format signed values as one text node.
+  - Verified against a real seeded store on the real read path before any assertion was written:
+    48.8 bps / 20% of risk / 0.12 USDT on the exit, 23.3 bps / 11% on the entry — all worked by
+    hand first. The three tests that matter were **confirmed able to fail** by inverting the exit
+    sign (3 red), dropping the bracket requirement (1 red), and swapping median for mean (1 red).
+    The seed gained the `tpsl_exit` rows and a planned entry, since without them every gate in
+    the repo saw only the refusal.
+  - **Expect few readings at first, and that is the honest outcome**: the ledger probe measured
+    12 `tpsl_exit` rows against 40 manual exits, so most historical exits are unmeasurable by
+    design. This gets useful going forward more than backward.
+  - Deliberately NOT done: **storing a reading on the `Trade`** (derived on read, like
+    excursions — a derived number must not fill a field the trader believes is theirs),
+    inferring a reference price from anything, measuring entry slippage against the candle feed
+    (1.7bps of candle width is the same order as the slippage itself, so it cannot resolve it), a
+    coach's-corner leak over slippage (worth doing once there are `MIN_SAMPLE` readings), and
+    **calling `/derivatives/futures/orders`** — allowlisted since the importer was written and
+    never called once. That is the next phase: the order's own limit/trigger price is the true
+    reference and needs nothing typed, but its shape is unknown and needs a probe round through
+    the deployed app first.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1598,7 +1666,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # eslint
 npm run build      # next build
 npm run seed       # seed sample data
-npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons, feature lifecycle, asset bias history + timeline, screenshot cascade guards
+npm run test       # unit tests — calculator, tags, search, options, store, checklist/gaps, notes filter, site-auth roles, setup grades, trade filters, table sorting, comparisons, feature lifecycle, asset bias history + timeline, screenshot cascade guards, slippage maths + refusals
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)

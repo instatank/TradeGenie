@@ -96,7 +96,15 @@ export function QuickTradeForm({
           <MiniNumber label="Stop" name="stopPrice" />
           <MiniNumber label="Exit" name="exitPrice" />
           <MiniNumber label="P&L" name="realizedPnl" />
+          {/* Separate from Entry on purpose: the exchange sync overwrites Entry
+              with the real fill, and would erase what you meant to pay. This one
+              it can never touch. */}
+          <MiniNumber label="Wanted" name="plannedEntryPrice" />
         </div>
+        <p className="mt-2 text-xs text-forge-muted">
+          <strong className="font-medium text-forge-ink">Wanted</strong> is the entry you were aiming for. Fill it in and the
+          journal can tell you what your fills are really costing you.
+        </p>
         <div className="mt-3">
           <OptionChipRadio
             label="How do you feel right now?"

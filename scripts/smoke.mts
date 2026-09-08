@@ -107,6 +107,14 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/import", "Log as archive", "the per-position archive button"],
   ["/import", "Log all", "the bulk archive control"],
   ["/trades", "Rebuilt from exchange fills", "the archive badge on a trade that was never journaled"],
+  // The slippage aggregate. It lives inside the advanced fold, so it is in the
+  // DOM regardless of the <details> being shut — what is NOT guaranteed is that
+  // any trade in the seeded world is measurable at all, which is the whole
+  // point of the check. "+48.8" is the median over the one measurable trade;
+  // the greyed row proves a single reading still refuses to sound confident.
+  ["/analytics", "Slippage on your fills", "the per-symbol slippage table"],
+  ["/analytics", "+48.8", "a real measured median rather than the empty state"],
+  ["/analytics", "more to read this", "the thin-sample badge, so one fill never reads as a verdict"],
   // Both halves of the setup grade: the badge only renders on a trade that
   // carries one, and the control only inside an expanded row's review — two
   // conditional renders `next build` never reaches.
@@ -198,6 +206,21 @@ async function dynamicContentChecks(storePath: string): Promise<[string, string,
     ["/trades/seed-trade-linked", "How it played out", "the replay panel on an exchange-linked trade"],
     ["/trades/seed-trade-linked", "No candles for LINKUSDT", "a plain reason when the candle feed is unreachable"],
   ];
+
+  // Slippage needs FOUR things to line up at once — a trade linked to a
+  // position, a bracket row in the ledger, a written-down reference price and a
+  // closed exit — so it is a conditional render four levels deep that `next
+  // build` cannot come near. The seed builds exactly that case, and the numbers
+  // asserted here are worked by hand: the LINK short's target was 20.50 and it
+  // covered at 20.60, i.e. 0.10 worse = 48.8 bps = 20% of the 0.50 it risked.
+  // A wrong sign or a mean-instead-of-median would move these.
+  const slippageChecks: [string, string, string][] = [
+    ["/trades/seed-trade-linked", "What your fills cost you", "the slippage panel on an exchange-linked trade"],
+    ["/trades/seed-trade-linked", "+48.8 bps", "the measured exit slippage, not a refusal"],
+    ["/trades/seed-trade-linked", "Share of your planned risk", "slippage expressed against risk, which is the number that matters"],
+    ["/trades/seed-trade-linked", "+23.3 bps", "entry slippage, which only renders when a planned entry was written down"],
+    ["/trades/seed-trade-linked", "Entry you wanted", "the planned-entry field a sync can never overwrite"],
+  ];
   const route = `/assets/${sol}`;
   const checks: [string, string, string][] = [
     [route, "The story so far", "the merged timeline"],
@@ -216,6 +239,7 @@ async function dynamicContentChecks(storePath: string): Promise<[string, string,
     [route, "paste", "the paste-to-attach hint on the note composer"],
     [route, 'type="file"', "the plain file input the paste control is built on"],
     ...replayChecks,
+    ...slippageChecks,
   ];
 
   // ARB's only trade is the USDT-margined archive position, so its panel is

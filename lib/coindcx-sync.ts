@@ -414,6 +414,11 @@ export type ExchangeView = {
    *  execution log behind a position without re-deriving the rates. */
   fills: Fill[];
   unattributedFunding: FundingEvent[];
+  /** The transaction ledger the fold was built from. Carried out rather than
+   *  re-read because it holds the one thing the fills do not: `stage`, which
+   *  says whether an exit was the exchange's own bracket firing or the trader
+   *  clicking close. lib/slippage.ts cannot tell those apart without it. */
+  ledger: CoindcxTransaction[];
   /** Positions opened before the ledger begins, so their funding is missing
    *  and their net P&L understates the true cost. Named, never hidden. */
   positionsMissingFunding: ReconstructedPosition[];
@@ -494,6 +499,7 @@ export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[]): Ex
     positions,
     fills,
     unattributedFunding,
+    ledger,
     positionsMissingFunding,
     ledgerFrom: ledgerSpan.from,
   };

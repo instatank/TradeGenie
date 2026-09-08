@@ -362,6 +362,10 @@ export function archiveTradeRecord(
     // Not in the diff and not knowable from fills: a stop and a target are
     // plan, not execution, and leverage is a margin setting the fills don't
     // report. Left null rather than back-solved from anything.
+    // Nothing was planned, so there is no planned entry either. Back-filling
+    // it from the fill VWAP would make every archived trade read as a perfect
+    // entry with zero slippage, which is a fabrication that flatters.
+    plannedEntryPrice: null,
     stopPrice: null,
     targetPrice: null,
     maePrice: null,

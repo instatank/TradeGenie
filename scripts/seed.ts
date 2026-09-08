@@ -446,6 +446,25 @@ async function main() {
   await seedFill("seed-fill-9", "LINK", "USDT", "BUY", 0.4, 20.6, 0.004, linkedClosed);
   await seedFill("seed-fill-10", "LINK", "USDT", "BUY", 0.4, 20.6, 0.004, linkedClosed);
   await seedFill("seed-fill-11", "LINK", "USDT", "BUY", 0.4, 20.6, 0.004, linkedClosed);
+  // The bracket rows behind that exit. Without a `tpsl_exit` in the ledger,
+  // lib/slippage.ts cannot tell the exchange's own stop/target from the trader
+  // clicking close, and refuses to measure — so before these existed, "What
+  // your fills cost you" rendered its refusal in every gate and its real output
+  // in none of them. Joined on orderId, which is the true link between a ledger
+  // row and a fill (a transaction's own fill_id is NOT the trades endpoint's).
+  //
+  // The numbers are chosen so the reading is worth asserting: target 20.50,
+  // covered at 20.60 on a short, i.e. 0.10 worse = 48.8 bps = 20% of the 0.50
+  // this trade was risking.
+  for (const [index, fillId] of ["seed-fill-9", "seed-fill-10", "seed-fill-11"].entries()) {
+    await db.create("exchangeLedger", {
+      id: `seed-tpsl-${index + 1}`, createdAt: exchangeNow, source: "coindcx",
+      instrument: "LINK", currency: "USDT", stage: "tpsl_exit", kind: "EXIT",
+      amount: 0.32, fee: 0.004, positionId: "seed-position-link", orderId: `order-${fillId}`,
+      rateInr: 99.88, rateUsdt: 1,
+      occurredAt: linkedClosed,
+    });
+  }
   await db.create("trades", {
     id: "seed-trade-linked",
     createdAt: linkedOpened,
@@ -463,6 +482,10 @@ async function main() {
     entryGrade: "A", setupGrade: null, exitReason: "Target hit",
     followedPlan: "YES", lesson: null, notes: null,
     entryPrice: 21.4, stopPrice: 21.9, targetPrice: 20.5, exitPrice: 20.6,
+    // The price this short was aiming to open at, against the 21.40 it got:
+    // 5 bps of entry slippage, 11% of the planned risk. The only seeded trade
+    // carrying one, so the entry half of the panel has something to render.
+    plannedEntryPrice: 21.45,
     maePrice: null, mfePrice: null,
     quantity: 1.2, totalOrderValue: null, leverage: 5,
     realizedPnl: 0.96, fees: 0.024, funding: 0, netPnl: 0.936,

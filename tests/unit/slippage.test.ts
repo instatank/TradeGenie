@@ -1,0 +1,291 @@
+// What you asked for against what you got.
+//
+// Every number asserted here is worked by hand in the test, not read off the
+// implementation — the failure mode of a slippage feature is not a crash, it is
+// a plausible-looking figure, and a test that only pins whatever the code
+// produced would ratify the bug.
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import {
+  bracketClosed,
+  calculateEntrySlippage,
+  calculateSlippage,
+  closingFills,
+  slippageByInstrument,
+  summarizeSlippage,
+  type SlippageReading,
+} from "@/lib/slippage";
+import { reconstructPositions, type Fill } from "@/lib/positions";
+import type { CoindcxTransaction } from "@/lib/coindcx";
+import type { Trade } from "@/lib/types";
+
+const T0 = new Date("2026-03-01T10:00:00Z");
+const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
+
+function fill(overrides: Partial<Fill> & Pick<Fill, "id" | "side" | "price">): Fill {
+  return {
+    instrument: "SOL",
+    currency: "USDT",
+    quoteCurrency: "USDT",
+    quantity: 10,
+    fee: 0,
+    timestamp: T0,
+    orderId: "order-open",
+    ...overrides,
+  } as Fill;
+}
+
+function ledgerRow(overrides: Partial<CoindcxTransaction>): CoindcxTransaction {
+  return {
+    id: "tx-1",
+    instrument: "SOL",
+    currency: "USDT",
+    stage: "tpsl_exit",
+    kind: "EXIT",
+    amount: -100,
+    fee: 0,
+    positionId: "pos-1",
+    orderId: "order-exit",
+    rate: { inr: null, usdt: 1 },
+    timestamp: at(30),
+    ...overrides,
+  };
+}
+
+/** A long that opened at 100 and was closed by its bracket at `exitPrice`. */
+function longStoppedAt(exitPrice: number, stage = "tpsl_exit") {
+  const fills = [
+    fill({ id: "f1", side: "BUY", price: 100, timestamp: T0, orderId: "order-open" }),
+    fill({ id: "f2", side: "SELL", price: exitPrice, timestamp: at(30), orderId: "order-exit" }),
+  ];
+  const { positions } = reconstructPositions(fills);
+  return { position: positions[0], fills, ledger: [ledgerRow({ stage })] };
+}
+
+const LONG: Pick<Trade, "direction" | "entryPrice" | "stopPrice" | "targetPrice"> = {
+  direction: "LONG" as Trade["direction"],
+  entryPrice: 100,
+  stopPrice: 99.85,
+  targetPrice: 100.3,
+};
+
+describe("stop slippage", () => {
+  it("measures a long stopped out below its stop, and calls it worse for you", () => {
+    // Stop 99.85, filled 99.80. You lost 0.05 more per unit than you planned.
+    const { position, fills, ledger } = longStoppedAt(99.8);
+    const result = calculateSlippage(LONG, position, fills, ledger);
+    assert.ok(result.ok, "should produce a reading");
+
+    assert.equal(result.leg, "STOP");
+    assert.equal(result.reference, 99.85);
+    assert.ok(Math.abs(result.filled - 99.8) < 1e-9);
+    // Positive means worse. 99.85 - 99.80 = 0.05.
+    assert.ok(Math.abs(result.priceDelta - 0.05) < 1e-9, `priceDelta ${result.priceDelta}`);
+    // 0.05 / 99.85 = 0.0500751% = 5.008 bps.
+    assert.ok(Math.abs(result.bps - 5.0075) < 0.01, `bps ${result.bps}`);
+    // THE number: planned risk was 100 - 99.85 = 0.15, so 0.05 of slip is a
+    // third of the whole risk budget.
+    assert.ok(Math.abs(result.riskFraction! - 1 / 3) < 1e-6, `riskFraction ${result.riskFraction}`);
+    // 10 units closed x 0.05 = 0.50 USDT.
+    assert.ok(Math.abs(result.cost! - 0.5) < 1e-9);
+    assert.equal(result.quoteCurrency, "USDT");
+    assert.equal(result.suspect, false);
+  });
+
+  it("uses the same sign for a short, so worse is worse on both sides", () => {
+    // Short from 100 with the stop above at 100.15, filled at 100.20.
+    const fills = [
+      fill({ id: "s1", side: "SELL", price: 100, timestamp: T0, orderId: "order-open" }),
+      fill({ id: "s2", side: "BUY", price: 100.2, timestamp: at(30), orderId: "order-exit" }),
+    ];
+    const { positions } = reconstructPositions(fills);
+    const short = { direction: "SHORT" as Trade["direction"], entryPrice: 100, stopPrice: 100.15, targetPrice: 99.7 };
+
+    const result = calculateSlippage(short, positions[0], fills, [ledgerRow({})]);
+    assert.ok(result.ok);
+    assert.equal(result.leg, "STOP");
+    assert.ok(Math.abs(result.priceDelta - 0.05) < 1e-9, "a short filled above its stop is also +0.05 worse");
+    assert.ok(Math.abs(result.riskFraction! - 1 / 3) < 1e-6);
+  });
+
+  it("keeps a better-than-asked fill negative rather than clamping it at zero", () => {
+    // A resting limit can fill BETTER. Reporting that as zero would make the
+    // whole measurement one-sided.
+    const { position, fills, ledger } = longStoppedAt(100.35);
+    const result = calculateSlippage({ ...LONG }, position, fills, ledger);
+    assert.ok(result.ok);
+    assert.equal(result.leg, "TARGET", "above entry means the target fired, not the stop");
+    // Target 100.30, filled 100.35 — 0.05 better than asked.
+    assert.ok(Math.abs(result.priceDelta + 0.05) < 1e-9, `priceDelta ${result.priceDelta}`);
+    assert.ok(result.bps < 0, "better than asked must read negative");
+  });
+});
+
+describe("what is refused, and why", () => {
+  it("refuses a manual close — your own judgement is not the exchange's slippage", () => {
+    const { position, fills, ledger } = longStoppedAt(99.8, "default");
+    const result = calculateSlippage(LONG, position, fills, ledger);
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, "MANUAL_EXIT");
+  });
+
+  it("refuses when the ledger has no row for the exit at all", () => {
+    const { position, fills } = longStoppedAt(99.8);
+    const result = calculateSlippage(LONG, position, fills, []);
+    assert.equal(result.ok, false);
+    // Distinct from MANUAL_EXIT on purpose: "we know you closed it" and "we
+    // cannot see this far back" are different facts about the same trade.
+    assert.equal(result.ok === false && result.reason, "NO_LEDGER");
+  });
+
+  it("refuses to invent a stop that was never written down", () => {
+    const { position, fills, ledger } = longStoppedAt(99.8);
+    const result = calculateSlippage({ ...LONG, stopPrice: null }, position, fills, ledger);
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, "NO_REFERENCE");
+  });
+
+  it("refuses an open position", () => {
+    const fills = [fill({ id: "o1", side: "BUY", price: 100 })];
+    const { positions } = reconstructPositions(fills);
+    const result = calculateSlippage(LONG, positions[0], fills, [ledgerRow({})]);
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, "NOT_CLOSED");
+  });
+
+  it("flags a fill a whole R away from the stop as suspect rather than reporting it", () => {
+    // Stop 99.85 on 0.15 of planned risk, filled at 99.50 — that is 2.3R of
+    // "slippage", which is a moved stop or a misclassification, not a fill.
+    const { position, fills, ledger } = longStoppedAt(99.5);
+    const result = calculateSlippage(LONG, position, fills, ledger);
+    assert.ok(result.ok);
+    assert.equal(result.suspect, true);
+    assert.equal(summarizeSlippage([result]).count, 0, "a suspect reading must not reach the summary");
+    assert.equal(summarizeSlippage([result]).suspectCount, 1, "but it must be counted, not vanish");
+  });
+});
+
+describe("the exit fills it measures", () => {
+  it("takes the volume-weighted price across every closing leg, not the first", () => {
+    // A stop that walked the book: 5 at 99.82, 15 at 99.78. VWAP = 99.79.
+    const fills = [
+      fill({ id: "f1", side: "BUY", price: 100, quantity: 20, timestamp: T0 }),
+      fill({ id: "f2", side: "SELL", price: 99.82, quantity: 5, timestamp: at(30), orderId: "order-exit" }),
+      fill({ id: "f3", side: "SELL", price: 99.78, quantity: 15, timestamp: at(30), orderId: "order-exit" }),
+    ];
+    const { positions } = reconstructPositions(fills);
+    const result = calculateSlippage(LONG, positions[0], fills, [ledgerRow({})]);
+    assert.ok(result.ok);
+    assert.ok(Math.abs(result.filled - 99.79) < 1e-9, `vwap ${result.filled}`);
+    assert.equal(result.legs, 2);
+    // The queue is visible: 0.04 of spread on a 99.85 reference.
+    assert.ok(Math.abs(result.spreadFraction - 0.04 / 99.85) < 1e-9);
+  });
+
+  it("counts only the fills on the closing side", () => {
+    const fills = [
+      fill({ id: "f1", side: "BUY", price: 100, timestamp: T0 }),
+      fill({ id: "f2", side: "BUY", price: 100.1, timestamp: at(1) }),
+      fill({ id: "f3", side: "SELL", price: 99.8, quantity: 20, timestamp: at(30), orderId: "order-exit" }),
+    ];
+    const { positions } = reconstructPositions(fills);
+    assert.deepEqual(closingFills(positions[0], fills).map((f) => f.id), ["f3"]);
+  });
+});
+
+describe("bracketClosed", () => {
+  it("joins on orderId, never on the transaction's own id", () => {
+    // The trap pinned in lib/coindcx.ts: a transaction's fill_id is ITS id, so
+    // joining the endpoints on fill_id matches nothing. This asserts the join
+    // survives a ledger row whose id collides with a fill's.
+    const exit = [fill({ id: "f9", side: "SELL", price: 99.8, orderId: "order-exit" })];
+    const row = ledgerRow({ id: "f9", orderId: "order-exit" });
+    assert.equal(bracketClosed(exit, [row]), true);
+    assert.equal(bracketClosed(exit, [ledgerRow({ id: "f9", orderId: "someone-elses-order" })]), null);
+  });
+
+  it("returns null, not false, when nothing in the ledger covers these orders", () => {
+    const exit = [fill({ id: "f9", side: "SELL", price: 99.8, orderId: "order-exit" })];
+    assert.equal(bracketClosed(exit, []), null);
+    assert.equal(bracketClosed([fill({ id: "f9", side: "SELL", price: 1, orderId: null })], [ledgerRow({})]), null);
+  });
+});
+
+describe("entry slippage", () => {
+  it("is inverted relative to the exit, because you are on the other side", () => {
+    // Wanted in at 100, actually filled at 100.05: you paid 0.05 more.
+    const fills = [
+      fill({ id: "f1", side: "BUY", price: 100.05, timestamp: T0 }),
+      fill({ id: "f2", side: "SELL", price: 99.8, timestamp: at(30), orderId: "order-exit" }),
+    ];
+    const { positions } = reconstructPositions(fills);
+    const result = calculateEntrySlippage({ direction: "LONG" as Trade["direction"], plannedEntryPrice: 100, stopPrice: 99.85 }, positions[0]);
+    assert.ok(result.ok);
+    assert.ok(Math.abs(result.priceDelta - 0.05) < 1e-9, `priceDelta ${result.priceDelta}`);
+    // Risk is measured off the price you WANTED (100 - 99.85 = 0.15), because
+    // slipping in is precisely what silently widens the real risk.
+    assert.ok(Math.abs(result.riskFraction! - 1 / 3) < 1e-6);
+  });
+
+  it("says nothing at all when no intended entry was written down", () => {
+    const { position } = longStoppedAt(99.8);
+    const result = calculateEntrySlippage({ direction: "LONG" as Trade["direction"], plannedEntryPrice: null, stopPrice: 99.85 }, position);
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, "NO_REFERENCE");
+  });
+});
+
+describe("summarising", () => {
+  const reading = (bps: number, suspect = false): SlippageReading => ({
+    ok: true,
+    leg: "STOP",
+    reference: 100,
+    filled: 100,
+    priceDelta: 0,
+    fraction: bps / 10_000,
+    bps,
+    riskFraction: bps / 100,
+    cost: null,
+    quoteCurrency: "USDT",
+    legs: 1,
+    spreadFraction: 0,
+    suspect,
+  });
+
+  it("reports the median, so one gap-through cannot decide what normal is", () => {
+    // Four ordinary fills and one disaster. The mean is 24.4bps — a number that
+    // describes none of these trades. The median is 4.
+    const summary = summarizeSlippage([reading(2), reading(3), reading(4), reading(5), reading(108)]);
+    assert.equal(summary.medianBps, 4);
+    assert.equal(summary.worstBps, 108, "the tail is reported separately, never averaged away");
+    assert.equal(summary.count, 5);
+  });
+
+  it("takes the most positive as worst, not the largest magnitude", () => {
+    // -40bps is the BEST fill here. Sorting by magnitude would print it as the
+    // worst, which is exactly backwards.
+    assert.equal(summarizeSlippage([reading(-40), reading(6)]).worstBps, 6);
+    assert.equal(summarizeSlippage([reading(-40), reading(6)]).betterThanAsked, 1);
+  });
+
+  it("gives every symbol its own number, because depth is a property of a book", () => {
+    const groups = slippageByInstrument([
+      { instrument: "SOL", reading: reading(9) },
+      { instrument: "SOL", reading: reading(11) },
+      { instrument: "BTC", reading: reading(1) },
+    ]);
+    assert.deepEqual(groups.map((group) => group.label), ["SOL", "BTC"], "worst median first");
+    assert.equal(groups[0].medianBps, 10);
+    assert.equal(groups[1].medianBps, 1);
+  });
+
+  it("returns nulls rather than zeros when there is nothing to summarise", () => {
+    // A zero here would read as "no slippage", which is a claim. Null is "we
+    // did not measure any", which is the truth.
+    const empty = summarizeSlippage([]);
+    assert.equal(empty.medianBps, null);
+    assert.equal(empty.worstBps, null);
+    assert.equal(empty.count, 0);
+  });
+});

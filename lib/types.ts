@@ -175,6 +175,20 @@ export type Trade = {
   lesson: string | null;
   notes: string | null;
   entryPrice: number | null;
+  /**
+   * The price you MEANT to get in at, typed at entry.
+   *
+   * Separate from `entryPrice` because that one belongs to the exchange: it is
+   * in diffTrade(), so accepting a sync overwrites it with the real fill VWAP.
+   * Before this field existed, a trader typing their intended entry watched it
+   * be silently replaced the first time the trade reconciled — which made entry
+   * slippage unmeasurable by destroying exactly the half needed to measure it.
+   *
+   * Absent on every trade logged before this existed, and null whenever it was
+   * left blank, which is normal: a market entry often has no price in mind.
+   * Never written by a sync, never inferred, never back-solved.
+   */
+  plannedEntryPrice?: number | null;
   stopPrice: number | null;
   targetPrice: number | null;
   exitPrice: number | null;

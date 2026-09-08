@@ -11,6 +11,7 @@ import { ScreenshotField } from "@/components/ScreenshotField";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
 import { TradeReplayPanel, TradeReplayPanelSkeleton } from "@/components/TradeReplayPanel";
+import { SlippagePanel, SlippagePanelSkeleton } from "@/components/SlippagePanel";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { directions, humanize, isPrimaryMistakeTag, marketTypes } from "@/lib/constants";
@@ -229,6 +230,11 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           <p className="text-xs text-forge-muted">Exit price and realized P&L live in the review panel above.</p>
           <div className="grid gap-4 sm:grid-cols-4">
             <TextField label="Entry price" name="entryPrice" type="number" step="0.01" defaultValue={trade.entryPrice} />
+            {/* Its own field, and it has to be: `entryPrice` is in diffTrade(),
+                so accepting an exchange match replaces it with the real fill
+                VWAP. This one is absent from the diff and therefore untouchable
+                by any sync — which is the only way the two can be subtracted. */}
+            <TextField label="Entry you wanted" name="plannedEntryPrice" type="number" step="0.01" defaultValue={trade.plannedEntryPrice} />
             <TextField label="Stop price" name="stopPrice" type="number" step="0.01" defaultValue={trade.stopPrice} />
             <TextField label="Target price" name="targetPrice" type="number" step="0.01" defaultValue={trade.targetPrice} />
             <TextField label="Best price reached (MFE)" name="mfePrice" type="number" step="0.01" defaultValue={trade.mfePrice} />
@@ -243,6 +249,12 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
               MAE and MFE are computed from the candles in <strong className="font-medium text-forge-ink">How it played out</strong>,
               below — these two boxes stay empty unless you type in them, and exist to override that reading.
               Filling MFE in also switches on the exit-efficiency figure underneath.
+            </p>
+            <p className="sm:col-span-2 text-xs text-forge-muted">
+              <strong className="font-medium text-forge-ink">Entry price</strong> is overwritten with your real fill when this
+              trade reconciles against the exchange. <strong className="font-medium text-forge-ink">Entry you wanted</strong>{" "}
+              never is — it is the only place your intended price survives, and the difference between the two is your entry
+              slippage.
             </p>
             <TextField label="Quantity / size" name="quantity" type="number" step="any" defaultValue={trade.quantity} />
             <TextField label="Total order value" name="totalOrderValue" type="number" step="0.01" defaultValue={trade.totalOrderValue} />
@@ -303,6 +315,15 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
       <div className="mt-5">
         <Suspense fallback={<TradeReplayPanelSkeleton />}>
           <TradeReplayPanel trade={trade} />
+        </Suspense>
+      </div>
+
+      {/* Also outside the form, and its own boundary: it folds the whole fill
+          history to find this trade's position, which the trade itself must
+          never wait on. */}
+      <div className="mt-5">
+        <Suspense fallback={<SlippagePanelSkeleton />}>
+          <SlippagePanel trade={trade} />
         </Suspense>
       </div>
 

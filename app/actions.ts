@@ -716,6 +716,9 @@ export async function quickLogTradeAction(formData: FormData) {
   const stopPrice = toNumber(formData.get("stopPrice"));
   const exitPrice = toNumber(formData.get("exitPrice"));
   const realizedPnl = toNumber(formData.get("realizedPnl"));
+  // What you MEANT to get in at. Kept apart from entryPrice, which the sync
+  // owns and overwrites — see the field's note in lib/types.ts.
+  const plannedEntryPrice = toNumber(formData.get("plannedEntryPrice"));
   const trade = await db.create("trades", {
     createdAt: now,
     updatedAt: now,
@@ -743,6 +746,7 @@ export async function quickLogTradeAction(formData: FormData) {
     lesson: null,
     notes: null,
     entryPrice,
+    plannedEntryPrice,
     stopPrice,
     targetPrice: null,
     exitPrice,
@@ -834,6 +838,7 @@ export async function startTradeFromSetupAction(formData: FormData) {
     lesson: null,
     notes: null,
     entryPrice,
+    plannedEntryPrice: toNumber(formData.get("plannedEntryPrice")),
     stopPrice,
     targetPrice: toNumber(formData.get("targetPrice")),
     exitPrice: null,
@@ -946,6 +951,7 @@ export async function saveTradeAction(formData: FormData) {
       ? optionalEnum(FollowedPlan, formData.get("followedPlan")) ?? trade.followedPlan
       : trade.followedPlan,
     entryPrice,
+    plannedEntryPrice: num("plannedEntryPrice", trade.plannedEntryPrice),
     stopPrice,
     targetPrice: num("targetPrice", trade.targetPrice),
     exitPrice,
@@ -1422,6 +1428,7 @@ function objectiveNumbers(formData: FormData) {
   });
   return {
     entryPrice,
+    plannedEntryPrice: toNumber(formData.get("plannedEntryPrice")),
     stopPrice,
     targetPrice: toNumber(formData.get("targetPrice")),
     exitPrice,
@@ -1713,6 +1720,11 @@ async function createTradeFromEntry(
     // duration, market read. Lands in the trade's own "Free-form notes".
     notes: entry.notes,
     entryPrice: entry.entryPrice,
+    // Deliberately null. A spoken "I got in at 104.80" is a report of a FILL,
+    // not a plan — and the same line already drawn for tags, note categories
+    // and setup grades holds here: a trader-owned field is never populated from
+    // model output. Type it in on the trade page if the entry was planned.
+    plannedEntryPrice: null,
     stopPrice: entry.stopPrice,
     targetPrice: entry.targetPrice,
     exitPrice: null,

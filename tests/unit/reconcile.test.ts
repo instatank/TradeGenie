@@ -202,6 +202,17 @@ describe("acceptPatch", () => {
     assert.equal(patch.status, "CLOSED");
   });
 
+  it("cannot touch the entry price you MEANT to get, which is the whole point of the field", () => {
+    // entryPrice is in the diff, so a sync replaces it with the real fill VWAP.
+    // plannedEntryPrice is not, so it survives — and without that asymmetry the
+    // two halves of entry slippage become the same number and it is
+    // unmeasurable. This is the guard that keeps them apart.
+    const match = { position: position(), trade: { ...trade(), plannedEntryPrice: 2480 }, minutesApart: 5, confirmed: false };
+    const patch = acceptPatch(match, "k");
+    assert.equal("plannedEntryPrice" in patch, false, "a sync must never write the planned entry");
+    assert.equal(patch.entryPrice, 2484, "but it does own the real one");
+  });
+
   it("carries nothing the diff did not list", () => {
     const match = { position: position(), trade: trade(), minutesApart: 5, confirmed: false };
     // The allowed set is diffTrade's own fields plus the NAMED provenance
@@ -345,6 +356,11 @@ describe("archiveTradeRecord", () => {
     assert.equal(changedFields(diffTrade(archived, source)).length, 0);
   });
 
+  it("leaves the planned entry empty, because nothing was planned", () => {
+    const record = archiveTradeRecord(position(), "k", { marketType: "CRYPTO_PERP", now: new Date() });
+    assert.equal(record.plannedEntryPrice, null);
+  });
+
   it("touches no field outside the three named lists", () => {
     // The same containment guarantee acceptPatch has, extended to the create
     // path: if a field appears here that is in none of the lists, either it is
@@ -357,6 +373,10 @@ describe("archiveTradeRecord", () => {
       ...SUBJECTIVE_FIELDS,
       // The record's own bookkeeping, plus the fields explicitly nulled above.
       "createdAt", "updatedAt", "marketType", "entryGrade",
+      // plannedEntryPrice sits with stopPrice and targetPrice: all three are
+      // PLAN, and an archived position had none. Back-filling it from the fill
+      // would make every archived trade read as a perfect entry.
+      "plannedEntryPrice",
       "stopPrice", "targetPrice", "maePrice", "mfePrice", "totalOrderValue", "leverage", "rMultiple", "marketContext",
     ]);
     const record = archiveTradeRecord(position(), "k", { marketType: "CRYPTO_PERP", now: new Date() });

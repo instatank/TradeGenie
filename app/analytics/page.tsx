@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { format, startOfMonth, startOfYear, subDays } from "date-fns";
+import { SlippageTable, SlippageTableSkeleton } from "@/components/SlippageTable";
 import { BinColumns, DisciplineLines, DivergingColumns, EmptyChart, Meter, MoneyBars } from "@/components/Charts";
 import { PageTitle } from "@/components/Fields";
 import {
@@ -566,6 +568,11 @@ export default async function AnalyticsPage({
                 resolveSort={tableSort}
                 sortHref={tableSortHref}
               />
+              {/* Its own boundary: it folds the whole exchange fill history, and
+                  every table above it must render without waiting on that. */}
+              <Suspense fallback={<SlippageTableSkeleton />}>
+                <SlippageTable trades={trades} />
+              </Suspense>
               {checklist.length ? (
                 <BucketTable
                   title="Model followed, or not"
