@@ -1496,6 +1496,75 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     itch), and backfilling bias history for edits made before this existed —
     there is nothing to backfill it from.
 
+- **Trade replay + excursions — the path between entry and exit** (`lib/candles.ts`,
+  `lib/excursion.ts`, `lib/trade-replay.ts`, `lib/replay-shape.ts`, the "How it played out"
+  panel on `/trades/[id]`). The journal knew where you got in and out and nothing about what
+  happened in between — so it could say a trade lost money and not whether the stop was too
+  tight, how much heat you took before it worked, or where price went after you bailed.
+  - **The feed was proven before anything was built on it.** `/api/candle-probe` takes real
+    stored positions, fetches the candles covering their fills and checks each fill lands
+    inside its own minute. Measured on the real account: **36/36 fills across 5 positions and
+    4 symbols**, and the tightest candle a fill passed was **0.017% wide** — a $13.60 window on
+    an $79,800 BTC candle. That is near-tick agreement, not "inside a loose range", and it is
+    why excursions computed from Binance data are trustworthy for a CoinDCX book.
+  - **Candles are NOT journal data** — the one genuinely disposable thing in this app. ~70
+    bytes each; 500 trades of 1m context would be ~15MB against a journal that is single-digit
+    MB and gets committed whole to a git repo weekly. So they never reach `buildSnapshot()`, a
+    `Trade`, or a backup. Fetch on view, cache only if it drags, treat any cache as throwaway.
+  - **Never load-bearing**, and rendered in its own `<Suspense>` like `/settings`' "Where this
+    runs". Every failure path returns a reason string the panel prints; `npm run smoke` asserts
+    the panel still renders with **no provider reachable at all**, which is the case CI is in.
+  - **Three rules `lib/excursion.ts` will not break**, because the dangerous output here is not
+    a crash but a plausible number. (1) Incomplete candles produce null — an MAE over a
+    half-covered window understates the heat and says a stop was comfortable when it was nearly
+    hit. (2) A 1m candle has no intra-minute path, so entry and exit candles are included whole
+    and excursions **err wide, never narrow**. (3) A disagreement is reported, not resolved: the
+    feed is a proxy and the deeper book wicks less, so `NOT_REACHED` on a trade that closed at
+    its stop is the *finding* — either the venue wicked where this feed didn't, or the stop
+    moved.
+  - **A closed trade with no exit time refuses to report heat.** `Trade` stores
+    `tradeDateTime` at the entry and nothing at the exit, so only exchange-linked trades know
+    when they ended. Handed no exit, the maths runs to the last candle — right for an open
+    position, and for a closed one it reports risk from hours after the trader had left.
+  - **One definition, three times over.** The aftermath window (`driftWindowMinutes`) is shared
+    by the excursion and the fetch that must cover it, or "after you left (3h)" gets computed
+    over 45 minutes. The chart's trailing window and the fetch's lead-in are the same number
+    (`lib/replay-shape.ts`) or the replay opens three-quarters empty. That file **imports
+    nothing on purpose**: sharing the constant from `lib/trade-replay.ts` pulls store →
+    firebase-admin → `node:fs` into the browser bundle and fails the build.
+  - **Fills are folded to one mark per minute + side.** The real account has a position with 23
+    fills, 22 of them one instant at one price — one order against 22 counterparties. Uniform
+    prices are returned verbatim rather than VWAP'd, because summing 22 copies of 87.6 and
+    dividing introduces float noise the input never had (the house rule is about not discarding
+    precision, not about manufacturing it).
+  - **The fifth client-JS control** (after `TagPicker`, the calculator, `QuickNoteBar` and
+    `ScreenshotField`): lightweight-charts v5, imported *inside* the effect so it never
+    evaluates during SSR and never enters the shared bundle. Measured: `/trades/[id]` 6.31 →
+    8.61 kB, **First Load JS shared by all unchanged at 102 kB**. Note v5 removed
+    `addCandlestickSeries()` and moved markers to `createSeriesMarkers` — both survive in the
+    package's own stale doc comments, which is how you write code that fails at runtime with a
+    green typecheck. The chart's locale is **pinned to `en-IN`**, not inherited: a viewer whose
+    locale is `en_US@posix` makes the library throw on every frame.
+  - **It lives OUTSIDE the page's `<form>`.** The trade page is one form with one Save; a
+    `<button>` defaults to submit, so inside it, pressing Play would save the trade. A
+    verification check asserts scrubbing doesn't submit.
+  - **`npm run verify:replay`** drives headless Chromium against the built app over a candle
+    fixture whose extremes are known by construction, so all 17 checks assert values computed
+    by hand — 0.70R heat, 2.10R offered, a stop missed by 0.68%, +0.80R left behind — rather
+    than whatever the code produced. `TRADEGENIE_CANDLE_FIXTURE` makes it work with no egress,
+    mirroring `TRADEGENIE_LOCAL_STORE`; unset, not a line of it runs. It found all three of the
+    bugs above, plus the locale crash. The seed gained an exchange-linked trade with a stop and
+    a three-leg exit, because every other seeded trade is hand-logged and the real path had no
+    gate over it at all.
+  - Deliberately NOT done: **practice mode** (TradingView's Bar Replay already does it and does
+    it better — the owner has it; the only version worth building here would replay your own
+    tagged setups blind, which is a much bigger build for a marginal gain), **storing
+    excursions on the trade or backfilling the ~89 archived positions** (that writes derived
+    numbers into a year of records and lets the coach draw conclusions from them — worth doing
+    once these numbers have been read on trades the trader actually remembers), any **caching
+    of candles**, and overwriting the hand-entered `maePrice`/`mfePrice` — trader input is
+    never silently replaced by a derived number.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
@@ -1520,6 +1589,9 @@ npm run test       # unit tests — calculator, tags, search, options, store, ch
 npm run smoke      # after a build: every route renders 200, and the conditional
                    #   exchange panels actually render (a 200 alone would hide a
                    #   crash in a card that only appears when there is data)
+npm run verify:replay  # headless Chromium over a candle fixture: are the excursion
+                   #   numbers RIGHT, does Play advance, does scrubbing avoid
+                   #   submitting the page's form? Needs a build first.
 npm run check:cron # can EVERY cron in vercel.json get past the site password,
                    #   and is each refused to a wrong token and to a viewer?
 npm run eval:capture   # score capture extraction against tests/fixtures/capture
