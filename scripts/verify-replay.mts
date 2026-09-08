@@ -117,7 +117,7 @@ async function main() {
 
     // --- the exchange-linked trade: the full path -------------------------
     await page.goto(`${BASE}/trades/${linked.id}`, { waitUntil: "networkidle" });
-    await page.waitForSelector("text=How it played out", { timeout: 15000 });
+    await page.getByRole("heading", { name: "How it played out" }).waitFor({ timeout: 15000 });
     const body = await page.locator("body").innerText();
 
     check(body.includes("How it played out"), "the panel renders at all");
@@ -143,10 +143,39 @@ async function main() {
     const cursorAfter = await page.locator("input[type=range]").inputValue();
     check(Number(cursorAfter) > Number(cursorBefore), "pressing Play advances the replay", `${cursorBefore} → ${cursorAfter}`);
 
+    // 1× must mean ONE CANDLE PER SECOND. The first cut ran ~4-5 a second and
+    // the scale had no slow end, which is what the owner hit. A rate is a claim
+    // about behaviour over time, so it gets timed rather than asserted.
     await page.getByRole("button", { name: /Pause/ }).click();
-    await page.waitForTimeout(400);
+    await page.getByRole("button", { name: /^1×$/ }).click();
+    const rateStart = Number(await page.locator("input[type=range]").inputValue());
+    const clockStart = Date.now();
+    await page.getByRole("button", { name: /^Play$/ }).click();
+    await page.waitForTimeout(4000);
+    await page.getByRole("button", { name: /Pause/ }).click();
+    const advanced = Number(await page.locator("input[type=range]").inputValue()) - rateStart;
+    const seconds = (Date.now() - clockStart) / 1000;
+    const rate = advanced / seconds;
+    // Generous band: setInterval drifts and a headless page is not a metronome.
+    check(rate > 0.6 && rate < 1.6, `1× runs at about one candle per second`, `measured ${rate.toFixed(2)}/s over ${seconds.toFixed(1)}s`);
+
+    // And the slow end actually exists and is slower.
+    await page.getByRole("button", { name: /^0\.25×$/ }).click();
+    const slowStart = Number(await page.locator("input[type=range]").inputValue());
+    const slowClock = Date.now();
+    await page.getByRole("button", { name: /^Play$/ }).click();
+    await page.waitForTimeout(4000);
+    await page.getByRole("button", { name: /Pause/ }).click();
+    const slowRate = (Number(await page.locator("input[type=range]").inputValue()) - slowStart) / ((Date.now() - slowClock) / 1000);
+    check(slowRate < rate * 0.6, "0.25× is genuinely slower than 1×", `${slowRate.toFixed(2)}/s vs ${rate.toFixed(2)}/s`);
+
+    await page.getByRole("button", { name: /^4×$/ }).click();
+    await page.getByRole("button", { name: /^Play$/ }).click();
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /Pause/ }).click();
+    await page.waitForTimeout(300);
     const paused = await page.locator("input[type=range]").inputValue();
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(900);
     check((await page.locator("input[type=range]").inputValue()) === paused, "Pause actually stops it");
 
     // Scrubbing must not submit the page's form — the trade page is one big
@@ -158,14 +187,20 @@ async function main() {
     check(page.url() === urlBefore, "scrubbing does not navigate or submit the trade form");
     check((await page.locator("input[type=range]").inputValue()) === "40", "scrubbing moves the cursor");
 
-    await page.getByRole("button", { name: /4×/ }).click();
-    check((await page.getByRole("button", { name: /4×/ }).getAttribute("aria-pressed")) === "true", "speed selection sticks");
+    await page.getByRole("button", { name: /^4×$/ }).click();
+    check((await page.getByRole("button", { name: /^4×$/ }).getAttribute("aria-pressed")) === "true", "speed selection sticks");
+    check(await page.getByRole("button", { name: /^0\.5×$/ }).isVisible(), "the scale has a slow end at all");
+
+    // Uppercased by CSS, and innerText honours text-transform — the same trap
+    // that caught the aftermath-window check above.
+    check(/HEAT TAKEN \(MAE\)/i.test(body) && /BEST IT OFFERED \(MFE\)/i.test(body),
+      "the panel names MAE and MFE, the words the trade page already uses", excerpt(body, "EAT TAKEN"));
 
     check(consoleErrors.length === 0, "no uncaught errors in the browser", consoleErrors.join(" | "));
 
     // --- the hand-logged closed trade: the honest refusal -------------------
     await page.goto(`${BASE}/trades/${handLogged.id}`, { waitUntil: "networkidle" });
-    await page.waitForSelector("text=How it played out", { timeout: 15000 });
+    await page.getByRole("heading", { name: "How it played out" }).waitFor({ timeout: 15000 });
     const handBody = await page.locator("body").innerText();
     check(
       handBody.includes("no exit time recorded"),

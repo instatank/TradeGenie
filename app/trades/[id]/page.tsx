@@ -233,6 +233,17 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
             <TextField label="Target price" name="targetPrice" type="number" step="0.01" defaultValue={trade.targetPrice} />
             <TextField label="Best price reached (MFE)" name="mfePrice" type="number" step="0.01" defaultValue={trade.mfePrice} />
             <TextField label="Worst price reached (MAE)" name="maePrice" type="number" step="0.01" defaultValue={trade.maePrice} />
+            {/* These two read as broken when they are empty, because everything
+                else in this fold fills itself in from the exchange. They do not:
+                nothing writes them but the trader, and "How it played out" below
+                computes the same two numbers from candles without touching them.
+                Saying so here is cheaper than the alternative — silently writing
+                a derived number into a field the trader believes is theirs. */}
+            <p className="sm:col-span-2 text-xs text-forge-muted">
+              MAE and MFE are computed from the candles in <strong className="font-medium text-forge-ink">How it played out</strong>,
+              below — these two boxes stay empty unless you type in them, and exist to override that reading.
+              Filling MFE in also switches on the exit-efficiency figure underneath.
+            </p>
             <TextField label="Quantity / size" name="quantity" type="number" step="any" defaultValue={trade.quantity} />
             <TextField label="Total order value" name="totalOrderValue" type="number" step="0.01" defaultValue={trade.totalOrderValue} />
             <TextField label="Leverage" name="leverage" type="number" defaultValue={trade.leverage} />

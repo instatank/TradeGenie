@@ -37,11 +37,19 @@ import type { FillMarker } from "@/lib/trade-replay";
  *  they live in a module of their own rather than in lib/trade-replay.ts. */
 const TRAILING_CANDLES = REPLAY_TRAILING_BARS;
 
-/** Milliseconds per candle at 1×. Roughly a readable pace for reading a 1m
- *  chart of a trade you are trying to remember. */
-const BASE_STEP_MS = 220;
+/**
+ * Milliseconds per candle at 1×. **One candle per second**, deliberately.
+ *
+ * The first cut used 220ms, which made 1× run at roughly 4-5 candles a second
+ * — fast enough that a 1m chart blurred past and the only controls available
+ * made it FASTER. The scale had no slow end at all. 1× now means the literal
+ * thing it should: one bar, one second, countable.
+ */
+const BASE_STEP_MS = 1000;
 
-const SPEEDS = [1, 2, 4, 8] as const;
+/** Both directions from 1×. 0.25× is four seconds a candle — slow enough to
+ *  watch a single bar form and say out loud what you were thinking. */
+const SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
 
 /**
  * The slice of chart to show for a given cursor.
@@ -85,7 +93,7 @@ export function TradeReplayChart(props: TradeReplayChartProps) {
   const [failed, setFailed] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(2);
+  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
 
   /** The candle the first fill lands on — where the interesting part starts. */
   const entryIndex = useMemo(() => {
@@ -307,7 +315,7 @@ export function TradeReplayChart(props: TradeReplayChartProps) {
                 speed === option ? "border-forge-ink bg-forge-ink text-white" : "border-forge-line bg-white text-forge-ink"
               }`}
             >
-              {option}×
+              {option}&times;
             </button>
           ))}
         </div>

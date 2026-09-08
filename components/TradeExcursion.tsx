@@ -41,13 +41,13 @@ export function TradeExcursion({
       <div className="grid gap-3 sm:grid-cols-2">
         <Stat
           icon={<Flame className="h-4 w-4 text-forge-red" aria-hidden />}
-          label="Heat taken"
+          label="Heat taken (MAE)"
           value={`${formatPrice(mae.price)}${mae.moveR !== null ? ` · ${mae.moveR.toFixed(2)}R` : ""}`}
           reading={heatReading(heatToStop, mae.movePct)}
         />
         <Stat
           icon={<MoveUpRight className="h-4 w-4 text-forge-green" aria-hidden />}
-          label="Best it offered"
+          label="Best it offered (MFE)"
           value={`${formatPrice(mfe.price)}${mfe.moveR !== null ? ` · ${mfe.moveR.toFixed(2)}R` : ""}`}
           reading={`It ran ${formatPct(mfe.movePct)} your way at best, ${timeOfDay(mfe.at)}.`}
         />
@@ -79,6 +79,10 @@ export function TradeExcursion({
       </div>
 
       <p className="text-xs text-forge-muted">
+        <strong className="font-medium text-forge-ink">MAE</strong> is the worst price this went to while you held it;{" "}
+        <strong className="font-medium text-forge-ink">MFE</strong> is the best. Both are computed here from the
+        candles — the boxes of the same name under &ldquo;Objective trade data&rdquo; are yours to override them with,
+        and stay empty until you type in one.{" "}
         From {interval} candles on {source === "binance" ? "Binance USD-M futures" : "Bybit"} — a different venue
         from the one that filled you, so wicks can differ slightly.
         {fromExchange
