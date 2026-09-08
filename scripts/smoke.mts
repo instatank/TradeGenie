@@ -23,6 +23,11 @@ const STATIC_ROUTES = [
   "/", "/trades", "/trades/new", "/daily", "/inbox", "/lessons", "/notes",
   "/search", "/calendar", "/analytics", "/assets", "/playbook", "/settings",
   "/calculator", "/weekly-review", "/import", "/login", "/mechanisms",
+  // A route whose whole job is to call hosts that are unreachable from CI. It
+  // is here precisely because of that: the candle feed is never load-bearing,
+  // so the probe must still render a readable report when every provider fails,
+  // and a 200 with zero providers reachable is the proof of it.
+  "/api/candle-probe",
 ];
 
 async function main() {
