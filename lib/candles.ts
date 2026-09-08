@@ -349,6 +349,45 @@ function pause(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Ask EVERY provider the same question, independently.
+ *
+ * fetchCandles() stops at the first provider that answers, which is right for a
+ * page and wrong for a diagnostic: it means the fallback is never exercised, so
+ * "Bybit is the fallback" stays an untested claim right up until the day
+ * Binance is down and it matters. This runs both and reports both.
+ */
+export async function checkProviders(request: CandleRequest): Promise<CandleResult[]> {
+  const symbol = providerSymbol(request.instrument);
+
+  return Promise.all(
+    PROVIDERS.map(async (provider): Promise<CandleResult> => {
+      const providerInterval = provider.intervalFor(request.interval);
+      if (!symbol || !providerInterval) {
+        return {
+          candles: [],
+          source: null,
+          detail: `${provider.label} cannot serve ${request.interval} for "${request.instrument}".`,
+          attempts: [],
+        };
+      }
+
+      const { candles, providerAttempts } = await fetchFromProvider(provider, symbol, providerInterval, request);
+      const failure = providerAttempts.find((attempt) => attempt.error);
+
+      return {
+        candles,
+        source: candles.length > 0 ? provider.id : null,
+        detail:
+          candles.length > 0
+            ? `${candles.length} ${request.interval} candles for ${symbol}.`
+            : `No candles${failure ? `: ${failure.error}` : " — answered, but had nothing for that window."}`,
+        attempts: providerAttempts,
+      };
+    }),
+  );
+}
+
 // --- verification ---------------------------------------------------------
 
 /**

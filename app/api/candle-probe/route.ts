@@ -1,6 +1,7 @@
 import { exchangeView } from "@/lib/coindcx-sync";
 import {
   checkFills,
+  checkProviders,
   fetchCandles,
   providerSymbol,
   summarizeFillChecks,
@@ -69,26 +70,54 @@ export async function GET() {
 
   const probeInstrument = positions[0]?.instrument ?? fills[0]?.instrument ?? "BTC";
   const now = Date.now();
-  const reach = await fetchCandles({
+
+  // EVERY provider, not just the first that answers. A fallback nobody has ever
+  // called is a fallback nobody knows works.
+  const reachAll = await checkProviders({
     instrument: probeInstrument,
     interval: "1m",
     from: new Date(now - 60 * 60 * 1000),
     to: new Date(now),
   });
 
-  say(`Asked for the last hour of 1m candles on ${providerSymbol(probeInstrument)}:`);
+  say(`Asked EACH provider for the last hour of 1m candles on ${providerSymbol(probeInstrument)}:`);
   say();
-  for (const attempt of reach.attempts) say(`  ${formatAttempt(attempt)}`);
-  say();
-  say(`  => ${reach.detail}`);
+  for (const result of reachAll) {
+    for (const attempt of result.attempts) say(`  ${formatAttempt(attempt)}`);
+    if (result.attempts.length === 0) say(`  ${result.detail}`);
+  }
   say();
 
-  if (reach.candles.length > 0) {
-    const last = reach.candles[reach.candles.length - 1];
-    say(`  Newest candle: ${new Date(last.time * 1000).toISOString()}`);
-    say(`  O ${last.open}  H ${last.high}  L ${last.low}  C ${last.close}`);
-    say();
+  // Where both answered, they describe the same minutes of the same asset, so
+  // they should agree. A gap between two independent venues is the honest
+  // measure of how much any single feed can be trusted.
+  const answering = reachAll.filter((result) => result.candles.length > 0);
+  for (const result of answering) {
+    const last = result.candles[result.candles.length - 1];
+    say(`  ${result.source}: newest ${new Date(last.time * 1000).toISOString()}` +
+      `  O ${last.open}  H ${last.high}  L ${last.low}  C ${last.close}`);
   }
+
+  if (answering.length === 2) {
+    const [a, b] = answering;
+    const bByTime = new Map(b.candles.map((candle) => [candle.time, candle]));
+    const shared = a.candles.filter((candle) => bByTime.has(candle.time));
+    if (shared.length > 0) {
+      const gaps = shared.map((candle) => {
+        const other = bByTime.get(candle.time)!;
+        return Math.abs(candle.close - other.close) / candle.close;
+      });
+      const worst = Math.max(...gaps);
+      const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+      say();
+      say(`  Both answered. Over ${shared.length} shared minutes the two venues' closes differ by`);
+      say(`  ${(mean * 100).toFixed(4)}% on average, ${(worst * 100).toFixed(4)}% at worst.`);
+    }
+  } else if (answering.length === 1) {
+    say();
+    say(`  Only ${answering[0].source} answered — the fallback is unproven, not broken.`);
+  }
+  say();
 
   // --- 2. the real test ---------------------------------------------------
   say();
