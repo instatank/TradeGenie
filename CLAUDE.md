@@ -1556,6 +1556,19 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     bugs above, plus the locale crash. The seed gained an exchange-linked trade with a stop and
     a three-leg exit, because every other seeded trade is hand-logged and the real path had no
     gate over it at all.
+  - **1× means one candle per second.** The first cut ran 1× at ~220ms a bar — four to five a
+    second, faster than a 1m chart can be read — and every other control made it *faster*, so
+    the scale had no slow end. Range is now 0.25×–8×, default 1×. `verify:replay` **times** it
+    against the wall clock rather than asserting it, because a rate is a claim about behaviour
+    over time.
+  - **MAE/MFE are computed in the panel and NOT written to the fields of the same name.** The
+    panel's "Heat taken (MAE)" / "Best it offered (MFE)" come from candles; the boxes under
+    *Objective trade data* are the trader's override and stay empty until typed in. That is
+    still the right call — a derived number must not silently fill a field the trader believes
+    is theirs — but unexplained it reads as a broken feature, since every other field in that
+    fold self-fills from the exchange. Both halves now say so, and the fold notes that filling
+    MFE is what switches on the exit-efficiency figure printed under it (a real feature that
+    was sitting dark).
   - Deliberately NOT done: **practice mode** (TradingView's Bar Replay already does it and does
     it better — the owner has it; the only version worth building here would replay your own
     tagged setups blind, which is a much bigger build for a marginal gain), **storing
