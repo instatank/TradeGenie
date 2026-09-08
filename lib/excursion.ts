@@ -115,6 +115,20 @@ export type ExcursionResult = ({ ok: true } & Excursion) | ExcursionRefusal;
 const DRIFT_MIN_MINUTES = 30;
 const DRIFT_MAX_MINUTES = 240;
 
+/**
+ * How far past the exit the aftermath looks, for a trade held this long.
+ *
+ * Exported because the candle WINDOW has to cover it. The fetch pads either
+ * side of the trade in proportion to the hold, which for a three-hour trade is
+ * 45 minutes — while the drift window for that same trade is three hours. Sized
+ * off the padding alone, the panel would confidently say "after you left (3h)"
+ * over 45 minutes of data. Two places deciding how long the aftermath is, is
+ * two places that will disagree.
+ */
+export function driftWindowMinutes(heldMs: number): number {
+  return Math.min(DRIFT_MAX_MINUTES, Math.max(DRIFT_MIN_MINUTES, Math.round(heldMs / 60_000)));
+}
+
 export function calculateExcursion(
   input: ExcursionInput,
   candles: Candle[],
@@ -242,8 +256,7 @@ function calculateDrift(
   if (exitPrice == null || !Number.isFinite(exitPrice) || exitPrice <= 0) return null;
   if (!input.exitAt) return null;
 
-  const heldMinutes = (input.exitAt.getTime() - input.entryAt.getTime()) / 60_000;
-  const windowMinutes = Math.min(DRIFT_MAX_MINUTES, Math.max(DRIFT_MIN_MINUTES, Math.round(heldMinutes)));
+  const windowMinutes = driftWindowMinutes(input.exitAt.getTime() - input.entryAt.getTime());
   const until = exitBucket + windowMinutes * 60;
 
   // Strictly after the exit candle: the candle you exited in is the trade, not

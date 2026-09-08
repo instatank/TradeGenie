@@ -240,6 +240,16 @@ export async function fetchCandles(request: CandleRequest): Promise<CandleResult
   const attempts: Attempt[] = [];
   const symbol = providerSymbol(request.instrument);
 
+  // Offline candles, when a fixture is configured. Mirrors this codebase's
+  // existing TRADEGENIE_LOCAL_STORE override, and exists for the same reason:
+  // the container this app is developed in has no egress to any exchange, so
+  // without it the replay chart could only ever be verified by deploying it and
+  // looking. It is also how the replay is worked on offline at all.
+  //
+  // Production is untouched: with the variable unset, not one line of this runs.
+  const fixture = await fixtureCandles(symbol, request);
+  if (fixture) return fixture;
+
   if (!symbol) {
     return { candles: [], source: null, detail: `No usable symbol from "${request.instrument}".`, attempts };
   }
@@ -274,6 +284,39 @@ export async function fetchCandles(request: CandleRequest): Promise<CandleResult
       : `No candles for ${symbol} — every provider answered, none had data for that window.`,
     attempts,
   };
+}
+
+/**
+ * Candles from a JSON file instead of the network, keyed by provider symbol:
+ * `{ "SOLUSDT": [{ time, open, high, low, close, volume }, …] }`.
+ *
+ * Returns null — never throws, never logs loudly — when the variable is unset
+ * or the file is unusable, so a stale fixture path degrades to the real
+ * providers rather than blanking every chart.
+ */
+async function fixtureCandles(symbol: string, request: CandleRequest): Promise<CandleResult | null> {
+  const fixturePath = process.env.TRADEGENIE_CANDLE_FIXTURE;
+  if (!fixturePath || !symbol) return null;
+
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const parsed = JSON.parse(await readFile(fixturePath, "utf8")) as Record<string, Candle[]>;
+    const all = parsed[symbol];
+    if (!Array.isArray(all)) return null;
+
+    const from = Math.floor(request.from.getTime() / 1000);
+    const to = Math.ceil(request.to.getTime() / 1000);
+    const candles = sortCandles(all.filter((candle) => candle.time >= from && candle.time <= to));
+
+    return {
+      candles,
+      source: "binance",
+      detail: `${candles.length} ${request.interval} candles for ${symbol} from a local fixture.`,
+      attempts: [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function fetchFromProvider(

@@ -13,6 +13,7 @@
     "check:capture": "tsx scripts/check-capture.ts",
     "test": "tsx --test \"tests/unit/*.test.ts\" \"tests/unit/*.test.mts\"",
     "smoke": "tsx scripts/smoke.mts",
+    "verify:replay": "tsx scripts/verify-replay.mts",
     "check:cron": "tsx scripts/check-cron-auth.mts"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "firebase-admin": "^13.5.0",
+    "lightweight-charts": "^5.2.1",
     "lucide-react": "^0.468.0",
     "next": "^15.3.3",
     "papaparse": "^5.5.3",

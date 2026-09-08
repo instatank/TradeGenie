@@ -187,6 +187,17 @@ async function dynamicContentChecks(storePath: string): Promise<[string, string,
   const sol = store.assets?.find((asset) => asset.symbol === "SOL")?.id;
   const arb = store.assets?.find((asset) => asset.symbol === "ARB")?.id;
   if (!sol) return [];
+
+  // The replay panel is a conditional render behind a <Suspense> and a live
+  // network call, so `next build` cannot reach it at all. With no egress here
+  // the candle fetch fails, which is exactly the case worth gating: the panel
+  // must still render, and say why it is empty, rather than blanking or taking
+  // the trade page down with it. The full-content assertions live in
+  // `npm run verify:replay`, which drives a real browser over a candle fixture.
+  const replayChecks: [string, string, string][] = [
+    ["/trades/seed-trade-linked", "How it played out", "the replay panel on an exchange-linked trade"],
+    ["/trades/seed-trade-linked", "No candles for LINKUSDT", "a plain reason when the candle feed is unreachable"],
+  ];
   const route = `/assets/${sol}`;
   const checks: [string, string, string][] = [
     [route, "The story so far", "the merged timeline"],
@@ -204,6 +215,7 @@ async function dynamicContentChecks(storePath: string): Promise<[string, string,
     // The paste control degrades to a real file input; both halves must render.
     [route, "paste", "the paste-to-attach hint on the note composer"],
     [route, 'type="file"', "the plain file input the paste control is built on"],
+    ...replayChecks,
   ];
 
   // ARB's only trade is the USDT-margined archive position, so its panel is

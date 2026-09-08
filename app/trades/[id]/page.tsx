@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -9,6 +10,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { ScreenshotField } from "@/components/ScreenshotField";
 import { TagPills } from "@/components/TagPills";
 import { TagPicker } from "@/components/TagPicker";
+import { TradeReplayPanel, TradeReplayPanelSkeleton } from "@/components/TradeReplayPanel";
 import { TradeReviewFields } from "@/components/TradeReviewFields";
 import { TradeSetupFields, TradeSetupSummary } from "@/components/TradeSetupFields";
 import { directions, humanize, isPrimaryMistakeTag, marketTypes } from "@/lib/constants";
@@ -282,6 +284,16 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </div>
         </details>
       </form>
+
+      {/* OUTSIDE the form on purpose: the replay controls are real buttons, and
+          inside the page's single save-everything form, pressing Play would
+          submit it. Its own Suspense boundary so a live candle fetch never
+          holds up the trade itself. */}
+      <div className="mt-5">
+        <Suspense fallback={<TradeReplayPanelSkeleton />}>
+          <TradeReplayPanel trade={trade} />
+        </Suspense>
+      </div>
 
       <section className="mt-5 grid gap-4 lg:grid-cols-2">
         <div className="panel space-y-3">

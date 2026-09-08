@@ -430,6 +430,49 @@ async function main() {
   await seedFill("seed-fill-3", "HYPE", "USDT", "SELL", 1.29, 82.753, 0.0629, new Date(exchangeNow.getTime() - 26 * 3600_000));
   await seedFill("seed-fill-4", "HYPE", "USDT", "BUY", 1.29, 80.1, 0.0611, new Date(exchangeNow.getTime() - 20 * 3600_000));
 
+  // A trade LINKED to real exchange fills, with a stop — the only path on which
+  // the replay draws a true fill ladder and the excursion can speak in R. Every
+  // other seeded trade is hand-logged (no exchangeKey) or has no fills behind
+  // it, which left "How it played out" rendering its refusal in every gate we
+  // have and its actual output in none of them.
+  //
+  // The exit is deliberately THREE fills at one instant and one price. That is
+  // what one order filling against several counterparties looks like — the real
+  // account has a position with 22 such legs — and aggregateFills must fold
+  // them into a single mark rather than stacking arrows on one candle.
+  const linkedOpened = new Date(exchangeNow.getTime() - 14 * 3600_000);
+  const linkedClosed = new Date(exchangeNow.getTime() - 11 * 3600_000);
+  await seedFill("seed-fill-8", "LINK", "USDT", "SELL", 1.2, 21.4, 0.012, linkedOpened);
+  await seedFill("seed-fill-9", "LINK", "USDT", "BUY", 0.4, 20.6, 0.004, linkedClosed);
+  await seedFill("seed-fill-10", "LINK", "USDT", "BUY", 0.4, 20.6, 0.004, linkedClosed);
+  await seedFill("seed-fill-11", "LINK", "USDT", "BUY", 0.4, 20.6, 0.004, linkedClosed);
+  await db.create("trades", {
+    id: "seed-trade-linked",
+    createdAt: linkedOpened,
+    updatedAt: linkedClosed,
+    tradeDateTime: linkedOpened,
+    marketType: "CRYPTO",
+    instrument: "LINK",
+    direction: "SHORT",
+    status: "CLOSED",
+    setupName: null, setupId: null,
+    entryThesis: "Swept the highs and failed to hold. Short the retest.",
+    invalidation: null, concern: null, premortem: null,
+    conditions: [], timeframes: ["15m"], mechanisms: ["LIQUIDITY_SWEEP"], checklistSteps: [],
+    emotionalState: "CALM", riskPosture: null, confidenceScore: 7,
+    entryGrade: "A", setupGrade: null, exitReason: "Target hit",
+    followedPlan: "YES", lesson: null, notes: null,
+    entryPrice: 21.4, stopPrice: 21.9, targetPrice: 20.5, exitPrice: 20.6,
+    maePrice: null, mfePrice: null,
+    quantity: 1.2, totalOrderValue: null, leverage: 5,
+    realizedPnl: 0.96, fees: 0.024, funding: 0, netPnl: 0.936,
+    currency: "USDT", moneyRate: { inr: 99.88, usdt: 1 },
+    // The link itself: positionKey() is `instrument|currency|openedAt`, so this
+    // must be derived from the same instant the opening fill carries.
+    exchangeKey: `LINK|USDT|${linkedOpened.getTime()}`,
+    marketContext: null, reconstructed: null, tags: [],
+  } as never);
+
   // Still open, and in the other margin account — proves the two accounts stay
   // apart and that an open position renders without exit numbers.
   // INR wallet, USDT price — the case that was ~100x wrong. Paired with an INR
