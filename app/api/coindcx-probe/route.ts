@@ -1,4 +1,5 @@
 import { credentialsFromEnv, formatProbeReport, probeFuturesEndpoints } from "@/lib/coindcx";
+import { NextRequest } from "next/server";
 
 // A one-time discovery endpoint: open it in the browser, copy the text, and the
 // adapter gets written against real field names instead of guessed ones. It
@@ -14,7 +15,7 @@ import { credentialsFromEnv, formatProbeReport, probeFuturesEndpoints } from "@/
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const credentials = credentialsFromEnv();
   if (!credentials) {
     return new Response(
@@ -33,7 +34,13 @@ export async function GET() {
     );
   }
 
-  const outcomes = await probeFuturesEndpoints(credentials);
+  // `?only=orders` runs just the probes whose label matches, so a follow-up
+  // question costs one fast call instead of the whole set. It also keeps the
+  // run inside maxDuration: every probe can take up to 15s, and seven of them
+  // timing out together would exceed the 60s function budget and return
+  // nothing at all — which is the one outcome that wastes a browser trip.
+  const only = request.nextUrl.searchParams.get("only");
+  const outcomes = await probeFuturesEndpoints(credentials, only);
   return new Response(formatProbeReport(outcomes), {
     status: 200,
     headers: {

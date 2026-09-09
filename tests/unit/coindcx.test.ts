@@ -6,7 +6,7 @@
 // schema, and a test that drifted from them would be testing nothing.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { exitWasAutomatic, normalizePair, parseFill, parseFills, parseTransaction, parseTransactions } from "@/lib/coindcx";
+import { exitWasAutomatic, formatProbeReport, FUTURES_PROBES, normalizePair, parseFill, parseFills, parseTransaction, parseTransactions } from "@/lib/coindcx";
 
 // Straight from /exchange/v1/derivatives/futures/trades.
 const REAL_TRADE = {
@@ -173,5 +173,67 @@ describe("parseTransactions", () => {
     ]);
     assert.equal(transactions.length, 2);
     assert.deepEqual(unknownStages, ["liquidation"]);
+  });
+});
+
+describe("the /orders probe survives whatever comes back", () => {
+  // NOT a schema test, and deliberately so. Nothing in this repo knows what an
+  // order row looks like yet — that is the entire reason the probe exists — so
+  // a fixture here would be an invention wearing a fixture's authority, which
+  // is the opposite of how every other shape in this file was established.
+  //
+  // What IS testable, and worth testing: the probe must never throw. It runs in
+  // a deployed route against a live account the dev container cannot reach, so
+  // an exception is not a red test — it is a 500 in the owner's browser, one
+  // wasted round trip, and a redeploy before anyone learns anything. These
+  // cases are every way a response can surprise it.
+  const orderProbes = FUTURES_PROBES.filter((probe) => probe.path.endsWith("/orders"));
+
+  const render = (body: unknown) =>
+    formatProbeReport(orderProbes.map((probe) => ({ probe, status: 200, ok: true, body })));
+
+  it("probes the orders endpoint at all", () => {
+    assert.ok(orderProbes.length >= 2, "several payload variants, since the payload is a guess");
+    assert.ok(orderProbes.every((probe) => probe.summary), "each must summarise rather than dump raw rows");
+  });
+
+  it("handles an empty array without claiming the endpoint failed", () => {
+    const report = render([]);
+    assert.match(report, /empty array/);
+  });
+
+  it("handles a 4xx error body, which is as informative as a success here", () => {
+    // CoinDCX names the missing parameter in the body; that is how the payload
+    // gets settled, so it must print rather than be swallowed.
+    const report = formatProbeReport(
+      orderProbes.map((probe) => ({ probe, status: 422, ok: false, body: { message: "status is required" } })),
+    );
+    assert.match(report, /status is required/);
+    assert.match(report, /HTTP 422/);
+  });
+
+  it("does not throw on rows carrying none of the expected fields", () => {
+    const report = render([{ something_nobody_predicted: 1 }]);
+    // It must SAY the names were absent rather than printing a confident empty
+    // list — the shape dump underneath is then the only thing worth reading.
+    assert.match(report, /NONE of the expected names/);
+    assert.match(report, /something_nobody_predicted/);
+  });
+
+  it("counts a present-but-null price field as unpopulated", () => {
+    // The dangerous case: a field that exists and is always null looks like a
+    // working reference price until every reading comes out empty.
+    const report = render([
+      { stop_price: null, price: 100 },
+      { stop_price: null, price: 101 },
+    ]);
+    assert.match(report, /stop_price: present 2\/2, non-empty 0/);
+    assert.match(report, /price: present 2\/2, non-empty 2/);
+  });
+
+  it("survives nulls, nested objects and a non-array body", () => {
+    for (const body of [null, "gateway timeout", { error: "nope" }, [null], [{ nested: { a: 1 } }], [{ x: undefined }]]) {
+      assert.doesNotThrow(() => render(body), `threw on ${JSON.stringify(body)}`);
+    }
   });
 });

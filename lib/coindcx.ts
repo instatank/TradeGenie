@@ -82,7 +82,7 @@ export type Probe = {
 // and nothing in it can place, edit, cancel or exit an order.
 export const TRADES_PATH = "/exchange/v1/derivatives/futures/trades";
 export const TRANSACTIONS_PATH = "/exchange/v1/derivatives/futures/positions/transactions";
-const ORDERS_PATH = "/exchange/v1/derivatives/futures/orders";
+export const ORDERS_PATH = "/exchange/v1/derivatives/futures/orders";
 const POSITIONS_PATH = "/exchange/v1/derivatives/futures/positions";
 
 const ALLOWED_PATHS = new Set([TRADES_PATH, TRANSACTIONS_PATH, ORDERS_PATH, POSITIONS_PATH]);
@@ -105,6 +105,54 @@ export const FUTURES_PROBES: Probe[] = [
     path: TRANSACTIONS_PATH,
     payload: { page: "10", size: "100" },
     summary: summarizeTransactions,
+  },
+
+  // ── /orders: DISCOVERY IN PROGRESS ──────────────────────────────────────
+  //
+  // This path has been on the allowlist since the importer was written and has
+  // never been called once, so unlike the two above, NOTHING below is known —
+  // not the payload it accepts, not one field name.
+  //
+  // Why it matters: the exchange reports where you were FILLED and never what
+  // you ASKED for, which is why measuring slippage currently depends on the
+  // trader having typed a stop into the journal. An order carries its own
+  // limit/trigger price. If these rows do, slippage becomes measurable from the
+  // exchange alone, against the price the bracket was actually set to rather
+  // than the one that got written down.
+  //
+  // FOUR VARIANTS, because the payload is a guess. Both known endpoints take
+  // `{page, size}`, so that is variant 1; the others probe whether a status
+  // filter is required or merely accepted. A 4xx here is as useful as a 200 —
+  // CoinDCX's error body names the parameter it wanted, and formatProbeReport
+  // prints error bodies in full for exactly this reason.
+  {
+    label: "Orders v1 — does it take {page,size} like the other two?",
+    path: ORDERS_PATH,
+    payload: { page: "1", size: "10" },
+    summary: summarizeOrders,
+  },
+  {
+    label: "Orders v2 — is a `status` filter required?",
+    path: ORDERS_PATH,
+    payload: { status: "filled", page: "1", size: "10" },
+    summary: summarizeOrders,
+  },
+  {
+    label: "Orders v3 — same, asking for open orders instead",
+    path: ORDERS_PATH,
+    payload: { status: "open", page: "1", size: "10" },
+    summary: summarizeOrders,
+  },
+  {
+    // The ledger turned out to be FINITE, stopping at a fixed date while fills
+    // reached ten months further back — which is why the sync stores rows
+    // rather than querying live. Whether orders have the same horizon decides
+    // whether this is a backfill or only ever works going forward, so it is
+    // asked now rather than discovered after the adapter is written.
+    label: "Orders p8 — how far back does the order history reach?",
+    path: ORDERS_PATH,
+    payload: { page: "8", size: "100" },
+    summary: summarizeOrders,
   },
 ];
 
@@ -168,9 +216,16 @@ export async function callFutures(
 /** Space between calls, so probing a dozen endpoints can't trip a rate limit. */
 const PAUSE_MS = 400;
 
-export async function probeFuturesEndpoints(credentials: CoindcxCredentials): Promise<ProbeOutcome[]> {
+export async function probeFuturesEndpoints(
+  credentials: CoindcxCredentials,
+  /** Case-insensitive substring of the probe label. Omit to run them all. */
+  only?: string | null,
+): Promise<ProbeOutcome[]> {
+  const needle = only?.trim().toLowerCase();
+  const selected = needle ? FUTURES_PROBES.filter((probe) => probe.label.toLowerCase().includes(needle)) : FUTURES_PROBES;
+
   const outcomes: ProbeOutcome[] = [];
-  for (const probe of FUTURES_PROBES) {
+  for (const probe of selected) {
     outcomes.push(await callFutures(credentials, probe));
     await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
   }
@@ -478,6 +533,95 @@ function summarizeTransactions(body: unknown): string {
     seen.add(currency);
     lines.push(`    ${currency}: price_in_inr=${String(row.price_in_inr)} price_in_usdt=${String(row.price_in_usdt)} amount=${String(row.amount)} fee=${String(row.fee_amount)}`);
   }
+  return lines.join("\n");
+}
+
+/**
+ * The order rows, summarised around the ONE question they exist to answer:
+ * does an order carry the price it was set at, and can it be joined to a fill?
+ *
+ * Deliberately prints the full shape of one row as well as the digest. The
+ * digest answers "is this usable"; the shape is what the adapter gets written
+ * against, and a second round trip to ask for field names would cost the owner
+ * another browser trip for nothing.
+ *
+ * PRICE FIELDS ARE PROBED BY NAME rather than dumped blind, because the whole
+ * point is to find out which of them exists and — more importantly — which is
+ * actually POPULATED. A field that is present and always null is worse than an
+ * absent one: it looks like a working reference price right up until every
+ * reading comes out empty.
+ */
+function summarizeOrders(body: unknown): string {
+  // Objects only. A null or a bare string inside the array throws on the first
+  // property read, and this runs in a deployed route the dev container cannot
+  // reach — so an exception here is a 500 in the owner's browser and a wasted
+  // round trip, not a stack trace anyone gets to see. A test pins each case.
+  const rows = (Array.isArray(body) ? body : []).filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row),
+  );
+  if (!rows.length) {
+    // Not necessarily a failure: an empty array is the honest answer to "any
+    // open orders?" and is also what a page past the end returns.
+    return "  (empty array — no orders in this window, or this payload filtered them all out)";
+  }
+
+  const lines = [`  rows: ${rows.length}`];
+
+  const times = rows
+    .map((row) => Number(row.created_at ?? row.timestamp ?? row.updated_at))
+    .filter((time) => Number.isFinite(time) && time > 0);
+  if (times.length) {
+    lines.push(`  span: ${new Date(Math.min(...times)).toISOString()} → ${new Date(Math.max(...times)).toISOString()}`);
+  }
+
+  const tally = (key: string) => {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const value = row[key];
+      if (value === undefined) continue;
+      const label = value === null ? "(null)" : String(value);
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    if (!counts.size) return null;
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(", ");
+  };
+
+  for (const key of ["order_type", "status", "side", "margin_currency_short_name"]) {
+    const summary = tally(key);
+    if (summary) lines.push(`  ${key}: ${summary}`);
+  }
+
+  // Every plausible name for "the price you asked for". Reported with how many
+  // rows actually carry a non-null value, which is the number that decides
+  // whether Phase 2 is possible at all.
+  const priceKeys = [
+    "price", "limit_price", "stop_price", "trigger_price", "stop_trigger_price",
+    "avg_price", "average_price", "take_profit_trigger", "stop_loss_trigger",
+    "take_profit_price", "stop_loss_price", "activation_price",
+  ];
+  const found = priceKeys
+    .map((key) => {
+      const present = rows.filter((row) => key in row);
+      if (!present.length) return null;
+      const populated = present.filter((row) => row[key] !== null && row[key] !== undefined && row[key] !== 0 && row[key] !== "0");
+      const sample = populated[0]?.[key] ?? present[0]?.[key];
+      return `    ${key}: present ${present.length}/${rows.length}, non-empty ${populated.length}, e.g. ${JSON.stringify(sample)}`;
+    })
+    .filter(Boolean);
+  lines.push(found.length ? "  price fields:" : "  price fields: NONE of the expected names are present — read the full shape below");
+  lines.push(...(found as string[]));
+
+  // The join. A ledger row links to a fill through parent_id → order_id, so the
+  // question here is which key on an ORDER carries that same id. Without it
+  // there is no way to say which order produced which fill, and a price with no
+  // join is unusable.
+  for (const key of ["id", "order_id", "client_order_id", "position_id"]) {
+    const present = rows.filter((row) => typeof row[key] === "string" && row[key]);
+    if (present.length) lines.push(`  join candidate ${key}: ${present.length}/${rows.length}, e.g. ${JSON.stringify(present[0][key])}`);
+  }
+
+  lines.push("  full shape of row 0 (this is what the adapter gets written against):");
+  lines.push(describeShape(rows[0], "    "));
   return lines.join("\n");
 }
 
