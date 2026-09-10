@@ -62,9 +62,10 @@ export async function SlippageTable({ trades }: { trades: Trade[] }) {
       <div className="panel space-y-2">
         <h3 className="font-semibold">Slippage on your fills</h3>
         <p className="text-sm text-forge-muted">
-          Nothing measurable yet. A trade can be measured when it is closed, reconciled against the exchange, closed by your
-          own stop or target rather than by hand, and had that price written down before it closed. Discretionary exits are
-          deliberately left out — you closed where you chose to, so there is no price it was supposed to hit.
+          Nothing measurable yet. A trade is measurable when it is closed, reconciled against the exchange, and the exchange
+          still holds the order records behind it — those only exist from your first sync after order history was captured,
+          so older trades will show as unmeasurable here. Trades you closed at market are left out on purpose: you took
+          whatever the book had, so there is no price it was supposed to hit.
         </p>
         <Coverage coverage={coverage} />
       </div>
@@ -76,8 +77,9 @@ export async function SlippageTable({ trades }: { trades: Trade[] }) {
       <div>
         <h3 className="font-semibold">Slippage on your fills</h3>
         <p className="text-sm text-forge-muted">
-          How far the exchange filled your stops and targets from where you set them. Positive is worse for you. Per symbol,
-          because depth belongs to the book and not to you.
+          How far the exchange filled your stops and targets from where you set them — read from the exchange&rsquo;s own order
+          records, so the price you asked for is the trigger that was really on it, not one typed from memory. Positive is
+          worse for you. Per symbol, because depth belongs to the book and not to you.
         </p>
       </div>
 
@@ -150,13 +152,19 @@ export async function SlippageTable({ trades }: { trades: Trade[] }) {
                 {trade.instrument}
               </Link>
               <span className="text-xs text-forge-muted">{format(trade.tradeDateTime, "d MMM yyyy")}</span>
-              <span className="text-xs text-forge-muted">{reading.leg === "STOP" ? "stopped out" : "target hit"}</span>
+              <span className="text-xs text-forge-muted">
+                {reading.leg === "STOP" ? "stopped out" : reading.leg === "TARGET" ? "target hit" : "limit exit"}
+              </span>
               <span className={reading.bps > 0.5 ? "text-forge-red" : reading.bps < -0.5 ? "text-forge-green" : undefined}>
                 {`${reading.bps > 0 ? "+" : ""}${reading.bps.toFixed(1)} bps`}
               </span>
+              {/* SIGNED, not absolute. Math.abs here made a fill 96% of the risk
+                  IN YOUR FAVOUR render identically to one 96% AGAINST you —
+                  which reads as a contradiction sitting next to a negative bps
+                  figure, and is the opposite of the fact. */}
               {reading.riskFraction != null ? (
                 <span className="text-xs text-forge-muted">
-                  {`${Math.abs(reading.riskFraction * 100).toFixed(0)}% of risk`}
+                  {`${reading.riskFraction > 0 ? "+" : ""}${(reading.riskFraction * 100).toFixed(0)}% of risk`}
                 </span>
               ) : null}
               {reading.suspect ? (

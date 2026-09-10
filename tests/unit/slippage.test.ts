@@ -14,6 +14,7 @@ import {
   closingFills,
   measureOrder,
   measurePositionOrders,
+  plannedRiskFromOrders,
   slippageByInstrument,
   summarizeSlippage,
   type MeasurableOrder,
@@ -375,5 +376,98 @@ describe("measuring against the exchange's own order", () => {
     ];
     const { positions } = reconstructPositions(fills);
     assert.deepEqual(measurePositionOrders(positions[0], fills, []), []);
+  });
+});
+
+describe("the BTC failure: a reference price that was never the live bracket", () => {
+  // Two real stop-outs on BTC read as -290.6 bps (96% of the whole risk) and
+  // +204.9 bps (219%) — on the deepest book there is, where real execution slip
+  // is single-digit bps. Both were genuine stop-outs, so the leg was right; the
+  // REFERENCE was wrong. This pins the difference between the two paths.
+  const T = new Date("2026-08-03T09:00:00Z");
+  const later = new Date("2026-08-03T11:00:00Z");
+
+  // Long BTC from 83,000. Stop originally at 80,000 and TYPED into the journal
+  // as such — then moved up to 82,400 on the exchange to cut the loss. It
+  // filled at 82,390: eleven bps of real slip, which is a good fill.
+  const fills = [
+    fill({ id: "b1", instrument: "BTC", side: "BUY", price: 83_000, quantity: 0.1, timestamp: T, orderId: "open" }),
+    fill({ id: "b2", instrument: "BTC", side: "SELL", price: 82_390, quantity: 0.1, timestamp: later, orderId: "stop" }),
+  ];
+  const { positions } = reconstructPositions(fills);
+  const position = positions[0];
+
+  const liveStop: MeasurableOrder = {
+    id: "stop",
+    side: "SELL",
+    orderType: "stop_market",
+    status: "filled",
+    referencePrice: 82_400,
+    avgPrice: 82_390,
+    quantity: 0.1,
+    quoteCurrency: "USDT",
+    updatedAt: later,
+  };
+
+  it("the journal path produces the nonsense figure, because it scores the STALE stop", () => {
+    const journal = calculateSlippage(
+      { direction: "LONG" as Trade["direction"], entryPrice: 83_000, stopPrice: 80_000, targetPrice: 90_000 },
+      position,
+      fills,
+      [ledgerRow({ instrument: "BTC", orderId: "stop" })],
+    );
+    assert.ok(journal.ok);
+    assert.equal(journal.leg, "STOP", "the LEG was never the problem — both trades really did stop out");
+    // 80,000 typed vs 82,390 filled = 2,390 'better than the stop', on a typed
+    // risk of 3,000 — 80% of the whole risk, from a fill that was actually fine.
+    assert.ok(journal.bps < -250, `journal bps ${journal.bps} should be the wild figure`);
+    assert.ok(Math.abs(journal.riskFraction!) > 0.75, "and it eats most of the supposed risk");
+  });
+
+  it("the order path gets it right, because the exchange knows where the stop actually was", () => {
+    const [reading] = measurePositionOrders(position, fills, [liveStop]);
+    assert.ok(reading, "the stop order should produce a reading");
+    assert.equal(reading.leg, "STOP");
+    // 82,400 asked, 82,390 got, on a SELL: 10 worse. 10/82,400 = 1.2 bps.
+    assert.ok(Math.abs(reading.priceDelta - 10) < 1e-6, `priceDelta ${reading.priceDelta}`);
+    assert.ok(Math.abs(reading.bps - 1.2136) < 0.01, `bps ${reading.bps} — a normal BTC fill`);
+    assert.equal(reading.suspect, false);
+  });
+
+  it("measures risk against the stop that was really on the exchange", () => {
+    // 83,000 entry against the LIVE 82,400 stop is 600 of risk, not the 3,000
+    // the journal still had written down. Getting this wrong is what turns a
+    // 1.2 bps fill into "96% of your risk".
+    assert.equal(plannedRiskFromOrders(83_000, [liveStop]), 600);
+    const [reading] = measurePositionOrders(position, fills, [liveStop]);
+    assert.ok(Math.abs(reading.riskFraction! - 10 / 600) < 1e-9, `riskFraction ${reading.riskFraction}`);
+    assert.ok(reading.riskFraction! < 0.02, "under 2% of risk — which is the truth about this fill");
+  });
+
+  it("reports no risk share rather than a wrong one when no stop order backs the position", () => {
+    assert.equal(plannedRiskFromOrders(83_000, []), null);
+    const tpOnly: MeasurableOrder = { ...liveStop, orderType: "take_profit_market" };
+    assert.equal(plannedRiskFromOrders(83_000, [tpOnly]), null, "a take-profit is not a risk boundary");
+    const [reading] = measurePositionOrders(position, fills, [{ ...tpOnly, id: "stop" }]);
+    assert.equal(reading.riskFraction, null);
+    assert.equal(reading.suspect, false, "unknown risk is not a suspect reading");
+  });
+
+  it("keeps the two exit legs apart when a position is closed in stages", () => {
+    // A partial take-profit and then a stop are two different fills answering
+    // two different questions. The journal path blends them into one VWAP and
+    // scores that against a single reference, which is meaningless.
+    const staged = [
+      fill({ id: "s1", instrument: "BTC", side: "BUY", price: 83_000, quantity: 0.2, timestamp: T, orderId: "open" }),
+      fill({ id: "s2", instrument: "BTC", side: "SELL", price: 84_000, quantity: 0.1, timestamp: at(60), orderId: "tp" }),
+      fill({ id: "s3", instrument: "BTC", side: "SELL", price: 82_390, quantity: 0.1, timestamp: at(120), orderId: "stop" }),
+    ];
+    const built = reconstructPositions(staged).positions[0];
+    const readings = measurePositionOrders(built, staged, [
+      { ...liveStop, id: "tp", orderType: "take_profit_market", referencePrice: 84_010, avgPrice: 84_000, updatedAt: at(60) },
+      { ...liveStop, id: "stop", updatedAt: at(120) },
+    ]);
+    assert.equal(readings.length, 2, "one reading per order, never one blended average");
+    assert.deepEqual(readings.map((r) => r.leg), ["TARGET", "STOP"]);
   });
 });

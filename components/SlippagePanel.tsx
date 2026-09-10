@@ -108,7 +108,7 @@ function EntryReading({ reading }: { reading: EntrySlippageReading }) {
       You wanted in at <strong className="font-medium text-forge-ink">{fmt(reading.reference, 4)}</strong> and were filled at{" "}
       <strong className="font-medium text-forge-ink">{fmt(reading.filled, 4)}</strong> —{" "}
       <span className={toneFor(reading.bps)}>{`${signed(reading.bps, 1, " bps")} ${worse ? "against" : "in favour of"} you`}</span>
-      {reading.riskFraction != null ? <>, {fmt(Math.abs(reading.riskFraction) * 100, 0)}% of your planned risk</> : null}
+      {reading.riskFraction != null ? <>, {signed(reading.riskFraction * 100, 0, "%")} of your planned risk</> : null}
       {reading.cost != null ? <> ({fmt(Math.abs(reading.cost), 2)} {reading.quoteCurrency})</> : null}.
     </p>
   );
@@ -148,6 +148,9 @@ function OrderReadings({ readings }: { readings: OrderReading[] }) {
                 <strong className="font-medium">{fmt(reading.filled, 4)}</strong>
               </span>
               <span className={toneFor(reading.bps)}>{signed(reading.bps, 1, " bps")}</span>
+              {reading.riskFraction != null ? (
+                <span className="text-xs text-forge-muted">{`${signed(reading.riskFraction * 100, 0, "%")} of risk`}</span>
+              ) : null}
               {!worse && reading.bps < -0.5 ? <span className="text-xs text-forge-muted">in your favour</span> : null}
             </li>
           );

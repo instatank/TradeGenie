@@ -15,26 +15,21 @@ import {
   calculateEntrySlippage,
   calculateSlippage,
   type EntrySlippageResult,
-  type SlippageReading,
   measurePositionOrders,
+  ordersForPosition,
   type OrderReading,
   type SlippageResult,
 } from "@/lib/slippage";
 import type { Trade } from "@/lib/types";
 
-/** Both legs for one trade, each with its own reading or its own refusal. */
+/** Everything one trade's panel needs: the exchange's own reading, and the
+ *  journal-based fallback for a trade with no order records behind it. */
 export type TradeSlippageReport = {
   exit: SlippageResult;
   entry: EntrySlippageResult;
-  /**
-   * What the EXCHANGE recorded, which beats both of the above when present: the
-   * order states its own leg and carries the trigger price actually set, so
-   * nothing is inferred from geometry or remembered from the journal.
-   *
-   * Empty on any trade whose orders were never captured — every trade synced
-   * before /orders was called — and that reads as "unknown", never as "no
-   * order existed".
-   */
+  /** What the EXCHANGE recorded. Preferred over both fields above whenever it
+   *  is non-empty — it carries the order's own type and its own trigger price,
+   *  so nothing is inferred or remembered. */
   orders: OrderReading[];
 };
 
@@ -63,54 +58,64 @@ export async function getTradeSlippage(trade: Trade): Promise<TradeSlippageRepor
   }
 }
 
-export type TradeSlippage = { trade: Trade; reading: SlippageReading };
+/** One trade's headline reading for the aggregate. */
+export type TradeSlippage = { trade: Trade; reading: OrderReading };
 
 /**
- * Why the trades that produced no reading produced none.
+ * Why the closed trades that produced no reading produced none.
  *
- * This exists because "nothing measurable" is the expected answer most of the
- * time and is indistinguishable, from the outside, from "this feature is
- * broken". Counting where each trade fell out turns a blank panel into a
- * sentence — and, more usefully, tells us WHICH of the four reasons dominates:
- * a pile of MANUAL_EXIT is the feature working as designed on a trader who
- * closes by hand, and a pile of NO_LEDGER is the exchange join failing and is
- * a bug to chase.
+ * "Nothing measurable" is the expected answer most of the time and is
+ * indistinguishable from "this feature is broken" unless the reasons are
+ * counted. It is also the diagnostic: a pile of NO_ORDERS means the sync has
+ * not captured order history yet, which is fixable, while a pile of
+ * MANUAL_EXIT is the feature working as designed.
  */
 export type SlippageCoverage = {
-  /** Closed trades considered at all. */
   considered: number;
-  /** Of those, how many are reconciled to a position we still hold fills for. */
+  /** Reconciled to a position whose fills we still hold. */
   linked: number;
-  /** Of those, how many produced a reading. */
+  /** Of those, how many had exchange ORDER records behind them. */
+  withOrders: number;
   measured: number;
-  /** Reason → count, over the linked trades that produced nothing. */
   byReason: Record<string, number>;
 };
 
-/** Plain English for each refusal, for a reader who did not write the code. */
 export const SLIPPAGE_REASON_LABELS: Record<string, string> = {
   NOT_LINKED: "not reconciled against the exchange yet",
-  NOT_CLOSED: "still open",
-  MANUAL_EXIT: "you closed it by hand, so there is no price it was meant to hit",
-  NO_LEDGER: "the exchange ledger has no row for the exit (it does not reach back this far)",
-  NO_REFERENCE: "no stop or target was written down before it closed",
+  NO_ORDERS: "no exchange order records (synced before order history was captured)",
+  NO_REFERENCE: "closed at market, so there was no price it was meant to hit",
 };
 
 export type SlippageReadings = { readings: TradeSlippage[]; coverage: SlippageCoverage };
 
 /**
  * Every measurable reading across a set of trades, in ONE pass over the
- * exchange history, plus an account of everything that produced nothing.
+ * exchange history.
  *
- * Deliberately not `getTradeSlippage` in a loop: that would refold the whole
- * fill history per trade, which on the real account is ~425 fills folded once
- * per row on a page that renders hundreds of them.
+ * BUILT ONLY ON THE EXCHANGE'S OWN ORDER RECORDS, deliberately. The
+ * journal-based path (calculateSlippage) still exists and still renders on a
+ * single trade page as a labelled fallback, but it must not feed an aggregate,
+ * because it is unreliable in two ways that a median cannot repair:
+ *
+ *   1. THE OBSERVED FAILURE: its reference is the stop the trader TYPED. Move a
+ *      stop after entry, or type it approximately, and the journal keeps a
+ *      number that was never the live bracket — so the "slip" is the distance
+ *      between two unrelated prices rather than the quality of a fill. Two real
+ *      BTC stop-outs read as -290bps (96% of the whole risk) and +205bps (219%,
+ *      excluded) this way, on the most liquid book there is, where real
+ *      execution slip is single-digit bps.
+ *   2. A latent one, not the cause of the above but reachable: it infers
+ *      stop-vs-target from GEOMETRY — which side of entry the exit landed on. A
+ *      take-profit that finished below entry would be read as a stop and scored
+ *      against the stop price. (On the two trades above the label was correct;
+ *      both genuinely stopped out. The reference was the problem.)
+ *
+ * An order row carries the exchange's own order_type AND its own trigger price,
+ * so neither failure is reachable from it.
  */
 export async function getSlippageReadings(trades: Trade[]): Promise<SlippageReadings> {
-  // Only closed trades can have an exit to measure, so an open book is not a
-  // failure and must not be counted as one.
   const closed = trades.filter((trade) => trade.status === "CLOSED");
-  const coverage: SlippageCoverage = { considered: closed.length, linked: 0, measured: 0, byReason: {} };
+  const coverage: SlippageCoverage = { considered: closed.length, linked: 0, withOrders: 0, measured: 0, byReason: {} };
   const bump = (reason: string) => {
     coverage.byReason[reason] = (coverage.byReason[reason] ?? 0) + 1;
   };
@@ -130,17 +135,36 @@ export async function getSlippageReadings(trades: Trade[]): Promise<SlippageRead
       }
       coverage.linked += 1;
 
-      const result = calculateSlippage(trade, position, view.fills, view.ledger);
-      if (result.ok) {
-        coverage.measured += 1;
-        readings.push({ trade, reading: result });
-      } else {
-        bump(result.reason);
+      // Two different situations, and the counts matter: no order rows behind
+      // THIS position (the sync predates order capture) versus rows that asked
+      // for no price (a market close). Both produce nothing, so the join is
+      // checked before the measuring rather than blaming the sync for the
+      // trader's own discretion.
+      const joined = ordersForPosition(position, view.fills, view.orders);
+      if (!joined.length) {
+        bump("NO_ORDERS");
+        continue;
       }
+      coverage.withOrders += 1;
+
+      const orders = measurePositionOrders(position, view.fills, view.orders);
+
+      // The EXIT legs only. An entry fill is a different question (how well did
+      // I get in) and averaging it with exit quality answers neither.
+      const exits = orders.filter((reading) => !reading.opening);
+      if (!exits.length) {
+        bump("NO_REFERENCE");
+        continue;
+      }
+
+      coverage.measured += 1;
+      // The worst exit leg represents the trade: a position closed by a partial
+      // take-profit and then a stop has two readings, and the stop is the one
+      // that cost money. Averaging them inside one trade would hide it.
+      const worst = exits.reduce((a, b) => (b.bps > a.bps ? b : a));
+      readings.push({ trade, reading: worst });
     }
 
-    // Newest first: the fill you took this morning is the one you can still
-    // picture, and it is the one worth checking a new number against.
     readings.sort((a, b) => b.trade.tradeDateTime.getTime() - a.trade.tradeDateTime.getTime());
     return { readings, coverage };
   } catch {

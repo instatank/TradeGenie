@@ -492,6 +492,28 @@ async function main() {
       updatedAt: linkedClosed,
     });
   }
+  // A stop order that never filled. It is what the position's RISK is measured
+  // against — |entry 21.40 - stop 21.90| = 0.50 — so without it the analytics
+  // table has bps but no "share of risk", which is the column that matters.
+  await db.create("exchangeOrders", {
+    id: "order-seed-link-stop",
+    createdAt: exchangeNow,
+    source: "coindcx",
+    instrument: "LINK",
+    currency: "USDT",
+    quoteCurrency: "USDT",
+    side: "BUY",
+    orderType: "stop_market",
+    status: "cancelled",
+    stage: "default",
+    referencePrice: 21.9,
+    avgPrice: null,
+    quantity: 1.2,
+    fee: 0,
+    placedAt: linkedOpened,
+    updatedAt: linkedClosed,
+  });
+
   // The entry order: a limit at 21.45 that filled at 21.40 — on a SELL that is
   // 5 bps IN THE TRADER'S FAVOUR, and the case that proves negative readings
   // survive rather than being clamped to zero.

@@ -131,6 +131,21 @@ export type OrderReading = {
   priceDelta: number;
   fraction: number;
   bps: number;
+  /**
+   * The slip as a share of the risk that was actually on the exchange —
+   * |entry fill - stop trigger|. THE number to read: 5bps against a tight stop
+   * is a third of the budget and against a wide one is nothing.
+   *
+   * Derived entirely from exchange data (the position's own entry price and the
+   * stop order's own trigger), so unlike the journal-based path it cannot go
+   * wrong because a stop was moved after entry and the journal kept the old
+   * number. Null when the position had no stop order, which is honest rather
+   * than a gap.
+   */
+  riskFraction: number | null;
+  /** Larger than the whole planned risk — not a fill, so it is shown and left
+   *  out of every average. Same rule as the journal-based path. */
+  suspect: boolean;
   quantity: number;
   quoteCurrency: string;
   at: Date;
@@ -156,7 +171,7 @@ export type MeasurableOrder = {
  * at this level: an order with no reference price (a market order) or no fill
  * (cancelled) is simply not a measurement, and the caller counts what it got.
  */
-export function measureOrder(order: MeasurableOrder, opening: boolean): OrderReading | null {
+export function measureOrder(order: MeasurableOrder, opening: boolean, plannedRisk: number | null = null): OrderReading | null {
   const reference = order.referencePrice;
   const filled = order.avgPrice;
   if (reference == null || filled == null || reference <= 0 || filled <= 0) return null;
@@ -164,6 +179,7 @@ export function measureOrder(order: MeasurableOrder, opening: boolean): OrderRea
   // The one rule. See the note above: side, not entry-vs-exit.
   const priceDelta = order.side === "SELL" ? reference - filled : filled - reference;
   const fraction = priceDelta / reference;
+  const riskFraction = plannedRisk && plannedRisk > 0 ? priceDelta / plannedRisk : null;
 
   return {
     ok: true,
@@ -176,10 +192,45 @@ export function measureOrder(order: MeasurableOrder, opening: boolean): OrderRea
     priceDelta,
     fraction,
     bps: fraction * 10_000,
+    riskFraction,
+    suspect: riskFraction != null && Math.abs(riskFraction) > SUSPECT_RISK_FRACTION,
     quantity: order.quantity,
     quoteCurrency: order.quoteCurrency,
     at: order.updatedAt,
   };
+}
+
+/**
+ * The risk that was actually on the exchange for this position.
+ *
+ * `|entry fill - stop trigger|`, both read off the exchange's own records. This
+ * is deliberately NOT the journal's `stopPrice`: a stop moved up after entry
+ * leaves the journal holding a number that was never the live bracket, and
+ * measuring against it reports the distance between two unrelated prices as
+ * though it were a fill quality problem. That is exactly how a BTC stop came to
+ * read as a 290bps slip when the real execution was near-perfect.
+ *
+ * KNOWN AND DELIBERATE LIMIT: orders are joined to a position through its
+ * FILLS, so a stop that never fired has no fill pointing at it and cannot be
+ * seen here. In practice that means the risk share is available on exactly the
+ * exits where it matters — a stop-out fills its own stop order — and is null on
+ * a take-profit exit, where the stop was cancelled unfilled.
+ *
+ * Reporting null there is the honest answer. The alternative, falling back to
+ * the journal's typed stop, would reintroduce precisely the staleness this
+ * function exists to escape. (CoinDCX pairs a TP and SL under a shared
+ * `group_id`, which would recover the cancelled side — but that pairing has not
+ * been verified against real data, and guessing at it is how the last wrong
+ * number got shipped.)
+ *
+ * Null when no stop order backs this position — better than a risk figure
+ * derived from something that was not the risk.
+ */
+export function plannedRiskFromOrders(entryPrice: number, orders: MeasurableOrder[]): number | null {
+  const stop = orders.find((order) => order.orderType === "stop_market" && order.referencePrice != null);
+  if (!stop?.referencePrice || !Number.isFinite(entryPrice) || entryPrice <= 0) return null;
+  const risk = Math.abs(entryPrice - stop.referencePrice);
+  return risk > 0 ? risk : null;
 }
 
 /**
@@ -191,11 +242,20 @@ export function measureOrder(order: MeasurableOrder, opening: boolean): OrderRea
  * order does both, and relative to THIS position it is correctly the closing
  * one, which is the same reasoning closingFills() already uses.
  */
-export function measurePositionOrders(
-  position: Pick<ReconstructedPosition, "direction" | "fillIds">,
+/**
+ * The orders that actually produced this position's fills, unmeasured.
+ *
+ * Exposed separately from the measuring because "no orders are held for this
+ * position" and "orders are held but none asked for a price" are different
+ * facts about a trade, and a caller reporting why a trade is unmeasurable has
+ * to be able to tell them apart. Measuring first and counting the empties
+ * afterwards loses that distinction.
+ */
+export function ordersForPosition(
+  position: Pick<ReconstructedPosition, "fillIds">,
   fills: Fill[],
   orders: MeasurableOrder[],
-): OrderReading[] {
+): MeasurableOrder[] {
   const ids = new Set(position.fillIds);
   // fill.orderId → order.id is the join, MEASURED rather than assumed; see the
   // note in lib/coindcx.ts. Only orders that actually produced one of this
@@ -204,11 +264,21 @@ export function measurePositionOrders(
   const orderIds = new Set(
     fills.filter((fill) => ids.has(fill.id)).map((fill) => fill.orderId).filter((id): id is string => Boolean(id)),
   );
+  return orders.filter((order) => orderIds.has(order.id));
+}
 
+export function measurePositionOrders(
+  position: Pick<ReconstructedPosition, "direction" | "fillIds" | "entryPrice">,
+  fills: Fill[],
+  orders: MeasurableOrder[],
+): OrderReading[] {
   const openingSide = position.direction === "LONG" ? "BUY" : "SELL";
-  return orders
-    .filter((order) => orderIds.has(order.id))
-    .map((order) => measureOrder(order, order.side === openingSide))
+  const mine = ordersForPosition(position, fills, orders);
+  // One risk figure for the whole position, off the exchange's own stop.
+  const plannedRisk = plannedRiskFromOrders(position.entryPrice, mine);
+
+  return mine
+    .map((order) => measureOrder(order, order.side === openingSide, plannedRisk))
     .filter((reading): reading is OrderReading => reading !== null)
     .sort((a, b) => a.at.getTime() - b.at.getTime());
 }
@@ -464,7 +534,15 @@ function median(values: number[]): number | null {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-export function summarizeSlippage(readings: SlippageReading[]): SlippageSummary {
+/**
+ * The minimum a reading needs to be summarised. Structural rather than tied to
+ * one reading type, because the order-based and journal-based readings are
+ * different shapes that answer the same question — and the aggregate must be
+ * able to move from one to the other without the maths being rewritten.
+ */
+export type Summarizable = { bps: number; riskFraction: number | null; suspect: boolean };
+
+export function summarizeSlippage(readings: Summarizable[]): SlippageSummary {
   const usable = readings.filter((reading) => !reading.suspect);
   const bps = usable.map((reading) => reading.bps);
   const risk = usable.map((reading) => reading.riskFraction).filter((value): value is number => value != null);
@@ -488,8 +566,8 @@ export type SlippageGroup = SlippageSummary & { key: string; label: string };
  * trader. SOL and BTC do not have the same depth, and one number spanning both
  * is an average of two different questions.
  */
-export function slippageByInstrument(entries: Array<{ instrument: string; reading: SlippageReading }>): SlippageGroup[] {
-  const buckets = new Map<string, SlippageReading[]>();
+export function slippageByInstrument(entries: Array<{ instrument: string; reading: Summarizable }>): SlippageGroup[] {
+  const buckets = new Map<string, Summarizable[]>();
   for (const entry of entries) {
     const key = entry.instrument.trim().toUpperCase();
     const bucket = buckets.get(key);

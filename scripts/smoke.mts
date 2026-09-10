@@ -114,6 +114,7 @@ const CONTENT_CHECKS: [string, string, string][] = [
   // the greyed row proves a single reading still refuses to sound confident.
   ["/analytics", "Slippage on your fills", "the per-symbol slippage table"],
   ["/analytics", "+48.8", "a real measured median rather than the empty state"],
+  ["/analytics", "the trigger that was really on it", "the table saying its numbers come from the exchange's own orders, not a typed stop"],
   ["/analytics", "more to read this", "the thin-sample badge, so one fill never reads as a verdict"],
   // The way back from the aggregate to the rows it came from. The owner went
   // looking for "which trades have this?" and the only answer was opening every
