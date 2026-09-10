@@ -100,6 +100,12 @@ async function main() {
 // force-dynamic rather than why this check was weakened.
 const CONTENT_CHECKS: [string, string, string][] = [
   ["/import", "Use the exchange", "the reconcile diff + accept button"],
+  // The journal-health panel. The owner suspected their hand-typed money was
+  // 100x out in places; these assert the panel that settles that actually
+  // renders, badge included, on a seeded trade carrying the real mistake.
+  ["/import", "Does your journal agree with CoinDCX", "the journal-health panel"],
+  ["/import", "100x", "the rupee-slip badge on a trade typed without the conversion"],
+  ["/import", "never heard of", "the list of trades no sync can ever verify"],
   ["/import", "Log this trade", "an unjournaled position card"],
   ["/import", "older position", "the missing-funding warning"],
   ["/import", "Accept selected", "the bulk-select accept control (seed keeps 2+ review items for this)"],

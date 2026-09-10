@@ -20,6 +20,8 @@ import { credentialsFromEnv } from "@/lib/coindcx";
 import { exchangeView, positionKey } from "@/lib/coindcx-sync";
 import { db } from "@/lib/data";
 import { changedFields, diffTrade, matchPositions, willCloseTrade } from "@/lib/reconcile";
+import { auditJournal } from "@/lib/reconcile-audit";
+import { JournalAuditPanel } from "@/components/JournalAudit";
 import { getSettings } from "@/lib/settings-store";
 import { listRecords } from "@/lib/store";
 
@@ -59,6 +61,9 @@ export default async function ImportPage() {
   const configured = Boolean(credentialsFromEnv());
   const dismissed = new Set(settings.dismissedExchangeKeys ?? []);
   const { matches, unmatched } = matchPositions(view.positions, trades, positionKey);
+  // Same matcher, same answer: the audit is handed the matches rather than
+  // redoing them, so this panel can never disagree with the lists below it.
+  const audit = auditJournal(matches, trades.filter((trade) => trade.status === "CLOSED"));
 
   // Only matches that would actually change something need attention. One that
   // already agrees is a confirmation, not a task, and mixing the two would bury
@@ -90,6 +95,8 @@ export default async function ImportPage() {
         title="Exchange"
         subtitle="Your CoinDCX fills, folded into positions and checked against what you wrote down."
       />
+
+      <JournalAuditPanel audit={audit} />
 
       <section className="panel mb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

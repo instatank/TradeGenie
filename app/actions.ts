@@ -2040,9 +2040,54 @@ export async function syncExchangeAction() {
     return;
   }
   const report = await syncExchange(credentials);
+
+  // AUTO-APPLY. The exchange is the source of truth for money, and leaving that
+  // true only for trades the owner remembered to press Accept on is what let a
+  // year of hand-typed numbers drift — including a rupee-conversion slip that
+  // stored a $5 loss as five rupees.
+  //
+  // Safe by construction rather than by care: the patch is built from
+  // acceptPatch(), which is built from diffTrade(), which lists only objective
+  // columns. A thesis, mood, grade, lesson or tag cannot be reached from here
+  // even by accident, and a test asserts it. So this changes what the exchange
+  // already owned; it never overwrites anything the trader wrote.
+  const applied = report.ok ? await applyExchangeNumbers() : 0;
+
   await noteUse("exchange.sync");
   revalidateEverything();
-  await redirectBackWithFeedback(report.detail, "/import", report.ok ? "success" : "error");
+  const detail = applied > 0 ? `${report.detail} ${applied} trade${applied === 1 ? "" : "s"} updated from the exchange.` : report.detail;
+  await redirectBackWithFeedback(detail, "/import", report.ok ? "success" : "error");
+}
+
+/**
+ * Bring every matched trade's numbers in line with the exchange.
+ *
+ * Only trades that would actually CHANGE are written — an accept that alters
+ * nothing is a wasted round trip and, worse, a spurious `updatedAt` that makes
+ * a record look edited when it was not.
+ *
+ * Shared by the sync and by the manual "Accept all" button so the two can never
+ * mean different things.
+ */
+async function applyExchangeNumbers(): Promise<number> {
+  const [view, trades] = await Promise.all([exchangeView(), db.list("trades")]);
+  const { matches } = matchPositions(view.positions, trades, positionKey);
+
+  let applied = 0;
+  for (const match of matches) {
+    const key = positionKey(match.position);
+    const patch = acceptPatch(match, key);
+    // acceptPatch always carries the link and provenance; a real change is one
+    // that touches a number or the status on top of those.
+    const substantive = Object.keys(patch).filter(
+      (field) => !["exchangeKey", "currency", "moneyRate"].includes(field),
+    );
+    if (!substantive.length && match.trade.exchangeKey === key) continue;
+
+    await db.update("trades", match.trade.id, { ...patch, updatedAt: new Date() });
+    applied += 1;
+  }
+  return applied;
 }
 
 export async function acceptExchangeMatchAction(formData: FormData) {

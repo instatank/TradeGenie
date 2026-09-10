@@ -418,6 +418,21 @@ async function main() {
     });
   }
 
+  // One trade carrying the owner's real mistake: a P&L typed without the rupee
+  // conversion, so it sits at a hundredth of what the exchange recorded. The
+  // audit panel's "~100x out" badge is a conditional render `next build` cannot
+  // reach, and without a seeded case no gate would ever see it.
+  if (matchable) {
+    // Derived from the fills above, not from whatever the trade already said:
+    // buy 0.5 @ 2484.25, sell 0.5 @ 2512.50 is 14.125 gross, 0.25 of fees and
+    // -0.0312 of funding, so 13.8438 net. A hundredth of that is what the
+    // journal holds when the rupee conversion was forgotten.
+    await db.update("trades", matchable.id, {
+      realizedPnl: 14.125 / 100,
+      netPnl: 13.8438 / 100,
+    });
+  }
+
   if (secondMatchable) {
     const opened = new Date(secondMatchable.tradeDateTime.getTime() + 6 * 60_000);
     const closed = new Date(opened.getTime() + 2 * 60 * 60_000);

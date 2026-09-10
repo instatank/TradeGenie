@@ -1698,6 +1698,44 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     off the ENTRY order — those carry the bracket set at entry time and were populated on only
     1 of 10 sampled rows, which is not enough to design against yet.
 
+- **CoinDCX is the source of truth for money, without anyone having to press a button**
+  (`lib/reconcile-audit.ts`, `applyExchangeNumbers` in `app/actions.ts`, the journal-health
+  panel on `/import`). The rule was always "the exchange owns the numbers, the trader owns the
+  words" — but it was only true for trades the owner had *remembered to accept*, and a year of
+  hand-typed figures had drifted underneath it.
+  - **The owner's own diagnosis, and it was right.** They recorded everything in rupees, so a
+    $5 loss on a USDT-margined trade was meant to be entered as 500 — and was sometimes entered
+    as 5. Nothing in the app could see it: ₹5 is a perfectly valid number. It surfaced only
+    because slippage readings came out absurd and they went looking at the trades behind them.
+  - **Measured before repairing.** `auditJournal()` compares every closed trade against the
+    position it matches and reports where they differ, flagging a money field off by roughly
+    100x as the suspected slip. Band 50-200x on purpose: fees and funding drift between the two
+    records for real reasons, and a tight band would miss the rows this exists to find. A ratio
+    across a sign flip or against zero returns null — a loss recorded as a gain is a *different*
+    mistake and must not be dressed as this one. Only money fields count: a quantity is units of
+    a coin, so a 100x gap there is something else.
+  - **The panel names the unfixable set too.** A trade CoinDCX has never heard of can never be
+    checked — not now, not later. A wrong number can be corrected; an unverifiable one can only
+    be trusted or deleted, which is a decision and not a sync. Counting them beside the
+    repairable ones is what stops that set being assumed small.
+  - **Auto-apply is safe by construction, not by care.** The sync now writes matched trades
+    without an Accept, and it can do that only because the patch comes from `acceptPatch()`,
+    built from `diffTrade()`, which lists objective columns alone. A thesis, mood, grade, lesson
+    or tag is unreachable from that path. A **source-level** test guards it: the sync's writer
+    must patch from `acceptPatch`, must contain exactly one `db.update`, and must not mention
+    any subjective field by name — because a behavioural test proves today's patch is clean
+    while this proves no later edit can quietly start writing trades by another route.
+  - **A match that would change nothing is skipped**, so a re-sync cannot stamp `updatedAt`
+    across the whole journal and make every record look edited when none was.
+  - The seed carries a trade with the real mistake — a P&L at exactly a hundredth of what its
+    own fills produce — because the "~100x out" badge is a conditional render `next build`
+    cannot reach, and the first attempt at seeding it (dividing the seed's own arbitrary number
+    by 100) produced a 3.4x gap that flagged nothing.
+  - Deliberately NOT done: repairing the unmatched trades (nothing to repair them *from*),
+    guessing a scale factor and multiplying anything by 100 (the exchange's own figure is
+    right there — inferring one would be the same class of mistake as the bug), and touching
+    `stopPrice` / `targetPrice` / `plannedEntryPrice`, which are plan and stay the trader's.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the
