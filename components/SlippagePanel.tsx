@@ -1,5 +1,5 @@
 import { getTradeSlippage } from "@/lib/slippage-view";
-import type { EntrySlippageReading, SlippageReading } from "@/lib/slippage";
+import type { EntrySlippageReading, OrderReading, SlippageReading } from "@/lib/slippage";
 import type { Trade } from "@/lib/types";
 
 // What your fills actually cost you on this one trade.
@@ -114,8 +114,51 @@ function EntryReading({ reading }: { reading: EntrySlippageReading }) {
   );
 }
 
+/**
+ * What the EXCHANGE recorded, straight from the order rows.
+ *
+ * Shown FIRST and above the journal-based reading, because it is the better
+ * measurement on every axis: the order states its own leg rather than having it
+ * inferred from which side of the entry the exit landed on, and its reference
+ * is the trigger actually set on the exchange rather than a number that had to
+ * be typed into the journal and remembered correctly.
+ */
+function OrderReadings({ readings }: { readings: OrderReading[] }) {
+  const label = (reading: OrderReading) => {
+    if (reading.leg === "STOP") return "Stop";
+    if (reading.leg === "TARGET") return "Target";
+    return reading.opening ? "Limit entry" : "Limit exit";
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-forge-muted">
+        Straight from the exchange&rsquo;s own order records — the price you set on it, against the price it gave you.
+        Nothing here depends on what was written in the journal.
+      </p>
+      <ul className="space-y-1 text-sm">
+        {readings.map((reading, index) => {
+          const worse = reading.priceDelta > 0;
+          return (
+            <li key={`${reading.at.getTime()}-${index}`} className="flex flex-wrap items-baseline gap-x-2 rounded-md bg-forge-panel px-3 py-2">
+              <span className="font-medium">{label(reading)}</span>
+              <span className="text-xs text-forge-muted">{reading.side === "BUY" ? "bought" : "sold"}</span>
+              <span>
+                asked <strong className="font-medium">{fmt(reading.reference, 4)}</strong>, got{" "}
+                <strong className="font-medium">{fmt(reading.filled, 4)}</strong>
+              </span>
+              <span className={toneFor(reading.bps)}>{signed(reading.bps, 1, " bps")}</span>
+              {!worse && reading.bps < -0.5 ? <span className="text-xs text-forge-muted">in your favour</span> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export async function SlippagePanel({ trade }: { trade: Trade }) {
-  const { exit, entry } = await getTradeSlippage(trade);
+  const { exit, entry, orders } = await getTradeSlippage(trade);
 
   return (
     <section className="panel space-y-4">
@@ -124,7 +167,14 @@ export async function SlippagePanel({ trade }: { trade: Trade }) {
         <span className="text-xs text-forge-muted">the price you asked for, against the one you got</span>
       </div>
 
-      {exit.ok ? <ExitReading reading={exit} /> : <p className="text-sm text-forge-muted">{exit.detail}</p>}
+      {orders.length ? <OrderReadings readings={orders} /> : null}
+
+      <div className={orders.length ? "border-t border-forge-line pt-3" : undefined}>
+        {orders.length ? (
+          <h3 className="mb-2 text-sm font-semibold">Measured against what you wrote down</h3>
+        ) : null}
+        {exit.ok ? <ExitReading reading={exit} /> : <p className="text-sm text-forge-muted">{exit.detail}</p>}
+      </div>
 
       <div className="border-t border-forge-line pt-3">
         <h3 className="text-sm font-semibold">Getting in</h3>

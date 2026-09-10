@@ -16,17 +16,32 @@ import {
   calculateSlippage,
   type EntrySlippageResult,
   type SlippageReading,
+  measurePositionOrders,
+  type OrderReading,
   type SlippageResult,
 } from "@/lib/slippage";
 import type { Trade } from "@/lib/types";
 
 /** Both legs for one trade, each with its own reading or its own refusal. */
-export type TradeSlippageReport = { exit: SlippageResult; entry: EntrySlippageResult };
+export type TradeSlippageReport = {
+  exit: SlippageResult;
+  entry: EntrySlippageResult;
+  /**
+   * What the EXCHANGE recorded, which beats both of the above when present: the
+   * order states its own leg and carries the trigger price actually set, so
+   * nothing is inferred from geometry or remembered from the journal.
+   *
+   * Empty on any trade whose orders were never captured — every trade synced
+   * before /orders was called — and that reads as "unknown", never as "no
+   * order existed".
+   */
+  orders: OrderReading[];
+};
 
 const NOT_LINKED = (detail: string) => ({ ok: false as const, reason: "NOT_LINKED" as const, detail });
 
 export async function getTradeSlippage(trade: Trade): Promise<TradeSlippageReport> {
-  const unlinked = (detail: string): TradeSlippageReport => ({ exit: NOT_LINKED(detail), entry: NOT_LINKED(detail) });
+  const unlinked = (detail: string): TradeSlippageReport => ({ exit: NOT_LINKED(detail), entry: NOT_LINKED(detail), orders: [] });
 
   if (!trade.exchangeKey) {
     return unlinked("This trade has not been reconciled against an exchange position, so there are no real fills to compare your prices against.");
@@ -41,6 +56,7 @@ export async function getTradeSlippage(trade: Trade): Promise<TradeSlippageRepor
     return {
       exit: calculateSlippage(trade, position, view.fills, view.ledger),
       entry: calculateEntrySlippage(trade, position),
+      orders: measurePositionOrders(position, view.fills, view.orders),
     };
   } catch {
     return unlinked("The exchange history could not be read.");

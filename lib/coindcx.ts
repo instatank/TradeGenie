@@ -360,6 +360,153 @@ export function parseFill(record: unknown): Fill | null {
 
 export type ParsedFills = { fills: Fill[]; skipped: number };
 
+// ── Orders: the price you ASKED for ─────────────────────────────────────────
+//
+// A record from /derivatives/futures/orders, verbatim from the live API:
+//
+//   { id: "56f5d96c-…", pair: "B-HYPE_USDT", side: "sell", status: "filled",
+//     order_type: "stop_market", stage: "tpsl_exit", order_category: "complete_tpsl",
+//     price: 86.937, stop_price: 85.8, avg_price: 85.81,
+//     total_quantity: 10.33, fee_amount: 0.522986207, leverage: 1,
+//     take_profit_price: null, stop_loss_price: null, group_id: "de9487c9…",
+//     margin_currency_short_name: "USDT",
+//     created_at: 1788790889208, updated_at: 1788794308719 }
+//
+// THIS ROW IS A WHOLE SLIPPAGE MEASUREMENT. `stop_price` is the trigger the
+// trader set on the exchange; `avg_price` is what they got. Everything the
+// journal previously had to be told, the exchange knew all along.
+//
+// Two facts established by probing, both of which the adapter depends on and
+// neither of which was safe to assume:
+//
+//   - `id` IS a fill's `order_id`. Measured: 47 of 100 orders matched, against
+//     only 53 distinct order_ids present in that window of fills. The obvious
+//     join being wrong is not hypothetical here — `fill_id` looked just as
+//     plausible and matched nothing.
+//   - `avg_price` EQUALS the volume-weighted price of the fills the order
+//     produced, exactly, on all five sampled including a 22-leg market order.
+//     So the fill price needs no join; the order row is self-contained.
+//
+// A trap in the numbers: `stop_price`, `avg_price` and the two bracket fields
+// use **0 and null interchangeably for "not applicable"**. A limit order
+// reports `stop_price: 0`, not null. Treating 0 as a price would put a
+// reference of zero on every limit order and report ~10,000% slippage, so
+// `positivePrice()` collapses both to null.
+
+/** How many rows carry a price that is really "not applicable". */
+function positivePrice(value: unknown): number | null {
+  const number = finiteNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+/**
+ * The price an order asked for, by type. THE one place that rule lives.
+ *
+ * Measured on the live account: `stop_price` is populated on both
+ * `stop_market` and `take_profit_market` (4 of 4 across the probed pages) and
+ * is 0 on everything else, so the trigger field is shared by both bracket
+ * types rather than each having its own.
+ *
+ * A **market order returns null and that is the correct answer, not a gap**: it
+ * asked for whatever the book had. Scoring a market fill against any reference
+ * would be inventing an intention the trader never expressed — the same refusal
+ * as measuring a discretionary exit against a stop.
+ */
+export function referencePriceOf(orderType: string, raw: { price?: unknown; stop_price?: unknown }): number | null {
+  switch (orderType) {
+    case "stop_market":
+    case "take_profit_market":
+      return positivePrice(raw.stop_price);
+    case "limit_order":
+      return positivePrice(raw.price);
+    default:
+      // market_order, and anything CoinDCX adds later. Unknown means unmeasured,
+      // never guessed — a new order type must not silently acquire a reference
+      // price by falling through to `price`.
+      return null;
+  }
+}
+
+/** Is this order type one the exchange's own bracket fired? */
+export function orderIsBracket(orderType: string): boolean {
+  return orderType === "stop_market" || orderType === "take_profit_market";
+}
+
+/** Which leg a bracket order represents. Null for anything that is not one. */
+export function bracketLegOf(orderType: string): "STOP" | "TARGET" | null {
+  if (orderType === "stop_market") return "STOP";
+  if (orderType === "take_profit_market") return "TARGET";
+  return null;
+}
+
+export type ParsedOrder = {
+  id: string;
+  instrument: string;
+  currency: string;
+  quoteCurrency: string;
+  side: "BUY" | "SELL";
+  orderType: string;
+  status: string;
+  stage: string;
+  referencePrice: number | null;
+  avgPrice: number | null;
+  quantity: number;
+  fee: number;
+  placedAt: Date;
+  updatedAt: Date;
+};
+
+/**
+ * One API order → one ParsedOrder, or null if it cannot be trusted.
+ *
+ * Null rather than throwing, for the same reason parseFill does: one malformed
+ * row must not cost the import of a whole page, and callers count what was
+ * skipped and say so.
+ */
+export function parseOrder(record: unknown): ParsedOrder | null {
+  if (!record || typeof record !== "object") return null;
+  const raw = record as Record<string, unknown>;
+
+  const id = typeof raw.id === "string" ? raw.id : null;
+  const pair = typeof raw.pair === "string" ? raw.pair : null;
+  const side = typeof raw.side === "string" ? raw.side.trim().toUpperCase() : null;
+  const placedAt = finiteNumber(raw.created_at);
+
+  if (!id || !pair || (side !== "BUY" && side !== "SELL") || placedAt === null) return null;
+
+  const orderType = typeof raw.order_type === "string" ? raw.order_type : "";
+  return {
+    id,
+    instrument: normalizePair(pair),
+    currency: typeof raw.margin_currency_short_name === "string" ? raw.margin_currency_short_name : "",
+    quoteCurrency: quoteCurrencyOf(pair),
+    side,
+    orderType,
+    status: typeof raw.status === "string" ? raw.status : "",
+    stage: typeof raw.stage === "string" ? raw.stage : "",
+    referencePrice: referencePriceOf(orderType, raw),
+    avgPrice: positivePrice(raw.avg_price),
+    quantity: finiteNumber(raw.total_quantity) ?? 0,
+    fee: finiteNumber(raw.fee_amount) ?? 0,
+    placedAt: new Date(placedAt),
+    updatedAt: new Date(finiteNumber(raw.updated_at) ?? placedAt),
+  };
+}
+
+export type ParsedOrders = { orders: ParsedOrder[]; skipped: number };
+
+export function parseOrders(body: unknown): ParsedOrders {
+  const records = Array.isArray(body) ? body : [];
+  const orders: ParsedOrder[] = [];
+  let skipped = 0;
+  for (const record of records) {
+    const order = parseOrder(record);
+    if (order) orders.push(order);
+    else skipped += 1;
+  }
+  return { orders, skipped };
+}
+
 // A record from /derivatives/futures/positions/transactions:
 //
 //   { pair: "B-SOL_USDT", stage: "tpsl_exit", amount: -1305.1716,

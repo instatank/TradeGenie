@@ -12,8 +12,11 @@ import {
   calculateEntrySlippage,
   calculateSlippage,
   closingFills,
+  measureOrder,
+  measurePositionOrders,
   slippageByInstrument,
   summarizeSlippage,
+  type MeasurableOrder,
   type SlippageReading,
 } from "@/lib/slippage";
 import { reconstructPositions, type Fill } from "@/lib/positions";
@@ -287,5 +290,90 @@ describe("summarising", () => {
     assert.equal(empty.medianBps, null);
     assert.equal(empty.worstBps, null);
     assert.equal(empty.count, 0);
+  });
+});
+
+describe("measuring against the exchange's own order", () => {
+  const order = (overrides: Partial<MeasurableOrder>): MeasurableOrder => ({
+    id: "o1",
+    side: "SELL",
+    orderType: "stop_market",
+    status: "filled",
+    referencePrice: 85.8,
+    avgPrice: 85.81,
+    quantity: 10.33,
+    quoteCurrency: "USDT",
+    updatedAt: at(30),
+    ...overrides,
+  });
+
+  it("reproduces the owner's real HYPE stop, which slipped IN THEIR FAVOUR", () => {
+    // Verbatim from the live account: a long's stop set at 85.80 that filled at
+    // 85.81 — one tick better than asked. This is the case that justifies
+    // keeping negative readings rather than clamping at zero.
+    const reading = measureOrder(order({}), false)!;
+    assert.ok(reading);
+    assert.equal(reading.leg, "STOP", "the exchange states the leg; nothing infers it");
+    assert.ok(Math.abs(reading.priceDelta + 0.01) < 1e-9, `priceDelta ${reading.priceDelta}`);
+    assert.ok(reading.bps < 0, "filled better than asked must read negative");
+    assert.ok(Math.abs(reading.bps + 1.1655) < 0.01, `bps ${reading.bps}`);
+  });
+
+  it("uses SIDE as the only rule, so entry and exit need no separate formula", () => {
+    // A SELL wants a higher price; a BUY wants a lower one. That single
+    // statement replaces the "inverted on the entry" special case the
+    // journal-based path needs.
+    const sold = measureOrder(order({ side: "SELL", referencePrice: 100, avgPrice: 99.9 }), false)!;
+    const bought = measureOrder(order({ side: "BUY", referencePrice: 100, avgPrice: 100.1 }), true)!;
+    assert.ok(Math.abs(sold.priceDelta - 0.1) < 1e-9, "selling lower than asked is worse");
+    assert.ok(Math.abs(bought.priceDelta - 0.1) < 1e-9, "buying higher than asked is worse, by the same amount");
+    assert.equal(bought.opening, true);
+  });
+
+  it("declines a market order rather than inventing a price it asked for", () => {
+    assert.equal(measureOrder(order({ orderType: "market_order", referencePrice: null }), true), null);
+  });
+
+  it("declines an order that never filled", () => {
+    assert.equal(measureOrder(order({ status: "cancelled", avgPrice: null }), false), null);
+  });
+
+  it("measures a limit order, which has a reference but is neither leg", () => {
+    const reading = measureOrder(order({ orderType: "limit_order", referencePrice: 87, avgPrice: 87 }), true)!;
+    assert.ok(reading);
+    assert.equal(reading.leg, null);
+    assert.equal(reading.priceDelta, 0);
+  });
+
+  it("only scores orders that actually produced this position's fills", () => {
+    // A stop resting on another position in the same symbol must never be
+    // scored against this one. The join is fill.orderId → order.id.
+    const fills = [
+      fill({ id: "f1", side: "BUY", price: 100, timestamp: T0, orderId: "mine-open" }),
+      fill({ id: "f2", side: "SELL", price: 99.8, timestamp: at(30), orderId: "mine-exit" }),
+    ];
+    const { positions } = reconstructPositions(fills);
+
+    const readings = measurePositionOrders(positions[0], fills, [
+      order({ id: "mine-open", side: "BUY", orderType: "limit_order", referencePrice: 100, avgPrice: 100, updatedAt: T0 }),
+      order({ id: "mine-exit", side: "SELL", referencePrice: 99.85, avgPrice: 99.8, updatedAt: at(30) }),
+      order({ id: "someone-elses", side: "SELL", referencePrice: 50, avgPrice: 40, updatedAt: at(31) }),
+    ]);
+
+    assert.equal(readings.length, 2, "the stranger's order must not be counted");
+    assert.deepEqual(readings.map((reading) => reading.opening), [true, false], "chronological, entry first");
+    // The exit: stop 99.85, filled 99.80, a SELL, so 0.05 worse.
+    assert.ok(Math.abs(readings[1].priceDelta - 0.05) < 1e-9);
+  });
+
+  it("returns nothing when no orders are held, rather than guessing", () => {
+    // Every trade synced before orders were captured is in this state, and it
+    // must read as "unknown", never as "no order existed".
+    const fills = [
+      fill({ id: "f1", side: "BUY", price: 100, timestamp: T0 }),
+      fill({ id: "f2", side: "SELL", price: 99.8, timestamp: at(30) }),
+    ];
+    const { positions } = reconstructPositions(fills);
+    assert.deepEqual(measurePositionOrders(positions[0], fills, []), []);
   });
 });

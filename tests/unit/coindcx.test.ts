@@ -6,7 +6,7 @@
 // schema, and a test that drifted from them would be testing nothing.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { exitWasAutomatic, formatProbeReport, FUTURES_PROBES, normalizePair, parseFill, parseFills, parseTransaction, parseTransactions } from "@/lib/coindcx";
+import { bracketLegOf, exitWasAutomatic, formatProbeReport, FUTURES_PROBES, normalizePair, orderIsBracket, parseFill, parseFills, parseOrder, parseOrders, parseTransaction, parseTransactions, referencePriceOf } from "@/lib/coindcx";
 
 // Straight from /exchange/v1/derivatives/futures/trades.
 const REAL_TRADE = {
@@ -235,5 +235,151 @@ describe("the /orders probe survives whatever comes back", () => {
     for (const body of [null, "gateway timeout", { error: "nope" }, [null], [{ nested: { a: 1 } }], [{ x: undefined }]]) {
       assert.doesNotThrow(() => render(body), `threw on ${JSON.stringify(body)}`);
     }
+  });
+});
+
+// Verbatim rows from /derivatives/futures/orders on the live account. Like
+// every other fixture in this file these ARE the schema — there is no published
+// one — so they are pasted unedited rather than tidied into what the parser
+// would find convenient.
+const REAL_STOP_ORDER = {
+  id: "56f5d96c-e9d8-4b34-a24c-d924ea2f3380",
+  client_order_id: null,
+  pair: "B-HYPE_USDT",
+  side: "sell",
+  status: "filled",
+  order_type: "stop_market",
+  stop_trigger_instruction: "last_price",
+  notification: "email_notification",
+  leverage: 1,
+  maker_fee: 0.0236,
+  taker_fee: 0.059,
+  fee_amount: 0.522986207,
+  price: 86.937,
+  stop_price: 85.8,
+  avg_price: 85.81,
+  total_quantity: 10.33,
+  remaining_quantity: 0,
+  cancelled_quantity: 0,
+  ideal_margin: 0,
+  order_category: "complete_tpsl",
+  stage: "tpsl_exit",
+  group_id: "de9487c9B-HYPE_USDT1788790889",
+  liquidation_fee: null,
+  position_margin_type: "isolated",
+  settlement_currency_conversion_price: 1,
+  take_profit_price: null,
+  stop_loss_price: null,
+  margin_currency_short_name: "USDT",
+  display_message: null,
+  group_status: null,
+  created_at: 1788790889208,
+  updated_at: 1788794308719,
+};
+
+// A cancelled limit order, also verbatim. Note stop_price and avg_price are
+// BOTH 0 here — the trap the parser exists to survive.
+const REAL_CANCELLED_LIMIT = {
+  id: "394baf63-b89b-4a0f-a611-93910c69430a",
+  pair: "B-BTC_USDT",
+  side: "buy",
+  status: "cancelled",
+  order_type: "limit_order",
+  price: 78715,
+  stop_price: 0,
+  avg_price: 0,
+  total_quantity: 0.019,
+  remaining_quantity: 0,
+  cancelled_quantity: 0.019,
+  fee_amount: 0,
+  stage: "default",
+  margin_currency_short_name: "USDT",
+  created_at: 1788934119787,
+  updated_at: 1788935662084,
+};
+
+describe("parseOrder", () => {
+  it("reads the price asked for and the price got, off one row", () => {
+    const order = parseOrder(REAL_STOP_ORDER)!;
+    assert.ok(order);
+    assert.equal(order.id, "56f5d96c-e9d8-4b34-a24c-d924ea2f3380");
+    assert.equal(order.instrument, "HYPE");
+    assert.equal(order.quoteCurrency, "USDT");
+    assert.equal(order.currency, "USDT");
+    assert.equal(order.side, "SELL");
+    assert.equal(order.orderType, "stop_market");
+    assert.equal(order.stage, "tpsl_exit");
+    // The whole point: the trigger this trader set, and the fill they got.
+    assert.equal(order.referencePrice, 85.8);
+    assert.equal(order.avgPrice, 85.81);
+    assert.equal(order.quantity, 10.33);
+    // Unrounded, like a fill's fee. The exchange UI shows "0.52".
+    assert.equal(order.fee, 0.522986207);
+  });
+
+  it("never treats 0 as a price", () => {
+    // THE trap. CoinDCX uses 0 and null interchangeably for "not applicable":
+    // a limit order reports stop_price 0, and an unfilled one reports avg_price
+    // 0. Reading either as a real price puts a reference of zero on the order
+    // and reports slippage in the thousands of percent.
+    const order = parseOrder(REAL_CANCELLED_LIMIT)!;
+    assert.equal(order.referencePrice, 78715, "a limit order asks for its limit price");
+    assert.equal(order.avgPrice, null, "0 means it never filled, not that it filled at zero");
+  });
+
+  it("refuses a row missing anything it is keyed on", () => {
+    assert.equal(parseOrder({ ...REAL_STOP_ORDER, id: undefined }), null);
+    assert.equal(parseOrder({ ...REAL_STOP_ORDER, pair: undefined }), null);
+    assert.equal(parseOrder({ ...REAL_STOP_ORDER, side: "sideways" }), null);
+    assert.equal(parseOrder({ ...REAL_STOP_ORDER, created_at: undefined }), null);
+    assert.equal(parseOrder(null), null);
+  });
+
+  it("counts what it had to skip rather than dropping it silently", () => {
+    const { orders, skipped } = parseOrders([REAL_STOP_ORDER, null, { junk: true }, REAL_CANCELLED_LIMIT]);
+    assert.equal(orders.length, 2);
+    assert.equal(skipped, 2);
+  });
+});
+
+describe("referencePriceOf — which field holds the price you asked for", () => {
+  it("takes the trigger from both bracket types, which share the field", () => {
+    // Measured: stop_price is populated on stop_market AND take_profit_market,
+    // 4 of 4 across the probed pages, and 0 on everything else.
+    assert.equal(referencePriceOf("stop_market", { price: 86.9, stop_price: 85.8 }), 85.8);
+    assert.equal(referencePriceOf("take_profit_market", { price: 86.9, stop_price: 88.39 }), 88.39);
+  });
+
+  it("takes the limit from a limit order", () => {
+    assert.equal(referencePriceOf("limit_order", { price: 78715, stop_price: 0 }), 78715);
+  });
+
+  it("returns null for a market order, which is the right answer and not a gap", () => {
+    // A market order asked for whatever the book had. Scoring its fill against
+    // any reference invents an intention the trader never expressed — the same
+    // refusal as measuring a discretionary exit against a stop.
+    assert.equal(referencePriceOf("market_order", { price: 87.6, stop_price: 0 }), null);
+  });
+
+  it("returns null for an order type nobody has seen yet", () => {
+    // A type CoinDCX adds later must not acquire a reference price by falling
+    // through to `price` — that would be a confident wrong number, which is the
+    // one output this whole feature must not produce.
+    assert.equal(referencePriceOf("trailing_stop_market", { price: 100, stop_price: 99 }), null);
+  });
+});
+
+describe("the exchange states the leg, so nothing has to infer it", () => {
+  it("names stop and target from the order type", () => {
+    assert.equal(bracketLegOf("stop_market"), "STOP");
+    assert.equal(bracketLegOf("take_profit_market"), "TARGET");
+    assert.equal(bracketLegOf("limit_order"), null);
+    assert.equal(bracketLegOf("market_order"), null);
+  });
+
+  it("knows which types are the exchange's own bracket firing", () => {
+    assert.equal(orderIsBracket("stop_market"), true);
+    assert.equal(orderIsBracket("take_profit_market"), true);
+    assert.equal(orderIsBracket("limit_order"), false);
   });
 });

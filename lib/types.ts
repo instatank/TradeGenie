@@ -455,6 +455,56 @@ export type ExchangeFill = {
   quoteCurrency: string;
 };
 
+/**
+ * One order, as the exchange reported it — the price you ASKED for.
+ *
+ * The third raw collection, and the one that closes the gap every other part of
+ * the import has: fills and ledger rows both say what HAPPENED, and neither has
+ * ever said what was requested. An order carries both sides — `referencePrice`
+ * is what you set, `avgPrice` is what you got — which is a slippage measurement
+ * in a single row.
+ *
+ * Established by probing the live API (there is no usable published schema; see
+ * lib/coindcx.ts), and the rows in tests/unit/coindcx.test.ts ARE the schema.
+ */
+export type ExchangeOrder = {
+  /** The exchange's own order id. MEASURED to be the same value a fill carries
+   *  as `order_id` — 47 of 100 orders matched, against only 53 distinct
+   *  order_ids present in that window of fills. Not assumed: joining on the
+   *  plausible-looking field is exactly how `fill_id` wasted a round. */
+  id: string;
+  createdAt: Date;
+  source: string;
+  instrument: string;
+  /** The margin wallet, as on a fill. */
+  currency: string;
+  /** What the price fields are denominated in — the pair's quote currency. */
+  quoteCurrency: string;
+  side: "BUY" | "SELL";
+  /** The exchange's own word: limit_order, market_order, stop_market,
+   *  take_profit_market. This is what makes a stop distinguishable from a
+   *  target without inferring it from which side of the entry the exit landed. */
+  orderType: string;
+  status: string;
+  /** The exchange's stage marker, as on a ledger row ("tpsl_exit", "default"). */
+  stage: string;
+  /**
+   * The price this order ASKED for, already resolved from whichever field
+   * carries it for this order type — the trigger on a stop or take-profit, the
+   * limit on a limit order. Null on a market order, which asked for no price at
+   * all and therefore cannot be measured against one.
+   */
+  referencePrice: number | null;
+  /** What it actually filled at. VERIFIED equal to the volume-weighted price of
+   *  the fills it produced, exactly, including across a 22-leg order — so the
+   *  exit price needs no join at all. Null on an unfilled order. */
+  avgPrice: number | null;
+  quantity: number;
+  fee: number;
+  placedAt: Date;
+  updatedAt: Date;
+};
+
 /** One row of the exchange's transaction ledger: funding, an exit, or P&L. */
 export type ExchangeLedgerEntry = {
   id: string;

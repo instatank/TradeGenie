@@ -33,7 +33,7 @@
 // measurement into a one-sided complaint.
 
 import type { Fill, ReconstructedPosition } from "@/lib/positions";
-import type { CoindcxTransaction } from "@/lib/coindcx";
+import { bracketLegOf, type CoindcxTransaction } from "@/lib/coindcx";
 import type { Trade } from "@/lib/types";
 
 /** Which planned price this exit is being measured against. */
@@ -93,6 +93,125 @@ export type SlippageReading = {
 };
 
 export type SlippageResult = SlippageReading | SlippageRefusal;
+
+// ── The order-based reading: what the exchange itself recorded ──────────────
+//
+// Everything above this line measures against a price the TRADER typed into the
+// journal. That was the only reference available before /orders was called, and
+// it has two weaknesses: it depends on the trader having written the stop down,
+// and it needs geometry (which side of the entry did the exit land on?) to
+// guess whether a stop or a target fired.
+//
+// An order row removes both. `order_type` STATES the leg — stop_market vs
+// take_profit_market — and `referencePrice` is the trigger actually set on the
+// exchange. So when an order is held, it is preferred, and nothing has to be
+// remembered or inferred.
+//
+// **THE SIGN GETS SIMPLER, AND IT IS WORTH SEEING WHY.** The journal-based code
+// needs one formula for the exit and the opposite one for the entry, which
+// reads like a bug and is commented as though it were a quirk. It is not: an
+// order carries its own SIDE, and side is the whole rule. A SELL wants a higher
+// price, so worse is `reference - filled`; a BUY wants a lower one, so worse is
+// `filled - reference`. Entry and exit collapse into that single statement,
+// because "entry" and "exit" were only ever proxies for which side you were on.
+
+export type OrderReading = {
+  ok: true;
+  /** STOP or TARGET when the exchange's bracket fired; null for a limit order,
+   *  which has a reference price but is neither leg. */
+  leg: SlippageLeg | null;
+  /** The exchange's own word: stop_market, take_profit_market, limit_order. */
+  orderType: string;
+  side: "BUY" | "SELL";
+  /** True when this order opened the position rather than closed it. */
+  opening: boolean;
+  reference: number;
+  filled: number;
+  /** Positive is worse for you, exactly as everywhere else in this file. */
+  priceDelta: number;
+  fraction: number;
+  bps: number;
+  quantity: number;
+  quoteCurrency: string;
+  at: Date;
+};
+
+/** An order as this module needs it — structurally what lib/types.ts stores. */
+export type MeasurableOrder = {
+  id: string;
+  side: "BUY" | "SELL";
+  orderType: string;
+  status: string;
+  referencePrice: number | null;
+  avgPrice: number | null;
+  quantity: number;
+  quoteCurrency: string;
+  updatedAt: Date;
+};
+
+/**
+ * Measure ONE order against the price it asked for.
+ *
+ * Returns null rather than a refusal object because there is nothing to explain
+ * at this level: an order with no reference price (a market order) or no fill
+ * (cancelled) is simply not a measurement, and the caller counts what it got.
+ */
+export function measureOrder(order: MeasurableOrder, opening: boolean): OrderReading | null {
+  const reference = order.referencePrice;
+  const filled = order.avgPrice;
+  if (reference == null || filled == null || reference <= 0 || filled <= 0) return null;
+
+  // The one rule. See the note above: side, not entry-vs-exit.
+  const priceDelta = order.side === "SELL" ? reference - filled : filled - reference;
+  const fraction = priceDelta / reference;
+
+  return {
+    ok: true,
+    leg: bracketLegOf(order.orderType),
+    orderType: order.orderType,
+    side: order.side,
+    opening,
+    reference,
+    filled,
+    priceDelta,
+    fraction,
+    bps: fraction * 10_000,
+    quantity: order.quantity,
+    quoteCurrency: order.quoteCurrency,
+    at: order.updatedAt,
+  };
+}
+
+/**
+ * Every measurable order behind one position, split into the legs that opened
+ * it and the legs that closed it.
+ *
+ * An order is "opening" when its side matches the direction the position was
+ * held in — a LONG is opened by BUYs and closed by SELLs. On a flip the same
+ * order does both, and relative to THIS position it is correctly the closing
+ * one, which is the same reasoning closingFills() already uses.
+ */
+export function measurePositionOrders(
+  position: Pick<ReconstructedPosition, "direction" | "fillIds">,
+  fills: Fill[],
+  orders: MeasurableOrder[],
+): OrderReading[] {
+  const ids = new Set(position.fillIds);
+  // fill.orderId → order.id is the join, MEASURED rather than assumed; see the
+  // note in lib/coindcx.ts. Only orders that actually produced one of this
+  // position's fills are considered, so a stop resting on a different position
+  // in the same symbol can never be scored against this one.
+  const orderIds = new Set(
+    fills.filter((fill) => ids.has(fill.id)).map((fill) => fill.orderId).filter((id): id is string => Boolean(id)),
+  );
+
+  const openingSide = position.direction === "LONG" ? "BUY" : "SELL";
+  return orders
+    .filter((order) => orderIds.has(order.id))
+    .map((order) => measureOrder(order, order.side === openingSide))
+    .filter((reading): reading is OrderReading => reading !== null)
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
+}
 
 /** The exchange's own word for "my bracket order closed this position". */
 const BRACKET_STAGE = "tpsl_exit";

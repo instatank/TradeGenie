@@ -465,6 +465,55 @@ async function main() {
       occurredAt: linkedClosed,
     });
   }
+  // The ORDERS behind that exit — the only record of what was ASKED for.
+  // Shaped after the owner's real HYPE stop: a trigger set at 20.50 that filled
+  // at 20.60, i.e. 48.8 bps worse, which is the same number the journal-based
+  // path gets from the typed target. The two agreeing on a seeded trade is the
+  // cheapest guard there is against them drifting apart.
+  for (const [index, fillId] of ["seed-fill-9", "seed-fill-10", "seed-fill-11"].entries()) {
+    await db.create("exchangeOrders", {
+      id: `order-${fillId}`,
+      createdAt: exchangeNow,
+      source: "coindcx",
+      instrument: "LINK",
+      currency: "USDT",
+      quoteCurrency: "USDT",
+      side: "BUY",
+      // The exchange's own word, and what makes the leg a fact rather than a
+      // guess: this was a take-profit on a short.
+      orderType: index === 0 ? "take_profit_market" : "limit_order",
+      status: "filled",
+      stage: "tpsl_exit",
+      referencePrice: 20.5,
+      avgPrice: 20.6,
+      quantity: 0.4,
+      fee: 0.004,
+      placedAt: linkedOpened,
+      updatedAt: linkedClosed,
+    });
+  }
+  // The entry order: a limit at 21.45 that filled at 21.40 — on a SELL that is
+  // 5 bps IN THE TRADER'S FAVOUR, and the case that proves negative readings
+  // survive rather than being clamped to zero.
+  await db.create("exchangeOrders", {
+    id: "order-seed-fill-8",
+    createdAt: exchangeNow,
+    source: "coindcx",
+    instrument: "LINK",
+    currency: "USDT",
+    quoteCurrency: "USDT",
+    side: "SELL",
+    orderType: "limit_order",
+    status: "filled",
+    stage: "default",
+    referencePrice: 21.45,
+    avgPrice: 21.4,
+    quantity: 1.2,
+    fee: 0.012,
+    placedAt: linkedOpened,
+    updatedAt: linkedOpened,
+  });
+
   await db.create("trades", {
     id: "seed-trade-linked",
     createdAt: linkedOpened,

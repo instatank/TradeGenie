@@ -8,6 +8,7 @@ import { getStorage } from "firebase-admin/storage";
 import type {
   ExchangeFill,
   ExchangeLedgerEntry,
+  ExchangeOrder,
   Asset,
   AssetBiasChange,
   AssetNote,
@@ -49,6 +50,7 @@ export type StoreShape = {
   savedViews: SavedView[];
   exchangeFills: ExchangeFill[];
   exchangeLedger: ExchangeLedgerEntry[];
+  exchangeOrders: ExchangeOrder[];
 };
 
 const emptyStore: StoreShape = {
@@ -71,6 +73,7 @@ const emptyStore: StoreShape = {
   savedViews: [],
   exchangeFills: [],
   exchangeLedger: [],
+  exchangeOrders: [],
 };
 
 // Derived from the store shape itself so a new collection can never be left out

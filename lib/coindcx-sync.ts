@@ -21,17 +21,20 @@
 import {
   callFutures,
   fundingEventsFrom,
+  ORDERS_PATH,
   parseFills,
+  parseOrders,
   parseTransactions,
   TRADES_PATH,
   TRANSACTIONS_PATH,
   type CoindcxCredentials,
   type CoindcxTransaction,
+  type ParsedOrder,
 } from "@/lib/coindcx";
 import { reconstructPositions, type Fill, type FundingEvent, type ReconstructedPosition } from "@/lib/positions";
 import { FALLBACK_INR_PER_USDT, type MoneyRate } from "@/lib/currency";
 import { createRecord, listRecords, updateRecord } from "@/lib/store";
-import type { ExchangeFill, ExchangeLedgerEntry } from "@/lib/types";
+import type { ExchangeFill, ExchangeLedgerEntry, ExchangeOrder } from "@/lib/types";
 
 export const SOURCE = "coindcx";
 
@@ -60,6 +63,11 @@ export type SyncReport = {
   fillsBackfilled: number;
   ledgerSeen: number;
   ledgerStored: number;
+  /** Orders are the only source of the price you ASKED for — see the header of
+   *  lib/slippage.ts. Reported separately so a sync that fetched fills fine and
+   *  orders not at all cannot look complete. */
+  ordersSeen: number;
+  ordersStored: number;
   pages: number;
   /** Rows the exchange returned that could not be parsed. Should be 0. */
   unusable: number;
@@ -86,6 +94,8 @@ function emptyReport(detail: string, ok = false): SyncReport {
     fillsBackfilled: 0,
     ledgerSeen: 0,
     ledgerStored: 0,
+    ordersSeen: 0,
+    ordersStored: 0,
     pages: 0,
     unusable: 0,
     unknownStages: [],
@@ -186,6 +196,27 @@ function toStoredFill(fill: Fill): Omit<ExchangeFill, "id"> & { id: string } {
   };
 }
 
+function toStoredOrder(order: ParsedOrder): Omit<ExchangeOrder, "id"> & { id: string } {
+  return {
+    id: order.id,
+    createdAt: new Date(),
+    source: SOURCE,
+    instrument: order.instrument,
+    currency: order.currency,
+    quoteCurrency: order.quoteCurrency,
+    side: order.side,
+    orderType: order.orderType,
+    status: order.status,
+    stage: order.stage,
+    referencePrice: order.referencePrice,
+    avgPrice: order.avgPrice,
+    quantity: order.quantity,
+    fee: order.fee,
+    placedAt: order.placedAt,
+    updatedAt: order.updatedAt,
+  };
+}
+
 function toStoredLedger(transaction: CoindcxTransaction): Omit<ExchangeLedgerEntry, "id"> & { id: string } {
   return {
     id: transaction.id,
@@ -225,30 +256,69 @@ export async function syncExchange(credentials: CoindcxCredentials): Promise<Syn
   const report = emptyReport("", true);
   report.startedAt = startedAt;
 
-  const [tradeResult, ledgerResult] = [
+  const [tradeResult, ledgerResult, orderResult] = [
     await fetchAll(credentials, TRADES_PATH),
     await fetchAll(credentials, TRANSACTIONS_PATH),
+    // The third stream, and the only one that knows what was ASKED for. Stored
+    // for the same reason the other two are: the exchange's history is finite,
+    // so an order not captured today may not be fetchable later.
+    await fetchAll(credentials, ORDERS_PATH),
   ];
-  report.pages = tradeResult.pages + ledgerResult.pages;
+  report.pages = tradeResult.pages + ledgerResult.pages + orderResult.pages;
 
   const parsedFills = parseFills(tradeResult.rows);
   const parsedLedger = parseTransactions(ledgerResult.rows);
+  const parsedOrders = parseOrders(orderResult.rows);
   report.fillsSeen = parsedFills.fills.length;
   report.ledgerSeen = parsedLedger.transactions.length;
-  report.unusable = parsedFills.skipped + parsedLedger.skipped;
+  report.ordersSeen = parsedOrders.orders.length;
+  report.unusable = parsedFills.skipped + parsedLedger.skipped + parsedOrders.skipped;
   report.unknownStages = parsedLedger.unknownStages;
 
-  const errors = [tradeResult.error, ledgerResult.error].filter(Boolean);
+  const errors = [tradeResult.error, ledgerResult.error, orderResult.error].filter(Boolean);
   if (errors.length) {
     report.ok = false;
     report.detail = errors.join(" · ");
   }
 
-  const [existingFills, existingLedger] = await Promise.all([
+  const [existingFills, existingLedger, existingOrders] = await Promise.all([
     listRecords("exchangeFills"),
     listRecords("exchangeLedger"),
+    listRecords("exchangeOrders"),
   ]);
   const heldLedger = new Set(existingLedger.map((entry) => entry.id));
+
+  // An order is NOT skipped just because its id is held: unlike a fill, an
+  // order is mutable — it is placed `open`, then fills or is cancelled, and
+  // avg_price only appears at the end. A row captured mid-life and never
+  // revisited would sit there forever with no fill price, which reads exactly
+  // like an order that cannot be measured. So a held order is REPLACED when the
+  // exchange's copy has moved on.
+  const heldOrders = new Map(existingOrders.map((order) => [order.id, order]));
+  for (const order of parsedOrders.orders) {
+    const held = heldOrders.get(order.id);
+    const stored = toStoredOrder(order);
+    if (!held) {
+      await createRecord("exchangeOrders", stored);
+      report.ordersStored += 1;
+      continue;
+    }
+    if (held.status !== order.status || held.avgPrice !== order.avgPrice || held.referencePrice !== order.referencePrice) {
+      // `id` and `createdAt` are the record's own bookkeeping: the id is the
+      // key being patched, and createdAt records when WE first stored the row,
+      // not when the exchange last touched it.
+      await updateRecord("exchangeOrders", order.id, {
+        status: stored.status,
+        stage: stored.stage,
+        referencePrice: stored.referencePrice,
+        avgPrice: stored.avgPrice,
+        quantity: stored.quantity,
+        fee: stored.fee,
+        updatedAt: stored.updatedAt,
+      });
+      report.ordersStored += 1;
+    }
+  }
 
   // Rows already held are skipped — that is what makes the sync idempotent —
   // but a field ADDED to the shape after they were written would then never
@@ -419,6 +489,10 @@ export type ExchangeView = {
    *  says whether an exit was the exchange's own bracket firing or the trader
    *  clicking close. lib/slippage.ts cannot tell those apart without it. */
   ledger: CoindcxTransaction[];
+  /** The orders behind those fills — the only record of what was ASKED for.
+   *  Empty on a journal synced before orders were captured, which every reader
+   *  must treat as "unknown", never as "no order existed". */
+  orders: ExchangeOrder[];
   /** Positions opened before the ledger begins, so their funding is missing
    *  and their net P&L understates the true cost. Named, never hidden. */
   positionsMissingFunding: ReconstructedPosition[];
@@ -473,7 +547,7 @@ function fromStoredLedger(entry: ExchangeLedgerEntry): CoindcxTransaction {
  * the rate NEAREST each fill keeps a year-old trade converted at the rate that
  * actually applied rather than today's.
  */
-export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[]): ExchangeView {
+export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[], orders: ExchangeOrder[] = []): ExchangeView {
   const rateHistory = buildRateHistory(ledger);
 
   const fills: Fill[] = rawFills.map((fill) => {
@@ -500,6 +574,7 @@ export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[]): Ex
     fills,
     unattributedFunding,
     ledger,
+    orders,
     positionsMissingFunding,
     ledgerFrom: ledgerSpan.from,
   };
@@ -513,12 +588,13 @@ export function foldExchange(rawFills: Fill[], ledger: CoindcxTransaction[]): Ex
  * their fees are exact but their funding is unknowable now.
  */
 export async function exchangeView(): Promise<ExchangeView> {
-  const [storedFills, storedLedger] = await Promise.all([
+  const [storedFills, storedLedger, storedOrders] = await Promise.all([
     listRecords("exchangeFills"),
     listRecords("exchangeLedger"),
+    listRecords("exchangeOrders"),
   ]);
 
-  return foldExchange(storedFills.map(fromStoredFill), storedLedger.map(fromStoredLedger));
+  return foldExchange(storedFills.map(fromStoredFill), storedLedger.map(fromStoredLedger), storedOrders);
 }
 
 export type LiveExchangeView = ExchangeView & {

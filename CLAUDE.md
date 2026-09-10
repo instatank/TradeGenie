@@ -1646,6 +1646,58 @@ field). Old stored values still render via `humanize()`; we just stop offering r
     reference and needs nothing typed, but its shape is unknown and needs a probe round through
     the deployed app first.
 
+- **Phase 2 — the exchange knows what you ASKED for** (`ExchangeOrder`, the `exchangeOrders`
+  collection, `parseOrder` / `referencePriceOf` in `lib/coindcx.ts`, `measureOrder` /
+  `measurePositionOrders` in `lib/slippage.ts`). `/derivatives/futures/orders` had been
+  allowlisted since the importer was written and never called once. Probing it returned a better
+  answer than the design assumed: **one order row is a whole slippage measurement.**
+  `order_type` says `stop_market` vs `take_profit_market` — so the leg is a stated fact, not
+  geometry — `stop_price` is the trigger actually set on the exchange, and `avg_price` is the
+  fill. Nothing has to be remembered or inferred.
+  - **Two facts were MEASURED, not assumed**, because the obvious join being wrong is not
+    hypothetical here — `fill_id` looked just as plausible and matched nothing. (1) An order's
+    `id` IS a fill's `order_id`: 47 of 100 orders matched, against only 53 distinct order_ids
+    present in that window of fills. (2) `avg_price` EQUALS the volume-weighted price of the
+    fills the order produced, exactly, on all five sampled including a 22-leg market order — so
+    the fill price needs no join at all.
+  - **The sign formula collapses, and that is the insight.** The journal-based path needs one
+    formula for the exit and the opposite one for the entry. An order carries its own SIDE, and
+    side is the whole rule: a SELL wants a higher price (`reference - filled`), a BUY wants a
+    lower one (`filled - reference`). "Entry" and "exit" were only ever proxies for which side
+    you were on.
+  - **A market order returns null and that is the right answer, not a gap.** It asked for
+    whatever the book had; scoring its fill against any reference invents an intention the
+    trader never expressed — the same refusal as measuring a discretionary exit against a stop.
+    An unknown order type returns null too, so a value CoinDCX adds later cannot acquire a
+    reference price by falling through to `price`.
+  - **0 and null are used interchangeably for "not applicable"**: a limit order reports
+    `stop_price: 0`, an unfilled one `avg_price: 0`. Reading either as a price puts a reference
+    of zero on the order and reports slippage in the thousands of percent. `positivePrice()`
+    collapses both; a test pins it against the real cancelled-limit row.
+  - **An order is MUTABLE, unlike a fill** — placed `open`, then filled or cancelled, with
+    `avg_price` only appearing at the end. So the sync REPLACES a held order when the exchange's
+    copy has moved on, rather than skipping it by id. A row captured mid-life and never revisited
+    would sit there forever with no fill price, which reads exactly like an order that cannot be
+    measured.
+  - **Both paths are kept and shown together**, order-based first. Orders are the better
+    measurement, but order history is finite like the ledger, so every trade synced before this
+    existed has none — which must read as "unknown", never as "no order existed". The seed makes
+    the two agree on one trade by construction (48.8 bps from the exchange's trigger and from the
+    typed target), and `npm run smoke` asserts that number, so a drift between them turns the
+    gate red.
+  - Fixed alongside: **the aggregate had no way back to the rows it came from.** The owner went
+    looking for "which trades actually have a reading?" and the only answer was opening every
+    trade in the journal. `/analytics` now lists the measurable trades by name, and every panel
+    prints coverage — how many closed trades were checked, how many were measurable, where the
+    rest fell out in plain English. That last part is a diagnostic, not decoration: a pile of
+    `MANUAL_EXIT` is the feature working as designed, and a pile of `NO_LEDGER` is a bug to
+    chase.
+  - Deliberately NOT done yet: moving the `/analytics` aggregate onto the order-based readings
+    (it still runs on the journal-based path, which is correct but narrower), backfilling order
+    rows against already-reconciled trades, and reading `take_profit_price` / `stop_loss_price`
+    off the ENTRY order — those carry the bracket set at entry time and were populated on only
+    1 of 10 sampled rows, which is not enough to design against yet.
+
 ## Open items
 - **Vercel production branch — RESOLVED**: all feature/durability/lean work has been merged
   into `main`, and `main` is the configured Vercel Production Branch. `main` is now both the

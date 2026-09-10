@@ -225,6 +225,15 @@ async function dynamicContentChecks(storePath: string): Promise<[string, string,
     ["/trades/seed-trade-linked", "Share of your planned risk", "slippage expressed against risk, which is the number that matters"],
     ["/trades/seed-trade-linked", "+23.3 bps", "entry slippage, which only renders when a planned entry was written down"],
     ["/trades/seed-trade-linked", "Entry you wanted", "the planned-entry field a sync can never overwrite"],
+    // The order-based reading: the exchange's own record of the price ASKED
+    // for. Four conditions deep (linked trade, held order, a reference price on
+    // it, and a fill) so `next build` cannot come near it.
+    ["/trades/seed-trade-linked", "order records", "the reading taken from the exchange's own orders"],
+    ["/trades/seed-trade-linked", "Measured against what you wrote down", "the journal-based reading kept underneath it"],
+    // Both paths agree on this trade by construction. The string only exists if
+    // the order path produced a number, and it is the SAME number the typed
+    // target produces — a drift between the two turns this red.
+    ["/trades/seed-trade-linked", "+48.8 bps", "order and journal agreeing on the same fill"],
   ];
   const route = `/assets/${sol}`;
   const checks: [string, string, string][] = [
