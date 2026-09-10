@@ -149,9 +149,19 @@ export const FUTURES_PROBES: Probe[] = [
     // rather than querying live. Whether orders have the same horizon decides
     // whether this is a backfill or only ever works going forward, so it is
     // asked now rather than discovered after the adapter is written.
-    label: "Orders p8 — how far back does the order history reach?",
+    //
+    // Round 1 answered this ambiguously: page 8 came back EMPTY, which only
+    // proves there are fewer than 701 orders and says nothing about the date.
+    // These walk backwards to find the real edge.
+    label: "Orders p3 — walking back to find the oldest order",
     path: ORDERS_PATH,
-    payload: { page: "8", size: "100" },
+    payload: { page: "3", size: "100" },
+    summary: summarizeOrders,
+  },
+  {
+    label: "Orders p5 — walking back to find the oldest order",
+    path: ORDERS_PATH,
+    payload: { page: "5", size: "100" },
     summary: summarizeOrders,
   },
 ];
@@ -622,6 +632,95 @@ function summarizeOrders(body: unknown): string {
 
   lines.push("  full shape of row 0 (this is what the adapter gets written against):");
   lines.push(describeShape(rows[0], "    "));
+  return lines.join("\n");
+}
+
+/**
+ * ROUND 2. Round 1 established that an order carries BOTH sides of a slippage
+ * measurement in one row — `order_type` says whether it was a stop or a target
+ * (no geometry needed), `stop_price` is the trigger the trader set, and
+ * `avg_price` is what they actually got. Two things it could not establish, and
+ * the adapter cannot be written honestly without either:
+ *
+ *   1. THE JOIN. An order's own key is `id`, and a fill carries `order_id`.
+ *      Both are v4 UUIDs and it is overwhelmingly likely they are the same
+ *      value — but "overwhelmingly likely" is exactly what `fill_id` looked
+ *      like before it turned out to be the transaction's OWN id and matched
+ *      nothing. So this MEASURES the overlap instead of assuming it.
+ *   2. THE HORIZON. Page 8 at size 100 came back empty, which only proves there
+ *      are fewer than 701 orders — it says nothing about how far back they
+ *      reach. The ledger turned out to be finite, and if orders are too then
+ *      this can only ever work going forward and the sync must store rows
+ *      rather than query live.
+ *
+ * Two calls, cross-referenced. Returns text, like the rest of the probe.
+ */
+export async function probeOrderFillJoin(credentials: CoindcxCredentials): Promise<string> {
+  const lines: string[] = ["Order → fill join, measured rather than assumed.", ""];
+
+  const orders = await callFutures(credentials, {
+    label: "orders",
+    path: ORDERS_PATH,
+    payload: { status: "filled", page: "1", size: "100" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
+  const trades = await callFutures(credentials, {
+    label: "fills",
+    path: TRADES_PATH,
+    payload: { page: "1", size: "100" },
+  });
+
+  const orderRows = (Array.isArray(orders.body) ? orders.body : []).filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object",
+  );
+  const fillRows = (Array.isArray(trades.body) ? trades.body : []).filter(
+    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object",
+  );
+
+  if (!orderRows.length || !fillRows.length) {
+    return `${lines.join("\n")}\n  Could not fetch both sides (orders ${orderRows.length}, fills ${fillRows.length}). Orders HTTP ${orders.status}, fills HTTP ${trades.status}.`;
+  }
+
+  const fillOrderIds = new Set(
+    fillRows.map((row) => row.order_id).filter((id): id is string => typeof id === "string" && Boolean(id)),
+  );
+  const matched = orderRows.filter((row) => typeof row.id === "string" && fillOrderIds.has(row.id));
+
+  lines.push(`  orders (filled, newest 100): ${orderRows.length}`);
+  lines.push(`  fills   (newest 100):        ${fillRows.length}`);
+  lines.push(`  distinct order_id on those fills: ${fillOrderIds.size}`);
+  lines.push(`  ORDERS WHOSE \`id\` APPEARS AS A FILL'S \`order_id\`: ${matched.length}`);
+  lines.push("");
+  lines.push("  (The two windows only partly overlap in time, so this will never be 100%.");
+  lines.push("   What matters is whether it is comfortably ABOVE ZERO — zero would mean the");
+  lines.push("   join is wrong, exactly the way joining on fill_id was.)");
+  lines.push("");
+
+  // For the ones that DID match, is the order's avg_price the same number the
+  // fills give? If it is, the exit price needs no join at all and the order row
+  // alone carries the whole measurement.
+  lines.push("  avg_price on the order vs the fills it produced:");
+  let shown = 0;
+  for (const order of matched) {
+    if (shown >= 5) break;
+    const own = fillRows.filter((row) => row.order_id === order.id);
+    const qty = own.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
+    const notional = own.reduce((sum, row) => sum + (Number(row.quantity) || 0) * (Number(row.price) || 0), 0);
+    const vwap = qty > 0 ? notional / qty : null;
+    lines.push(
+      `    ${String(order.pair)} ${String(order.order_type)} — order.avg_price=${String(order.avg_price)}, fills VWAP=${vwap === null ? "n/a" : vwap.toFixed(6)} over ${own.length} leg(s), order.stop_price=${String(order.stop_price)}`,
+    );
+    shown += 1;
+  }
+  if (!shown) lines.push("    (none matched — see the count above)");
+
+  lines.push("");
+  lines.push("  horizon — oldest order in this page of 100:");
+  const times = orderRows.map((row) => Number(row.created_at)).filter((time) => Number.isFinite(time) && time > 0);
+  if (times.length) {
+    lines.push(`    ${new Date(Math.min(...times)).toISOString()} → ${new Date(Math.max(...times)).toISOString()}`);
+  }
+
   return lines.join("\n");
 }
 

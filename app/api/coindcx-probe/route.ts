@@ -1,4 +1,4 @@
-import { credentialsFromEnv, formatProbeReport, probeFuturesEndpoints } from "@/lib/coindcx";
+import { credentialsFromEnv, formatProbeReport, probeFuturesEndpoints, probeOrderFillJoin } from "@/lib/coindcx";
 import { NextRequest } from "next/server";
 
 // A one-time discovery endpoint: open it in the browser, copy the text, and the
@@ -40,6 +40,17 @@ export async function GET(request: NextRequest) {
   // timing out together would exceed the 60s function budget and return
   // nothing at all — which is the one outcome that wastes a browser trip.
   const only = request.nextUrl.searchParams.get("only");
+
+  // `?only=join` is its own thing rather than another entry in FUTURES_PROBES:
+  // it needs TWO calls cross-referenced against each other, and a Probe is one
+  // call with one body to summarise.
+  if (only?.trim().toLowerCase() === "join") {
+    return new Response(await probeOrderFillJoin(credentials), {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+
   const outcomes = await probeFuturesEndpoints(credentials, only);
   return new Response(formatProbeReport(outcomes), {
     status: 200,

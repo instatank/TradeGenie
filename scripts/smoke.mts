@@ -115,6 +115,11 @@ const CONTENT_CHECKS: [string, string, string][] = [
   ["/analytics", "Slippage on your fills", "the per-symbol slippage table"],
   ["/analytics", "+48.8", "a real measured median rather than the empty state"],
   ["/analytics", "more to read this", "the thin-sample badge, so one fill never reads as a verdict"],
+  // The way back from the aggregate to the rows it came from. The owner went
+  // looking for "which trades have this?" and the only answer was opening every
+  // trade in the journal, so these two are the fix and must not silently rot.
+  ["/analytics", "behind these numbers", "the list naming the measurable trades"],
+  ["/analytics", "measurable", "the coverage line saying how many trades were checked"],
   // Both halves of the setup grade: the badge only renders on a trade that
   // carries one, and the control only inside an expanded row's review — two
   // conditional renders `next build` never reaches.

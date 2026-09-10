@@ -1,4 +1,6 @@
-import { getSlippageReadings } from "@/lib/slippage-view";
+import Link from "next/link";
+import { format } from "date-fns";
+import { getSlippageReadings, SLIPPAGE_REASON_LABELS, type SlippageCoverage } from "@/lib/slippage-view";
 import { isThinSample, MIN_SAMPLE } from "@/lib/metrics";
 import { slippageByInstrument, summarizeSlippage } from "@/lib/slippage";
 import type { Trade } from "@/lib/types";
@@ -29,8 +31,29 @@ function bps(value: number | null) {
   );
 }
 
+/**
+ * Where the trades that produced no reading went.
+ *
+ * Never hidden, even when there ARE readings: "1 measurable out of 40" and "1
+ * out of 1" are wildly different claims about how much the median means, and a
+ * panel that shows only its successes lets the first read like the second.
+ */
+function Coverage({ coverage }: { coverage: SlippageCoverage }) {
+  const misses = Object.entries(coverage.byReason)
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => `${count} ${SLIPPAGE_REASON_LABELS[reason] ?? reason.toLowerCase()}`);
+
+  return (
+    <p className="text-xs text-forge-muted">
+      Checked {coverage.considered} closed trade{coverage.considered === 1 ? "" : "s"} ·{" "}
+      <strong className="font-medium text-forge-ink">{coverage.measured} measurable</strong>
+      {misses.length ? <> · {misses.join(" · ")}</> : null}
+    </p>
+  );
+}
+
 export async function SlippageTable({ trades }: { trades: Trade[] }) {
-  const readings = await getSlippageReadings(trades);
+  const { readings, coverage } = await getSlippageReadings(trades);
   const overall = summarizeSlippage(readings.map((entry) => entry.reading));
   const groups = slippageByInstrument(readings.map((entry) => ({ instrument: entry.trade.instrument, reading: entry.reading })));
 
@@ -39,10 +62,11 @@ export async function SlippageTable({ trades }: { trades: Trade[] }) {
       <div className="panel space-y-2">
         <h3 className="font-semibold">Slippage on your fills</h3>
         <p className="text-sm text-forge-muted">
-          Nothing measurable yet. A trade is measurable when it is reconciled against the exchange, was closed by your own
-          stop or target rather than by hand, and had that price written down before the trade closed. Discretionary exits
-          are deliberately left out — you closed where you chose to, so there is no price it was supposed to hit.
+          Nothing measurable yet. A trade can be measured when it is closed, reconciled against the exchange, closed by your
+          own stop or target rather than by hand, and had that price written down before it closed. Discretionary exits are
+          deliberately left out — you closed where you chose to, so there is no price it was supposed to hit.
         </p>
+        <Coverage coverage={coverage} />
       </div>
     );
   }
@@ -111,14 +135,48 @@ export async function SlippageTable({ trades }: { trades: Trade[] }) {
         </table>
       </div>
 
+      {/* THE TRADES THEMSELVES. An aggregate with no way back to the rows it
+          came from cannot be checked — the owner went looking for "which trades
+          have this?" and the answer was clicking every trade in the journal.
+          A per-symbol median is the verdict; this is the evidence. */}
+      <details className="rounded-lg border border-forge-line p-3" open={readings.length <= 10}>
+        <summary className="cursor-pointer text-sm font-semibold">
+          The {readings.length} trade{readings.length === 1 ? "" : "s"} behind these numbers
+        </summary>
+        <ul className="mt-3 space-y-1 text-sm">
+          {readings.map(({ trade, reading }) => (
+            <li key={trade.id} className="flex flex-wrap items-baseline gap-x-2 border-b border-forge-line/40 py-1.5 last:border-0">
+              <Link href={`/trades/${trade.id}`} className="font-medium text-forge-blue hover:underline">
+                {trade.instrument}
+              </Link>
+              <span className="text-xs text-forge-muted">{format(trade.tradeDateTime, "d MMM yyyy")}</span>
+              <span className="text-xs text-forge-muted">{reading.leg === "STOP" ? "stopped out" : "target hit"}</span>
+              <span className={reading.bps > 0.5 ? "text-forge-red" : reading.bps < -0.5 ? "text-forge-green" : undefined}>
+                {`${reading.bps > 0 ? "+" : ""}${reading.bps.toFixed(1)} bps`}
+              </span>
+              {reading.riskFraction != null ? (
+                <span className="text-xs text-forge-muted">
+                  {`${Math.abs(reading.riskFraction * 100).toFixed(0)}% of risk`}
+                </span>
+              ) : null}
+              {reading.suspect ? (
+                <span className="rounded bg-forge-panel px-1.5 py-0.5 text-[11px]">excluded — bigger than the whole risk</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      <Coverage coverage={coverage} />
+
       <p className="text-xs text-forge-muted">
         <strong className="font-medium text-forge-ink">Share of risk</strong> is the one to read: 5 bps against a tight stop
         can be a third of what you were risking, and the same 5 bps against a wide one is nothing.
         {overall.suspectCount > 0 ? (
           <>
             {" "}
-            {overall.suspectCount} reading{overall.suspectCount === 1 ? " is" : "s are"} left out for being larger than the
-            whole planned risk — that is a moved stop or a partial exit, not a fill.
+            {overall.suspectCount} reading{overall.suspectCount === 1 ? " is" : "s are"} left out of the medians for being
+            larger than the whole planned risk — that is a moved stop or a partial exit, not a fill.
           </>
         ) : null}
       </p>
