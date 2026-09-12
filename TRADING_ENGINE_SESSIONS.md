@@ -7,7 +7,8 @@ against the same repo.
 The plan they all serve is `TRADING_ENGINE_ROADMAP.md` in this repo. Nothing here overrides it —
 if a prompt and the roadmap disagree, the roadmap wins and the session should say so.
 
-**Before session 1.1:** the owner must create the repository (see the setup steps at the bottom).
+**Setup status:** the repository, the Firebase project and the Telegram bot are done
+(12 Sep 2026). Vercel is connected at the end of session 1.1, not before.
 
 ---
 
@@ -18,8 +19,8 @@ told, and so you can paste it in front of an ad-hoc request later.
 
 > You are building **TradeBot**, a separate trading-support app for one non-technical beginner
 > trader of large-cap crypto perpetuals (BTC, ETH, SOL, plus HYPE, ZEC and VVV watched only).
-> The full plan is `TRADING_ENGINE_ROADMAP.md` in `instatank/tradegenie`, on branch
-> `claude/wizardly-pasteur-dt3pq1` if it is not yet on `main`. **Read it before doing anything** —
+> The full plan is `TRADING_ENGINE_ROADMAP.md` on `main` in `instatank/tradegenie`.
+> **Read it before doing anything** —
 > sections 1, 4, 5, 6 and 10 at minimum. Section 10 lists decisions you must not reverse; if you
 > think one is wrong, say so and stop rather than quietly changing it.
 >
@@ -45,9 +46,8 @@ told, and so you can paste it in front of an ad-hoc request later.
 ```
 You are building TradeBot, a separate trading-support app for one non-technical beginner trader
 of large-cap crypto perpetuals (BTC, ETH, SOL, plus HYPE, ZEC and VVV watched only). The full
-plan is TRADING_ENGINE_ROADMAP.md in instatank/tradegenie, on branch
-claude/wizardly-pasteur-dt3pq1 if it is not yet on main. Read it before doing anything —
-sections 1, 4, 5, 6 and 10 at minimum. Section 10 lists decisions you must not reverse; if you
+plan is TRADING_ENGINE_ROADMAP.md on main in instatank/tradegenie. Read it before doing
+anything — sections 1, 4, 5, 6 and 10 at minimum. Section 10 lists decisions you must not reverse; if you
 think one is wrong, say so and stop rather than quietly changing it.
 
 Repos: build in instatank/tradebot on main; read instatank/tradegenie for the roadmap and for
@@ -353,20 +353,20 @@ Telegram.
 
 Four things, in this order. Only the first blocks the first session.
 
-**1. GitHub — the repository (30 seconds, do this first)**
-Go to github.com, click **+** at the top right, then **New repository**. Owner `instatank`, name
+**1. GitHub — the repository — DONE**
+`instatank/tradebot` exists, private, empty, default branch `main`. For reference: go to github.com, click **+** at the top right, then **New repository**. Owner `instatank`, name
 **`tradebot`**, tick **Private**, and leave **"Add a README file" unchecked**. Click
 **Create repository**.
 
-**2. Firebase — the database**
-Go to console.firebase.google.com → **Add project** → name it `tradebot` → turn Google Analytics
+**2. Firebase — the database — DONE**
+For reference: go to console.firebase.google.com → **Add project** → name it `tradebot` → turn Google Analytics
 **off** → **Create project**. Then in the left menu, **Build → Firestore Database → Create
 database** → choose **Production mode** → set the location to **asia-south1 (Mumbai)** → **Enable**.
 Then the **gear icon → Project settings → Service accounts → Generate new private key**, which
 downloads a JSON file. Keep that file; you will paste its contents into Vercel in step 4.
 
-**3. Telegram — the bot**
-Open Telegram, search for **@BotFather**, send `/newbot`, give it any name and a username ending
+**3. Telegram — the bot — DONE**
+For reference: open Telegram, search for **@BotFather**, send `/newbot`, give it any name and a username ending
 in `bot`. It replies with a token. Keep it. You already have the chat id — it is the
 `TELEGRAM_CHAT_ID` value in your SignalDesk project on Vercel, under **Settings → Environment
 Variables**.

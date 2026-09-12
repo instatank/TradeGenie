@@ -41,6 +41,10 @@ product. No multi-user, auth, payments, broker sync, signals, or financial advic
   UI) and **never push a red build**; report failures honestly instead. The owner will say so
   explicitly when they want to hold off on a push/deploy. If a deploy misbehaves, `git revert`
   + push to roll back fast — Vercel keeps the last good build if a new one fails to build.
+- **A session branch gets merged into `main` without asking.** Some harnesses assign a
+  `claude/*` branch and tell the agent never to leave it; the owner has standing authorization
+  (reaffirmed 12 Sep 2026) to fast-forward that branch into `main` and push when the work is
+  ready. Same gate as any push: green build, or docs-only.
 - **Don't revert the owner's changes or unrelated dirty work.**
 - Small, scoped changes, one concern at a time. No broad rewrites unless asked.
 - When something is a real tradeoff or changes the daily workflow, **stop and ask in plain
