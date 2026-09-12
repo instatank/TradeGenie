@@ -19,6 +19,9 @@ Update it when architecture, lean defaults, the working contract, or open items 
 4. **`AGENTS.md`** — stack, file map, product areas, commands, deployment workflow.
 5. **`PENDING_TASKS.md`** — backlog.
 6. This file — the working contract + a log of decisions made during active development.
+7. **`TRADING_ENGINE_ROADMAP.md`** — the plan for the separate trading bot (markup → detection → shadow →
+   paper → live), with its pre-registered kill criteria and decisions. The bot lives in its own repo; nothing
+   about execution is ever built here.
 
 Don't duplicate the stack/file/route lists here; they live in `AGENTS.md`.
 
