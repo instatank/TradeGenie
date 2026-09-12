@@ -20,8 +20,10 @@ Update it when architecture, lean defaults, the working contract, or open items 
 5. **`PENDING_TASKS.md`** — backlog.
 6. This file — the working contract + a log of decisions made during active development.
 7. **`TRADING_ENGINE_ROADMAP.md`** — the plan for the separate trading bot (markup → detection → shadow →
-   paper → live), with its pre-registered kill criteria and decisions. The bot lives in its own repo; nothing
-   about execution is ever built here.
+   paper → live), with its pre-registered kill criteria and decisions. The bot lives in its own repo
+   (`instatank/tradebot`); nothing about execution is ever built here.
+   **`TRADING_ENGINE_SESSIONS.md`** is its build plan as one prompt per session, each naming the files
+   that session must read. Hand one to a fresh agent; don't run two at once.
 
 Don't duplicate the stack/file/route lists here; they live in `AGENTS.md`.
 
