@@ -10,6 +10,10 @@ if a prompt and the roadmap disagree, the roadmap wins and the session should sa
 **Setup status:** the repository, the Firebase project and the Telegram bot are done
 (12 Sep 2026). Vercel is connected at the end of session 1.1, not before.
 
+**Session 1.0 is the one to run first if the videos are ready.** It turns TraderMayne's own
+videos into the model specification, which sessions 1.2 and 2.1 both depend on. It edits this
+repo only, so it can run at the same time as session 1.1, which edits the bot repo only.
+
 ---
 
 ## The shared header
@@ -40,6 +44,92 @@ told, and so you can paste it in front of an ad-hoc request later.
 ---
 
 ## Stage 1 — the markup bot
+
+### Session 1.0 — Turn the videos into a model spec
+
+Run this **before session 1.2**, which is where the parameters get frozen into code. It touches
+only `instatank/tradegenie`, so it can run in parallel with session 1.1, which touches only
+`instatank/tradebot`.
+
+The owner runs TraderMayne's videos through NotebookLM using the eight extraction prompts (kept
+below the setup steps) and pastes the answers into this session.
+
+```
+You are turning a set of video extractions into a written specification for a trading model that
+will later be coded as deterministic detectors.
+
+Read first, in instatank/tradegenie on main: TRADING_ENGINE_ROADMAP.md, sections 3.2 (what is
+precisely definable in ICT and what is not), 4.6 (the current parameter table, which you are
+replacing), and 10 (decisions you must not reverse). Also read TRADING_ENGINE_SESSIONS.md so you
+know which later sessions consume your output.
+
+Background you need: the model is "Mayne 5M Model", the main setup of one non-technical beginner
+trader of crypto perpetuals. Until now the only written record of it was five checklist lines the
+owner transcribed into their journal. No public written spec exists. The roadmap's section 4.6
+parameter table is therefore a set of PLACEHOLDERS taken from published practitioner values, not
+from the model itself, and it says so.
+
+WHAT THE OWNER IS PASTING IN: output from NotebookLM, grounded in TraderMayne's own YouTube
+videos, answering eight prompts — the step sequence, mechanical definitions, entry/stop/target,
+no-trade conditions, trade management, worked examples, his vocabulary, and finally a list of
+everything he never states.
+
+HOW TO TREAT IT: as evidence, not as truth. It is one model's summary of another person's videos.
+It was instructed to answer NOT STATED rather than guess, but it may still have smoothed a vague
+remark into a crisp rule. Where a claim reads more precise than a person talking over a chart
+would plausibly be, say so rather than encoding it. Where it carries a timestamp and a quote,
+trust it. Where two videos disagree, keep both.
+
+PRODUCE, in instatank/tradegenie on main:
+
+1. A new file MAYNE_5M_MODEL.md. Structure it as:
+   - The sequence, in his step order and his words, one section per step.
+   - For every parameter a detector will need, a row in one table with four columns: the
+     parameter, the value, the SOURCE, and the timestamp or citation. SOURCE is exactly one of
+     STATED (he says it), SHOWN (inferred from a chart example — say what you inferred), or OURS
+     (he never says it and we picked a number). Nothing may be left unlabelled.
+   - Entry, stop, target and minimum R.
+   - No-trade conditions, as a list.
+   - Trade management after entry.
+   - The worked examples, one per row: instrument, date if known, what satisfied each step,
+     entry, stop, target, outcome. These become test fixtures later, so keep every number.
+   - A closing section, "What is ours, not his", listing every OURS row in one place with the
+     value chosen and why. This is the section the owner will read first.
+
+2. An updated section 4.6 of TRADING_ENGINE_ROADMAP.md, replacing the placeholder table with the
+   real one and pointing at the new file. Keep the paragraph explaining that each parameter is a
+   backtest trial and the budget is single digits — and if the extraction leaves more than nine
+   OURS parameters, say so plainly and propose which to fix by fiat rather than fit.
+
+3. Edits to sessions 1.2 and 2.1 in TRADING_ENGINE_SESSIONS.md so both read MAYNE_5M_MODEL.md,
+   and so 2.1 no longer says the only spec is the owner's five checklist lines.
+
+CHECKS YOU MUST RUN, and report on:
+- Compare the video-derived steps against the owner's own five checklist lines, which are in the
+  journal backup: repo instatank/tradegenie-backups, file tradegenie-backup.json, collection
+  "setups", the record named "Mayne 5M Model", field "checklist". Attach that repo with add_repo
+  if it is not present. Where the owner's transcription differs from the videos — a missing step,
+  a step in a different order, a different timeframe — say so explicitly. That gap matters: the
+  journal's checklist drives a pre-trade gate the owner already uses, and it may be wrong.
+- Compare against roadmap section 3.2, which lists which of the twelve ICT mechanisms have one
+  agreed definition and which need a chosen number. If the extraction supplies a number for
+  something section 3.2 called inherently discretionary, that is interesting — flag it, do not
+  quietly treat it as settled.
+- Sanity-check the killzone times. If he gives session windows, convert them to New York time and
+  say whether he states them in New York time or another zone. Never store IST or fixed UTC.
+
+RULES: change nothing in roadmap section 10. Add no code. Do not invent a value to fill a gap —
+an honest OURS row with a stated reason is the goal, and a long list of them is a real finding
+about how much of this model is actually specified. If the pasted extraction is thin or mostly
+NOT STATED, say that in one sentence at the top of your report rather than padding the spec.
+
+Commit each of the three outputs as its own commit with the reasoning in the message, push to
+main, and give the owner the GitHub links. Then report, in plain language: how many parameters
+came out STATED, how many SHOWN, how many OURS; where the owner's own checklist disagrees with
+the videos; and the single biggest thing the videos still do not tell us.
+```
+
+---
 
 ### Session 1.1 — Scaffold, candles, and a page that proves it works
 
@@ -388,3 +478,73 @@ environment variables when the time comes: `SIGNALDESK_SNAPSHOT_URL` and
 `SIGNALDESK_SNAPSHOT_TOKEN`.
 
 After adding them, go to **Deployments** and redeploy the latest one so it picks them up.
+
+
+---
+
+## The NotebookLM extraction prompts
+
+Session 1.0 consumes the output of these. Add TraderMayne's videos as sources in NotebookLM —
+the 5-minute entry model episode, the one on why it fails at major reversals, and any live
+walkthroughs — then send these eight in order in the same chat. NotebookLM caps the question box
+at around two thousand characters, which is why this is eight prompts rather than one.
+
+**1**
+```
+Answer only from these videos. If he never states something, write NOT STATED — never guess a number or a rule. Give a timestamp for every claim.
+
+List the steps of the 5-minute model in order, as he teaches it. For each step: what has to be true, on which timeframe, and whether it must happen before the next step. Use his number of steps, not five. Quote him where you can.
+```
+
+**2**
+```
+Same rules: only from the videos, NOT STATED where he doesn't say it, timestamps on everything.
+
+His definition and any number he attaches (candle counts, percentages, ATR multiples, ratios) for:
+- higher-timeframe bias: which timeframes, and what makes it bullish or bearish
+- dealing range: which high and which low, over what lookback
+- swing high / swing low: how many candles either side before a pivot counts
+- market structure shift: a close beyond the level, or a wick through it?
+- displacement: how he tells a displacement candle from a normal one
+- liquidity sweep: must price close back inside, and within how many candles? which levels count?
+```
+
+**3**
+```
+Same rules. Continue with:
+- fair value gap: his three-candle definition, any minimum size, and where in the gap he enters — near edge, midpoint, or far side
+- order block: which candle exactly; is the zone the body or the whole candle with wicks; when is it used up
+- entry: a resting limit order in the zone, or does he wait for a confirmation candle?
+- stop: exactly where — beyond the sweep wick, beyond the block, a fixed distance?
+- target: opposite side of the range, next liquidity pool, fixed R multiple, partial exits?
+- the minimum reward-to-risk he will accept
+- the session times he trades, in New York time
+```
+
+**4**
+```
+Same rules. Every condition where he does NOT take the trade, or stands aside: news, ranges, day of the week, conflicting timeframes, major reversals, low volatility, anything else. Quote each with a timestamp. Be thorough — this matters as much as the entry rules.
+```
+
+**5**
+```
+Same rules. Once he is in a trade: does he move the stop, take partial profits, exit on time, re-enter after being stopped out, or take more than one position on the same idea? Quote him.
+```
+
+**6**
+```
+Same rules. Every complete trade he walks through: instrument, the date if he gives one or shows one on the chart, timeframes used, what satisfied each step, entry, stop, target, and outcome.
+```
+
+**7**
+```
+Same rules. For each term, give his own one-sentence definition with a timestamp, or write NOT USED: bias, dealing range, market structure shift, displacement, liquidity sweep, fair value gap, order block, breaker, optimal trade entry, premium and discount, equal highs and lows, killzone. Flag any term he uses differently from the standard ICT meaning.
+```
+
+**8**
+```
+Finally: list every question in this conversation you had to answer NOT STATED. Just the plain list, no commentary. Then separately, note anywhere he gave a rule and then broke it in an example, or where two videos disagree with each other.
+```
+
+Prompt 8 is the one that matters most: it is the list of parameters the model does not specify,
+which is exactly the list session 1.0 must label OURS rather than his.
