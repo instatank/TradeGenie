@@ -10,6 +10,11 @@ if a prompt and the roadmap disagree, the roadmap wins and the session should sa
 **Setup status:** the repository, the Firebase project and the Telegram bot are done
 (12 Sep 2026). Vercel is connected at the end of session 1.1, not before.
 
+**Sessions 1.1-1.4 predate the spec that session 1.0 wrote.** Their parameter values are
+correct, but four structural things they built now contradict it: the card's Watch line, the
+missing higher-timeframe-zone precondition, the liquidity pool set, and killzones built as a
+gate. **Session 1.5 fixes those and must run before stage 2.**
+
 **Session 1.0 is done (13 Sep 2026).** The videos became `MAYNE_5M_MODEL.md` in this repo, which
 is the spec sessions 1.2 and 2.1 now read; roadmap section 4.6 is its summary. Its headline: the
 sequence is his and every number is ours, so all nine trial dials are guesses session 1.4 exists
@@ -301,6 +306,87 @@ agreement rate is, per marking type, over whatever verdicts exist.
 STAGE 1 KILL CRITERION, from the roadmap: after four weeks, if agreement on bias, range and
 liquidity is below 70% after two parameter revisions, or the owner has opened the card on fewer
 than half of trading days, stop and rethink rather than adding features.
+```
+
+---
+
+### Session 1.5 — Reconcile stage 1 with the model spec
+
+Sessions 1.1 to 1.4 were built against the **placeholder** section 4.6, before session 1.0 replaced
+it from the videos. Most of what they built survives — every parameter *value* in
+`lib/detect/params.ts` already matches the real spec. What changed is structural, and four things
+in the shipped stage-1 code now contradict `MAYNE_5M_MODEL.md`.
+
+Run this before session 2.1. It touches `instatank/tradebot` only.
+
+```
+You are correcting a working app whose specification changed after it was built.
+
+Read first: MAYNE_5M_MODEL.md and TRADING_ENGINE_ROADMAP.md section 4.6, both on main in
+instatank/tradegenie. Then, in instatank/tradebot on main, read docs/DETECTOR_EXPECTATIONS.md and
+lib/detect/params.ts. Attach either repo with add_repo if missing.
+
+Context: stage 1 (sessions 1.1-1.4) was built from a placeholder parameter table that has since
+been replaced by a spec written from TraderMayne's own videos. The parameter VALUES are unchanged
+and correct. Four structural things are now wrong. Fix those, change nothing else, and do not
+take the opportunity to redesign anything.
+
+1. THE CARD DESCRIBES THE WRONG SEQUENCE — fix this first, it is what the owner reads twice a day.
+   lib/card.ts builds a "Watch" line of the form "A sweep of <pool>, then a 5-minute shift".
+   That is the old sequence. The spec's trigger sequence is: price trades INTO a higher-timeframe
+   zone, then a 5-minute market structure break, then displacement, then a pullback into the gap
+   it left. A liquidity sweep is explicitly NOT one of his five steps — it is one of several zone
+   types that can bring price to the level in the first place. Rewrite the line to describe what
+   he actually waits for. Keep it one sentence and keep the quiet-card rule intact.
+
+2. THE GATING STEP DOES NOT EXIST IN THE CODE. Grep the repo for a concept of price having
+   reached a higher-timeframe zone; there is none. The spec quotes him: "if it does not come into
+   the zone there is simply no trade." That is the model's precondition and the markup cannot
+   currently express it. Add it as a reading on the Markup: which HTF zone price is in or nearest
+   to, from the zone types the spec lists (order block, FVG, OTE, SFP, sweep, equal highs/lows),
+   on W/D/H4/H1. Surface it on the card and the coin page. This is a markup reading only — no
+   sequencer, no signal, no order. Stage 2 consumes it later.
+
+3. THE LIQUIDITY POOL SET IS WRONG IN BOTH DIRECTIONS. lib/detect/liquidity.ts defines
+   PoolKind as equal | previousDay | previousWeek | session. The spec states his pool list in
+   full, and it is: prior daily, weekly AND MONTHLY extremes, equal highs/lows, range extremes,
+   and internal points of interest — and explicitly NOT session extremes. So: drop "session" as a
+   pool kind, add previousMonth, and add range extremes and internal POIs. Session highs and lows
+   stay computed as a LABEL (see item 4) but must stop being pools that a sweep can fire on.
+   Update the tests that assert the old set rather than deleting them.
+
+4. KILLZONES ARE BUILT AS A GATE AND MUST BECOME A TAG. lib/detect/killzones.ts carries a
+   `killzone` flag, a KILLZONES export, `killzoneAt`, `inKillzone`, a `killzone` field on Markup,
+   and a comment citing "Roadmap 4.6's gate is London 02:00-05:00 and New York 08:00-11:30".
+   That gate no longer exists: the spec says the word killzone never appears in the videos and no
+   session time is given, so the windows are entirely ours and are to be RECORDED, never used to
+   suppress anything. Keep the session windows and the America/New_York clock exactly as they are
+   — that work is right and daylight saving is handled. Remove the killzone/gate concept, keep
+   `session` as a plain label on the markup, and leave a comment saying why, so a later session
+   does not helpfully reintroduce a filter.
+
+ALSO, two smaller corrections:
+- params.ts counts atrPeriod as a trial, giving TRIAL_PARAMETER_COUNT 9. Section 4.6 now fixes
+  atrPeriod by fiat as a denominator convention, leaving eight fitted dials against a budget of
+  nine with one held in reserve. Re-tag it structural and update the comment to say why. The
+  budget test should still fail at a tenth dial.
+- Section 4.6 says swingLookback is the most consequential number in the model, because "what
+  makes a swing significant" is the one thing he never defines and it sits underneath six of the
+  twelve mechanisms. Check whether session 1.4's settings page and agreement report put it first.
+  If not, make it first, and say in the UI why it is singled out.
+
+DO NOT DO: the daily-close bias rule (a daily close in the top or bottom 10% of its range) that
+section 4.6 mentions. It is a second, independent bias source and reconciling it with the
+structure-break bias is a design decision, not a correction. Leave it for a later session and say
+so in your report.
+
+Also update docs/DETECTOR_EXPECTATIONS.md, which records the old rules, and note at the top which
+sections were superseded and when rather than silently rewriting history.
+
+Gate: typecheck, lint, test, build and the smoke check must all be green, and the causality suite
+must still pass — the new HTF-zone reading is a detector like any other and may not read a candle
+later than the one being evaluated. One commit per numbered item, reasoning in the message.
+Report: what the card's Watch line says now, before and after, in full.
 ```
 
 ---
