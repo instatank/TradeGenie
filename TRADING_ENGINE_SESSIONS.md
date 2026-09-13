@@ -10,9 +10,10 @@ if a prompt and the roadmap disagree, the roadmap wins and the session should sa
 **Setup status:** the repository, the Firebase project and the Telegram bot are done
 (12 Sep 2026). Vercel is connected at the end of session 1.1, not before.
 
-**Session 1.0 is the one to run first if the videos are ready.** It turns TraderMayne's own
-videos into the model specification, which sessions 1.2 and 2.1 both depend on. It edits this
-repo only, so it can run at the same time as session 1.1, which edits the bot repo only.
+**Session 1.0 is done (13 Sep 2026).** The videos became `MAYNE_5M_MODEL.md` in this repo, which
+is the spec sessions 1.2 and 2.1 now read; roadmap section 4.6 is its summary. Its headline: the
+sequence is his and every number is ours, so all nine trial dials are guesses session 1.4 exists
+to correct. The prompt is kept below as the record of what it was asked to do.
 
 ---
 
@@ -194,9 +195,19 @@ THIS SESSION: build the pure detection library. No UI, no network, no Firestore 
 over candle arrays, and tests. This is the foundation every later stage runs on, live and in
 backtests, so correctness here matters more than speed of delivery.
 
-Read roadmap section 4.6 for the parameter defaults and section 3.2 for what is precisely
-definable and what is not. Use the mechanism vocabulary and hints from TradeGenie's lib/options.ts
-so a signal card and a journal chip say the same words.
+Read MAYNE_5M_MODEL.md in instatank/tradegenie first — it is the written spec for the model, built
+from the videos in session 1.0, and roadmap section 4.6 is now its summary rather than a second
+source. Then read roadmap section 4.6 for the parameter defaults and section 3.2 for what is
+precisely definable and what is not. Use the mechanism vocabulary and hints from TradeGenie's
+lib/options.ts so a signal card and a journal chip say the same words.
+
+The one thing to take from the spec before you write a line: EVERY number you are about to encode
+is ours, not his. All nine trial dials came back NOT STATED from his own videos. So the parameters
+module is not a transcription of a strategy — it is nine guesses that session 1.4 exists to
+correct, and the code should read that way. Two of the spec's structural findings land in this
+session: a market structure break is confirmed on a CLOSE because he never says which (our choice,
+not his), and his displacement may span several candles while ours is single-candle (a deliberate
+narrowing, worth a comment where it is defined).
 
 Build, as pure functions with no I/O:
 - ATR, and n-bar swing pivots (a pivot is only confirmed n bars after it prints).
@@ -303,23 +314,53 @@ Do not start stage 2 until stage 1's agreement rate on bias, range and liquidity
 ```
 [shared header — same as 1.1]
 
-THIS SESSION: detect the owner's model. Read roadmap section 4.6 — the five stages there are the
-five lines of their own playbook checklist, and that checklist is the only written spec that
-exists. There is no published rule set for this model anywhere; you are encoding their
-transcription of it, not a canonical strategy.
+THIS SESSION: detect the owner's model. Read MAYNE_5M_MODEL.md in instatank/tradegenie — that is
+the spec, written from TraderMayne's own videos in session 1.0, and roadmap section 4.6 is its
+summary. It replaced the old situation where the only written record was five checklist lines the
+owner had transcribed into their journal. Read section 10 of that file before building the state
+machine: the owner's checklist and the videos disagree about which steps exist and in what order,
+and you are encoding the videos.
+
+The four findings from the spec that change what you build:
+
+- The liquidity sweep is NOT a stage of his model. It is one of several things that can create or
+  validate the HTF zone; his five steps are zone tag -> 5m market structure break -> displacement
+  -> pull back into the gap and enter -> stop and target. His most fully walked-through trade has
+  no sweep at all, so a sequencer that requires one would reject his own flagship example.
+- The entry gap does not expire on a bar count. In his worked example price returned to tag the 5m
+  gap roughly 12 hours — about 144 bars — after it formed. The gap stays armed until the setup is
+  invalidated, meaning a close beyond where the stop sits.
+- He has no killzones. The word never appears in the videos and he gives no session time. RECORD
+  the New York session on every signal; do NOT gate on it. Gating rejects setups the model would
+  take on the authority of a rule its author never gave, and stage 2's kill criterion includes
+  starvation — fewer than 8 signals in four weeks — so an unjustified filter can kill the model by
+  producing nothing. Stage 3's backtest is what decides whether the windows earn their place.
+- He re-enters the same idea after a stop-out while the HTF zone still holds, and compounds more
+  than one position inside one zone. So the machine is scoped to the ZONE, not to a single pass:
+  it can arm repeatedly while the zone is valid, and the 5m stop ends a position while the zone
+  ends the idea.
 
 Build:
-- A state machine per symbol: idle -> swept -> displaced -> shifted -> armed -> filled or expired,
-  gated to the killzone windows, running on 5-minute candles with 1H and 15m context.
-- A plan builder: entry at the gap midpoint or block open, stop just beyond the sweep extreme,
-  target the opposite range extreme or the nearest pool, R computed after fees, and position size
-  from TradeGenie's lib/calculator.ts sizing maths — call the same function, do not reimplement it.
-  Reject a setup offering less than 2R.
+- A state machine per symbol, scoped to an HTF zone: idle -> zone tagged -> structure shifted ->
+  displaced -> armed -> filled or invalidated, re-armable while the zone holds, running on
+  5-minute candles with 1H and 15m context. Tag each signal with its New York session; do not
+  filter on it.
+- A plan builder: entry at the 5m gap midpoint, stop just beyond the 5-MINUTE SWING EXTREME THAT
+  PRECEDED THE BREAK (not the sweep extreme — that was an error in the old 4.6 and the spec
+  corrects it), target the opposite range extreme or the nearest pool, R computed after fees, and
+  position size from TradeGenie's lib/calculator.ts sizing maths — call the same function, do not
+  reimplement it. Reject a setup offering less than 2R: that 2:1 floor is one of the few numbers he
+  actually states, and it matches the owner's own idealRiskReward of 2.
 - Detection on BTC, ETH and SOL only. The other three are marked up but not detected: their books
   are thin and the roadmap says signals there would be reported separately if ever enabled.
 
 Fixtures: pick two real historical sequences by hand, before writing the sequencer, and write down
-what it should produce. Then make it produce exactly that and nothing else.
+what it should produce. Then make it produce exactly that and nothing else. The five worked
+examples in MAYNE_5M_MODEL.md section 7 cannot be used as numeric fixtures — he shows no entry,
+stop or target price anywhere — but they do pin the SHAPE, and all four of the complete ones stack
+the same way: HTF bias, then a NESTED zone (an H4 order block inside a daily one, or an H1 breaker
+inside an H4 block), then the low-timeframe trigger. Nesting is in every example and in none of his
+five steps; decide explicitly whether your zone selection reproduces it.
 
 Done when: the fixtures produce the expected signals and no extras; a sequence outside a killzone
 produces nothing; and the plan's size equals what TradeGenie's calculator page shows for the same
