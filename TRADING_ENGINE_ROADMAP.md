@@ -324,6 +324,10 @@ pinned to `America/New_York`, never to fixed IST or UTC.
 **TraderMayne's 5-minute model.** No public written rule set exists. What is public is two YouTube episodes from
 July 2026 (attributed; unreachable) and a third-party "Structure + OTE" playbook summary. **The five checklist
 lines in the playbook are the owner's transcription, and the bot can only ever be that transcription.**
+*Superseded 13 Sep 2026:* the videos were run through NotebookLM and the result is written up in
+`MAYNE_5M_MODEL.md`, so the bot now encodes his sequence rather than the transcription — and that file records where
+the two differ, including a step the checklist requires that his model does not have. It changes nothing in the
+verdict table below: the videos supply no threshold for any mechanism, so the count of three-of-twelve stands.
 
 **Evidence of edge.** The best independent test found (StatOasis, attributed: 648 backtests of OB/FVG/sweep/OTE
 entries on daily SPY/QQQ/DIA/IWM) found nothing statistically significant — but daily bars are not the intraday
@@ -545,20 +549,68 @@ Optional, not required by the bot: TradingView Essential ($14.95) if you want it
 
 ### 4.6 The model as the bot will encode it (version 0 — every number is a trial)
 
-The five checklist lines in the playbook become five stages, on three timeframes:
+**The spec is `MAYNE_5M_MODEL.md` in this repo.** It was written from a NotebookLM extraction of
+TraderMayne's own videos (13 Sep 2026) and it replaces what this section used to hold. Read it
+before building any detector; this table is its summary, not a second source. Where the two
+disagree, the spec wins, and this section should be corrected.
 
-| Step (your words) | Timeframe | Detector | Default parameter |
+**The shape of the model is his. Every number the detector runs on is ours.** The extraction
+answers his step sequence, his no-trade conditions and his trade management at length, with
+quotes. It answers **NOT STATED** to every question about a threshold: pivot width, what "broken"
+means, displacement size, whether a sweep must close back inside and within how many bars, any
+FVG minimum, which candle an order block is, where in a gap to enter, and session times. There
+are no timestamps anywhere in the extraction, so quotes are the only provenance available.
+
+**The two frameworks.** "The 5-minute model" is five steps (*price reaches the HTF zone → 5m
+market structure break → displacement → pull back into the gap and enter → stop and target*) and
+it sits inside a four-step top-down process (*W/D bias → H4 context → H1 setup → M5 execution*).
+The bot's stage-1 markup is the top-down; the stage-2 sequencer is the five-step trigger.
+
+| Step (his words) | Timeframe | Detector | Parameter, and where it comes from |
 |---|---|---|---|
-| HTF bias / trend | 1D and 4H | direction of the last confirmed structure break (BOS/CHoCH) | pivot lookback 5 |
-| DR, MS | 1H → 15m | dealing range = last swing high to swing low; premium/discount; OTE 0.62–0.79 body-anchored; 15m structure | pivot lookback 5; range from the last two confirmed swings |
-| Liquidity sweep | 15m / 5m | wick beyond a pool (equal highs/lows within 0.1 × ATR(14) confirmed after 3 bars; PDH/PDL; session high/low), close back inside within 2 bars | tolerance 0.1 × ATR, window 2 bars |
-| Displacement | 5m | a candle with body ≥ 1.5 × ATR(14) and body ≥ 70% of its range, moving away from the sweep | 1.5 × ATR, 0.70 |
-| Entry — FVG / OB | 5m | the FVG or order block the displacement leaves; limit at the FVG midpoint (or OB open), valid 6 bars; stop just beyond the sweep extreme; target the opposite dealing-range extreme or nearest pool; pass if R < 2 | validity 6 bars; min R 2 (playbook's ideal R) |
-| Killzone gate | clock | New York 08:00–11:30 and London 02:00–05:00, `America/New_York` | your data: 36 of 73 trades sit in 19:00–21:00 IST |
+| HTF bias / trend | 1D and 4H (he uses W and D; pairs are interchangeable) | direction of the last confirmed structure break | pivot lookback **5 — OURS**. Bullish/bearish rule is STATED |
+| Price reaches the HTF zone | W / D / H4 / H1 | price trades **into** an order block, FVG, OTE, SFP, sweep or equal highs/lows | zone types STATED. *"if it does not come into the zone there is simply no trade"* |
+| Dealing range, premium/discount, OTE | 1H → 15m | last confirmed swing high to swing low; 50% equilibrium; OTE band body-anchored | 50% equilibrium STATED. Range anchors STATED qualitatively ("most recent **significant** swing"); the lookback and OTE **0.62–0.79 are OURS** — he names OTE and gives no numbers |
+| Liquidity sweep — **not one of his five steps** | 15m / 5m | wick beyond a pool, close back inside | **Which pools count is STATED in full**: prior daily/weekly/monthly extremes, equal highs/lows, range extremes, internal POIs — and *not* session extremes. Tolerance **0.1 × ATR**, confirmation **3 bars**, close-back window **2 bars**: all **OURS** |
+| Market structure break | 5m | most recent lower high (bullish) or higher low (bearish) breaks | The level is STATED precisely. **Close vs wick is NOT STATED — we use close, OURS** |
+| Displacement | 5m | body ≥ 1.5 × ATR(14) and body ≥ 70% of range | **Both numbers OURS.** That it must *create an FVG* is STATED. That it *may span several candles* is STATED; our single-candle rule is a narrowing |
+| Entry — the 5m FVG | 5m | limit at the gap midpoint | **OURS** — he calls execution at the gap *personal preference* and offers three styles. **Validity is structural, not a bar count**: armed until the setup is invalidated. The old 6-bar window is contradicted by his own example, where the gap was tagged ~12 hours (~144 bars) after it formed |
+| Stop | 5m | beyond the 5-minute swing extreme **that preceded the break** | STATED, and shown in all four walkthroughs. Zero buffer is OURS. (V12 states the alternative: beyond the HTF zone. Both kept — the 5m stop ends a position, the HTF zone ends the idea) |
+| Target and minimum R | HTF | nearest HTF pool or the opposite range extreme; reject below 2R | **2:1 is STATED** and matches the owner's own `idealRiskReward: 2`. Targets are structural, never a fixed R multiple. Computing R **after fees** is ours |
+| Killzone | clock | **he has no killzones** | The word never appears and no session time is given. Windows are **entirely OURS** — recommended as a recorded tag, not a gate (see the spec, section 11). Computed in `America/New_York`, never IST and never a fixed UTC offset |
 
-Fewer than ten parameters, on purpose: each one is a backtest trial and the literature's ceiling for five years of
-data is in the tens. None of these defaults is claimed to be right. They are the published practitioner values,
-chosen so that the calibration loop starts from something rather than nothing.
+Note the stop rule changed in this revision. It used to read "stop just beyond the sweep extreme";
+he anchors it to the 5-minute structural swing, which is the same level only when a sweep created
+that swing — and his model explicitly permits a zone tagged without one.
+
+**The parameter budget, and it is already spent.** Each number above is a backtest trial and D10
+caps in-sample sets at nine. The extraction leaves **nine OURS trial dials** — `atrPeriod`,
+`swingLookback`, `poolLookback`, `equalToleranceAtr`, `sweepCloseBackBars`,
+`displacementAtrMultiple`, `displacementBodyRatio`, the OTE pair, `fvgMinAtr` — which is the whole
+budget before stage 2 has asked for anything, and stage 2 wants at least four more (entry point in
+the gap, gap validity, stop buffer, killzone windows).
+
+So those four, plus `atrPeriod`, are **fixed by fiat and never counted as trials**, because for
+each one he either declined to make the choice or the evidence already decides it: the gap
+midpoint (he calls it preference), validity until invalidated (structural, and his own example
+rules out a short window), a zero stop buffer (the only value that adds no assumption), killzones
+recorded rather than gated (removes the dial instead of choosing it), and ATR(14) as a denominator
+convention. That leaves **eight fitted dials against a budget of nine**, one held in reserve —
+most likely for `fvgMinAtr`, which currently ships switched off. A tenth is still a kill, not a
+fix.
+
+**One thing the videos supply that section 3.2 called discretionary.** 3.2 marks HTF bias
+*Discretionary*. The extraction gives a mechanical rule with numbers: a daily close in the top or
+bottom **10%** of its own range, with a stated ~86–91% chance that the next daily takes that
+extreme. It is **not encoded in version 0** — it is a second, independent bias source and
+reconciling it with "direction of the last confirmed structure break" is a design decision, not a
+parameter. Session 1.4 should display both and let the owner see how often they disagree.
+
+**And one thing they do not supply, which matters more than all the rest.** He never says what
+makes a swing "significant". That single undefined word sits underneath six of the twelve
+mechanisms — bias, the dealing range, premium/discount, OTE, the structure break and the stop —
+so `swingLookback` is the most consequential number in the model and the first thing the
+calibration loop should put in front of the owner's eye.
 
 ---
 
